@@ -35,6 +35,45 @@ export interface ReviseOutput {
   };
 }
 
+function buildTieredIssueList(
+  issues: ReadonlyArray<AuditIssue>,
+  isEnglish: boolean,
+): string {
+  const critical: string[] = [];
+  const high: string[] = [];
+  const medium: string[] = [];
+
+  for (const issue of issues) {
+    const line = `- ${issue.category}: ${issue.description}`;
+    if (issue.severity === "critical") {
+      critical.push(line);
+    } else if (issue.severity === "warning") {
+      high.push(line);
+    } else {
+      medium.push(line);
+    }
+  }
+
+  const parts: string[] = [];
+  if (critical.length > 0) {
+    parts.push(isEnglish
+      ? `## Critical — Must Fix\n${critical.join("\n")}`
+      : `## Critical（必须解决）\n${critical.join("\n")}`);
+  }
+  if (high.length > 0) {
+    parts.push(isEnglish
+      ? `## High — Should Improve\n${high.join("\n")}`
+      : `## High（应当改善）\n${high.join("\n")}`);
+  }
+  if (medium.length > 0) {
+    parts.push(isEnglish
+      ? `## Medium — Reference\n${medium.join("\n")}`
+      : `## Medium（参考建议）\n${medium.join("\n")}`);
+  }
+
+  return parts.join("\n\n");
+}
+
 const MODE_DESCRIPTIONS: Record<ReviseMode, string> = {
   auto: "", // auto mode uses buildAutoSystemPrompt instead
   polish: "润色：只改表达、节奏、段落呼吸，不改事实与剧情结论。禁止：增删段落、改变人名/地名/物品名、增加新情节或新对话、改变因果关系。只允许：替换用词、调整句序、修改标点节奏",
@@ -103,11 +142,12 @@ export class ReviserAgent extends BaseAgent {
 
     const isEnglish = (bookLanguage ?? gp.language) === "en";
     const resolvedLanguage = isEnglish ? "en" : "zh";
-    const suggestionLabel = isEnglish ? "Suggestion" : "建议";
 
-    const issueList = issues
-      .map((i) => `- [${i.severity}] ${i.category}: ${i.description}\n  ${suggestionLabel}: ${i.suggestion}`)
-      .join("\n");
+    const issueList = mode === "auto"
+      ? buildTieredIssueList(issues, isEnglish)
+      : issues
+          .map((i) => `- [${i.severity}] ${i.category}: ${i.description}\n  ${isEnglish ? "Suggestion" : "建议"}: ${i.suggestion}`)
+          .join("\n");
 
     const numericalRule = gp.numericalSystem
       ? (isEnglish

@@ -155,12 +155,12 @@ export async function runChapterReviewCycle(params: {
     if (!lengthInRange) {
       const direction = wordCount < params.lengthSpec.softMin ? "short" : "long";
       allIssues.push({
-        severity: "warning",
+        severity: "critical",
         category: "length",
-        description: `Chapter word count ${wordCount} is outside target range ${params.lengthSpec.softMin}-${params.lengthSpec.softMax} (too ${direction}).`,
+        description: `Chapter word count ${wordCount} is outside target range ${params.lengthSpec.softMin}-${params.lengthSpec.softMax} (too ${direction}). Must be brought within range.`,
         suggestion: direction === "long"
-          ? "Trim redundant explanations and weak-information sentences."
-          : "Expand key scenes with more sensory detail or dialogue.",
+          ? "Compress the chapter: trim redundant explanations, repeated actions, and weak-information sentences."
+          : "Expand key scenes with more sensory detail or dialogue to reach the target range.",
       });
     }
 
@@ -252,7 +252,7 @@ export async function runChapterReviewCycle(params: {
       }
 
       // Check net improvement
-      if (nextAssessment.score > currentAudit.score + NET_IMPROVEMENT_EPSILON) {
+      if (nextAssessment.score >= currentAudit.score + NET_IMPROVEMENT_EPSILON) {
         finalContent = reviseOutput.revisedContent;
         finalWordCount = revisedWordCount;
         postReviseCount = revisedWordCount;
@@ -272,12 +272,12 @@ export async function runChapterReviewCycle(params: {
   // Pick the best scoring snapshot for final output
   // ---------------------------------------------------------------------------
   const bestSnapshot = snapshots.reduce((best, snap) =>
-    snap.score > best.score + NET_IMPROVEMENT_EPSILON ? snap : best,
+    snap.score >= best.score + NET_IMPROVEMENT_EPSILON ? snap : best,
   );
 
   // If best snapshot differs from current content (repair made things worse
   // but an earlier version was better), roll back to the best version.
-  if (bestSnapshot.content !== finalContent && bestSnapshot.score > currentAudit.score + NET_IMPROVEMENT_EPSILON) {
+  if (bestSnapshot.content !== finalContent && bestSnapshot.score >= currentAudit.score + NET_IMPROVEMENT_EPSILON) {
     params.logWarn({
       zh: `回退到最高分版本（${bestSnapshot.score} 分 vs 当前 ${currentAudit.score} 分）`,
       en: `rolling back to highest-scoring version (${bestSnapshot.score} vs current ${currentAudit.score})`,
