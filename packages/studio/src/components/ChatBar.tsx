@@ -219,6 +219,35 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
     }
   }, [open]);
 
+  useEffect(() => {
+    if (!open) return;
+
+    let cancelled = false;
+    void fetchJson<{
+      session?: {
+        messages?: ReadonlyArray<{ role: "user" | "assistant" | "system"; content: string; timestamp: number }>;
+      };
+    }>("/interaction/session").then((data) => {
+      if (cancelled) return;
+      const restored = (data.session?.messages ?? [])
+        .filter((message) => message.role === "user" || message.role === "assistant")
+        .map((message) => ({
+          role: message.role as "user" | "assistant",
+          content: message.content,
+          timestamp: message.timestamp,
+        }));
+      if (restored.length > 0) {
+        setMessages(restored);
+      }
+    }).catch(() => {
+      // keep local empty state on session fetch failures
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
   // SSE events → assistant messages
   useEffect(() => {
     const recent = sse.messages.slice(-1)[0];
