@@ -2,14 +2,12 @@ import { basename } from "node:path";
 import readline from "node:readline/promises";
 import {
   appendInteractionMessage,
-  routeNaturalLanguageIntent,
-  runInteractionRequest,
+  processProjectInteractionInput,
   type AutomationMode,
   type ExecutionStatus,
   type InteractionRuntimeTools,
 } from "@actalk/inkos-core";
 import {
-  createProjectSession,
   loadProjectSession,
   persistProjectSession,
   resolveSessionActiveBook,
@@ -48,29 +46,16 @@ export async function processTuiInput(
   input: string,
   tools: InteractionRuntimeTools,
 ) {
-  const session = await loadProjectSession(projectRoot);
-  const activeBookId = await resolveSessionActiveBook(projectRoot, session);
-  const sessionWithBook = activeBookId && session.activeBookId !== activeBookId
-    ? { ...session, activeBookId }
-    : session;
-  const boundSession = appendInteractionMessage(sessionWithBook, {
-    role: "user",
-    content: input,
-    timestamp: Date.now(),
-  });
-  const request = routeNaturalLanguageIntent(input, {
-    activeBookId: boundSession.activeBookId,
-  });
-  const result = await runInteractionRequest({
-    session: boundSession,
-    request,
+  const result = await processProjectInteractionInput({
+    projectRoot,
+    input,
     tools,
   });
   const summary = formatTuiResult({
-    intent: request.intent,
+    intent: result.request.intent,
     status: result.session.currentExecution?.status ?? "completed",
     bookId: result.session.activeBookId,
-    mode: request.mode,
+    mode: result.request.mode,
   });
   const nextSession = appendInteractionMessage(result.session, {
     role: "assistant",
@@ -78,7 +63,7 @@ export async function processTuiInput(
     timestamp: Date.now(),
   });
   await persistProjectSession(projectRoot, nextSession);
-  return { ...result, session: nextSession, request };
+  return { ...result, session: nextSession };
 }
 
 export async function launchTui(
