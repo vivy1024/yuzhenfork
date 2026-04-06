@@ -90,6 +90,27 @@ export function routeNaturalLanguageIntent(
     };
   }
 
+  const slashRename = trimmed.match(/^\/rename\s+(.+?)\s*=>\s*(.+)$/i);
+  if (slashRename) {
+    return {
+      intent: "rename_entity",
+      ...(bookId ? { bookId } : {}),
+      oldValue: slashRename[1]!.trim(),
+      newValue: slashRename[2]!.trim(),
+    };
+  }
+
+  const slashReplace = trimmed.match(/^\/replace\s+(\d+)\s+(.+?)\s*=>\s*(.+)$/i);
+  if (slashReplace) {
+    return {
+      intent: "patch_chapter_text",
+      ...(bookId ? { bookId } : {}),
+      chapterNumber: parseInt(slashReplace[1]!, 10),
+      targetText: slashReplace[2]!.trim(),
+      replacementText: slashReplace[3]!.trim(),
+    };
+  }
+
   const rewriteMatch = trimmed.match(/(?:rewrite chapter|重写第)\s*(\d+)\s*(?:章)?/i);
   if (rewriteMatch) {
     return {
@@ -107,6 +128,26 @@ export function routeNaturalLanguageIntent(
       ...(bookId ? { bookId } : {}),
       chapterNumber: parseInt(reviseMatch[1]!, 10),
       ...(trailing ? { instruction: trailing } : {}),
+    };
+  }
+
+  const zhRenameMatch = trimmed.match(/^把(.+?)改成(.+)$/);
+  if (zhRenameMatch) {
+    return {
+      intent: "rename_entity",
+      ...(bookId ? { bookId } : {}),
+      oldValue: zhRenameMatch[1]!.trim(),
+      newValue: zhRenameMatch[2]!.trim(),
+    };
+  }
+
+  const enRenameMatch = trimmed.match(/^rename\s+(.+?)\s+to\s+(.+)$/i);
+  if (enRenameMatch) {
+    return {
+      intent: "rename_entity",
+      ...(bookId ? { bookId } : {}),
+      oldValue: enRenameMatch[1]!.trim(),
+      newValue: enRenameMatch[2]!.trim(),
     };
   }
 

@@ -121,8 +121,11 @@ export {
   type TruthAuthority,
 } from "./interaction/truth-authority.js";
 export {
+  executeEditTransaction,
   planEditTransaction,
   type EditRequest,
+  type EditExecutionDeps,
+  type ExecutedEditTransaction,
   type PlannedEditTransaction,
 } from "./interaction/edit-controller.js";
 export {

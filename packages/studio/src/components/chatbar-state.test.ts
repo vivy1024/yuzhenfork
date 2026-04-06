@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { coerceSharedSessionMessages, resolveDirectWriteTarget } from "./ChatBar";
+import {
+  coerceSharedSessionMessages,
+  formatSharedSessionContext,
+  resolveDirectWriteTarget,
+} from "./ChatBar";
 
 describe("resolveDirectWriteTarget", () => {
   it("prefers the active book when the user is already inside a book flow", () => {
@@ -45,5 +49,13 @@ describe("resolveDirectWriteTarget", () => {
       { role: "user", content: "continue", timestamp: 1 },
       { role: "assistant", content: "Completed write_next for harbor.", timestamp: 2 },
     ]);
+  });
+
+  it("formats shared session context with mode and stage", () => {
+    expect(formatSharedSessionContext({
+      activeBookId: "harbor",
+      automationMode: "semi",
+      currentStage: "waiting for your next decision",
+    })).toBe("harbor · semi · waiting for your next decision");
   });
 });

@@ -1,4 +1,4 @@
-import { appendInteractionMessage } from "./session.js";
+import { appendInteractionEvent, appendInteractionMessage } from "./session.js";
 import { routeNaturalLanguageIntent } from "./nl-router.js";
 import type { InteractionRuntimeTools } from "./runtime.js";
 import { runInteractionRequest } from "./runtime.js";
@@ -28,14 +28,36 @@ export async function processProjectInteractionInput(params: {
   const request = routeNaturalLanguageIntent(params.input, {
     activeBookId: userSession.activeBookId,
   });
-  const result = await runInteractionRequest({
-    session: userSession,
-    request,
-    tools: params.tools,
-  });
-  await persistProjectSession(params.projectRoot, result.session);
-  return {
-    ...result,
-    request,
-  };
+  try {
+    const result = await runInteractionRequest({
+      session: userSession,
+      request,
+      tools: params.tools,
+    });
+    await persistProjectSession(params.projectRoot, result.session);
+    return {
+      ...result,
+      request,
+    };
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    const failedSession = appendInteractionEvent({
+      ...userSession,
+      currentExecution: {
+        status: "failed",
+        bookId: userSession.activeBookId,
+        chapterNumber: userSession.activeChapterNumber,
+        stageLabel: `failed ${request.intent}`,
+      },
+    }, {
+      kind: "task.failed",
+      timestamp: Date.now(),
+      status: "failed",
+      bookId: userSession.activeBookId,
+      chapterNumber: userSession.activeChapterNumber,
+      detail,
+    });
+    await persistProjectSession(params.projectRoot, failedSession);
+    throw error;
+  }
 }

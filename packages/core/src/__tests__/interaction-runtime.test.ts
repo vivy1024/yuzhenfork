@@ -3,7 +3,7 @@ import { InteractionSessionSchema } from "../interaction/session.js";
 import { runInteractionRequest } from "../interaction/runtime.js";
 
 describe("interaction runtime", () => {
-  it("routes continue/write intents to writeNextChapter", async () => {
+  it("keeps write_next completed in auto mode", async () => {
     const writeNextChapter = vi.fn(async () => ({
       chapterNumber: 7,
       title: "Harbor Ledger",
@@ -20,20 +20,87 @@ describe("interaction runtime", () => {
       sessionId: "session-1",
       projectRoot: "/tmp/project",
       activeBookId: "harbor",
-      automationMode: "semi",
+      automationMode: "auto",
       messages: [],
+      events: [],
     });
 
     const result = await runInteractionRequest({
       session,
       request: { intent: "write_next", bookId: "harbor" },
-      tools: { writeNextChapter, reviseDraft, updateCurrentFocus, updateAuthorIntent, writeTruthFile },
+      tools: {
+        writeNextChapter,
+        reviseDraft,
+        patchChapterText: vi.fn(),
+        renameEntity: vi.fn(),
+        updateCurrentFocus,
+        updateAuthorIntent,
+        writeTruthFile,
+      },
     });
 
     expect(writeNextChapter).toHaveBeenCalledWith("harbor");
     expect(reviseDraft).not.toHaveBeenCalled();
     expect(result.session.activeBookId).toBe("harbor");
+    expect(result.session.activeChapterNumber).toBe(7);
     expect(result.session.currentExecution?.status).toBe("completed");
+    expect(result.session.pendingDecision).toBeUndefined();
+    expect(result.session.events.map((event) => event.kind)).toEqual([
+      "task.started",
+      "task.completed",
+    ]);
+  });
+
+  it("moves content-producing work into waiting_human in semi mode", async () => {
+    const writeNextChapter = vi.fn(async () => ({
+      chapterNumber: 7,
+      title: "Harbor Ledger",
+      wordCount: 3210,
+      revised: false,
+      status: "ready-for-review" as const,
+      auditResult: { passed: true, issues: [], summary: "ok" },
+      __interaction: {
+        events: [{
+          kind: "stage.changed",
+          timestamp: 1710000000000,
+          status: "writing" as const,
+          bookId: "harbor",
+          chapterNumber: 7,
+          detail: "writing chapter draft",
+        }],
+      },
+    }));
+
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-1b",
+        projectRoot: "/tmp/project",
+        activeBookId: "harbor",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      }),
+      request: { intent: "write_next", bookId: "harbor" },
+      tools: {
+        writeNextChapter,
+        reviseDraft: vi.fn(),
+        patchChapterText: vi.fn(),
+        renameEntity: vi.fn(),
+        updateCurrentFocus: vi.fn(),
+        updateAuthorIntent: vi.fn(),
+        writeTruthFile: vi.fn(),
+      },
+    });
+
+    expect(result.session.currentExecution?.status).toBe("waiting_human");
+    expect(result.session.pendingDecision?.kind).toBe("review-next-step");
+    expect(result.session.pendingDecision?.chapterNumber).toBe(7);
+    expect(result.session.events.map((event) => event.kind)).toEqual([
+      "task.started",
+      "stage.changed",
+      "task.completed",
+    ]);
+    expect(result.responseText).toContain("waiting for your next decision");
   });
 
   it("routes revise_chapter to reviseDraft with local-fix", async () => {
@@ -60,6 +127,8 @@ describe("interaction runtime", () => {
       tools: {
         writeNextChapter,
         reviseDraft,
+        patchChapterText: vi.fn(),
+        renameEntity: vi.fn(),
         updateCurrentFocus: vi.fn(),
         updateAuthorIntent: vi.fn(),
         writeTruthFile: vi.fn(),
@@ -90,6 +159,8 @@ describe("interaction runtime", () => {
       tools: {
         writeNextChapter: vi.fn(),
         reviseDraft,
+        patchChapterText: vi.fn(),
+        renameEntity: vi.fn(),
         updateCurrentFocus: vi.fn(),
         updateAuthorIntent: vi.fn(),
         writeTruthFile: vi.fn(),
@@ -118,6 +189,8 @@ describe("interaction runtime", () => {
       tools: {
         writeNextChapter: vi.fn(),
         reviseDraft: vi.fn(),
+        patchChapterText: vi.fn(),
+        renameEntity: vi.fn(),
         updateCurrentFocus,
         updateAuthorIntent: vi.fn(),
         writeTruthFile: vi.fn(),
@@ -151,6 +224,8 @@ describe("interaction runtime", () => {
       tools: {
         writeNextChapter: vi.fn(),
         reviseDraft: vi.fn(),
+        patchChapterText: vi.fn(),
+        renameEntity: vi.fn(),
         updateCurrentFocus: vi.fn(),
         updateAuthorIntent: vi.fn(),
         writeTruthFile,
@@ -162,6 +237,79 @@ describe("interaction runtime", () => {
       "current_focus.md",
       "# Current Focus\n\nBring the story back to the old harbor debt line.\n",
     );
+  });
+
+  it("routes rename_entity to the rename tool", async () => {
+    const renameEntity = vi.fn(async () => ({ ok: true }));
+
+    await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-4c",
+        projectRoot: "/tmp/project",
+        activeBookId: "harbor",
+        automationMode: "manual",
+        messages: [],
+        events: [],
+      }),
+      request: {
+        intent: "rename_entity",
+        bookId: "harbor",
+        oldValue: "陆尘",
+        newValue: "林砚",
+      },
+      tools: {
+        writeNextChapter: vi.fn(),
+        reviseDraft: vi.fn(),
+        updateCurrentFocus: vi.fn(),
+        updateAuthorIntent: vi.fn(),
+        writeTruthFile: vi.fn(),
+        renameEntity,
+        patchChapterText: vi.fn(),
+      },
+    });
+
+    expect(renameEntity).toHaveBeenCalledWith("harbor", "陆尘", "林砚");
+  });
+
+  it("routes patch_chapter_text to the chapter patch tool and waits for review", async () => {
+    const patchChapterText = vi.fn(async () => ({
+      chapterNumber: 3,
+      __interaction: {
+        responseText: "Patched chapter 3 and marked it for review.",
+      },
+    }));
+
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-4d",
+        projectRoot: "/tmp/project",
+        activeBookId: "harbor",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      }),
+      request: {
+        intent: "patch_chapter_text",
+        bookId: "harbor",
+        chapterNumber: 3,
+        targetText: "旧名字",
+        replacementText: "新名字",
+      },
+      tools: {
+        writeNextChapter: vi.fn(),
+        reviseDraft: vi.fn(),
+        updateCurrentFocus: vi.fn(),
+        updateAuthorIntent: vi.fn(),
+        writeTruthFile: vi.fn(),
+        renameEntity: vi.fn(),
+        patchChapterText,
+      },
+    });
+
+    expect(patchChapterText).toHaveBeenCalledWith("harbor", 3, "旧名字", "新名字");
+    expect(result.session.currentExecution?.status).toBe("waiting_human");
+    expect(result.session.pendingDecision?.chapterNumber).toBe(3);
+    expect(result.responseText).toContain("marked it for review");
   });
 
   it("updates automation mode without invoking pipeline tools", async () => {
@@ -178,11 +326,14 @@ describe("interaction runtime", () => {
         activeBookId: "harbor",
         automationMode: "semi",
         messages: [],
+        events: [],
       }),
       request: { intent: "switch_mode", mode: "auto" },
       tools: {
         writeNextChapter,
         reviseDraft,
+        patchChapterText: vi.fn(),
+        renameEntity: vi.fn(),
         updateCurrentFocus,
         updateAuthorIntent,
         writeTruthFile,
@@ -194,6 +345,10 @@ describe("interaction runtime", () => {
     expect(reviseDraft).not.toHaveBeenCalled();
     expect(updateCurrentFocus).not.toHaveBeenCalled();
     expect(updateAuthorIntent).not.toHaveBeenCalled();
+    expect(result.session.events.map((event) => event.kind)).toEqual([
+      "task.started",
+      "task.completed",
+    ]);
   });
 
   it("pauses the active book without invoking pipeline tools", async () => {
@@ -210,6 +365,8 @@ describe("interaction runtime", () => {
       tools: {
         writeNextChapter: vi.fn(),
         reviseDraft: vi.fn(),
+        patchChapterText: vi.fn(),
+        renameEntity: vi.fn(),
         updateCurrentFocus: vi.fn(),
         updateAuthorIntent: vi.fn(),
         writeTruthFile: vi.fn(),
@@ -218,7 +375,10 @@ describe("interaction runtime", () => {
 
     expect(result.session.currentExecution?.status).toBe("blocked");
     expect(result.responseText).toContain("Paused");
-    expect(result.session.events.at(-1)?.kind).toBe("task.completed");
+    expect(result.session.events.map((event) => event.kind)).toEqual([
+      "task.started",
+      "task.completed",
+    ]);
   });
 
   it("returns a human-readable explanation for explain_status", async () => {
@@ -241,6 +401,8 @@ describe("interaction runtime", () => {
       tools: {
         writeNextChapter: vi.fn(),
         reviseDraft: vi.fn(),
+        patchChapterText: vi.fn(),
+        renameEntity: vi.fn(),
         updateCurrentFocus: vi.fn(),
         updateAuthorIntent: vi.fn(),
         writeTruthFile: vi.fn(),

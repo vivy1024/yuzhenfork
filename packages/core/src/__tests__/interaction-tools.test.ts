@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import { createLogger, type LogSink } from "../index.js";
 import { createInteractionToolsFromDeps } from "../interaction/project-tools.js";
 
 let projectRoot: string;
@@ -13,8 +14,18 @@ describe("interaction tools", () => {
   });
 
   it("delegates writeNextChapter and reviseDraft to the pipeline", async () => {
+    const events: string[] = [];
+    const sink: LogSink = {
+      write(entry) {
+        events.push(entry.message);
+      },
+    };
     const pipeline = {
+      config: {
+        logger: createLogger({ tag: "test", sinks: [sink] }),
+      },
       writeNextChapter: vi.fn(async () => ({
+        config: undefined,
         chapterNumber: 1,
         title: "Draft",
         wordCount: 1000,
@@ -33,15 +44,69 @@ describe("interaction tools", () => {
     const state = {
       ensureControlDocuments: vi.fn(async () => {}),
       bookDir: vi.fn((bookId: string) => join(projectRoot, "books", bookId)),
+      loadChapterIndex: vi.fn(async () => []),
+      saveChapterIndex: vi.fn(async () => undefined),
     };
 
     const tools = createInteractionToolsFromDeps(pipeline, state);
 
-    await tools.writeNextChapter("harbor");
+    const writeResult = await tools.writeNextChapter("harbor");
     await tools.reviseDraft("harbor", 3, "rewrite");
 
     expect(pipeline.writeNextChapter).toHaveBeenCalledWith("harbor");
     expect(pipeline.reviseDraft).toHaveBeenCalledWith("harbor", 3, "rewrite");
+    expect((writeResult as { __interaction?: { activeChapterNumber?: number } }).__interaction?.activeChapterNumber).toBe(1);
+    expect(events).toEqual([]);
+  });
+
+  it("captures pipeline stage logs into interaction events", async () => {
+    const pipeline = {
+      config: {
+        logger: createLogger({
+          tag: "test",
+          sinks: [{
+            write() {},
+          }],
+        }),
+      },
+      writeNextChapter: vi.fn(async function (this: { config: { logger?: { info: (msg: string) => void } } }) {
+        this.config.logger?.info("Stage: preparing chapter inputs");
+        this.config.logger?.info("Stage: writing chapter draft");
+        return {
+          chapterNumber: 4,
+          title: "Draft",
+          wordCount: 1000,
+          revised: false,
+          status: "ready-for-review" as const,
+          auditResult: { passed: true, issues: [], summary: "ok" },
+        };
+      }),
+      reviseDraft: vi.fn(async () => ({
+        chapterNumber: 3,
+        wordCount: 1200,
+        fixedIssues: [],
+        applied: true,
+        status: "ready-for-review" as const,
+      })),
+    };
+    const state = {
+      ensureControlDocuments: vi.fn(async () => {}),
+      bookDir: vi.fn((bookId: string) => join(projectRoot, "books", bookId)),
+      loadChapterIndex: vi.fn(async () => []),
+      saveChapterIndex: vi.fn(async () => undefined),
+    };
+
+    const tools = createInteractionToolsFromDeps(pipeline, state);
+    const result = await tools.writeNextChapter("harbor");
+
+    expect((result as {
+      __interaction?: {
+        events?: ReadonlyArray<{ kind: string; status: string; detail?: string }>;
+      };
+    }).__interaction?.events).toEqual([
+      expect.objectContaining({ kind: "stage.changed", status: "planning", detail: "preparing chapter inputs" }),
+      expect.objectContaining({ kind: "stage.changed", status: "writing", detail: "writing chapter draft" }),
+    ]);
   });
 
   it("writes current_focus and author_intent into canonical story paths", async () => {
@@ -66,6 +131,8 @@ describe("interaction tools", () => {
       {
         ensureControlDocuments: vi.fn(async () => {}),
         bookDir: vi.fn((bookId: string) => join(projectRoot, "books", bookId)),
+        loadChapterIndex: vi.fn(async () => []),
+        saveChapterIndex: vi.fn(async () => undefined),
       },
     );
 

@@ -27,6 +27,8 @@ describe("tui control flow", () => {
     const tools = {
       writeNextChapter: vi.fn(async () => ({ ok: true })),
       reviseDraft: vi.fn(async () => ({ ok: true })),
+      patchChapterText: vi.fn(async () => ({ ok: true })),
+      renameEntity: vi.fn(async () => ({ ok: true })),
       updateCurrentFocus: vi.fn(async () => ({ ok: true })),
       updateAuthorIntent: vi.fn(async () => ({ ok: true })),
       writeTruthFile: vi.fn(async () => ({ ok: true })),
@@ -36,7 +38,8 @@ describe("tui control flow", () => {
 
     expect(tools.writeNextChapter).toHaveBeenCalledWith("harbor");
     expect(result.session.activeBookId).toBe("harbor");
-    expect(result.session.currentExecution?.status).toBe("completed");
+    expect(result.session.currentExecution?.status).toBe("waiting_human");
+    expect(result.session.pendingDecision?.kind).toBe("review-next-step");
     expect(result.session.messages.at(0)?.role).toBe("user");
     expect(result.session.messages.at(-1)?.role).toBe("assistant");
   });
@@ -50,6 +53,8 @@ describe("tui control flow", () => {
     const tools = {
       writeNextChapter: vi.fn(async () => ({ ok: true })),
       reviseDraft: vi.fn(async () => ({ ok: true })),
+      patchChapterText: vi.fn(async () => ({ ok: true })),
+      renameEntity: vi.fn(async () => ({ ok: true })),
       updateCurrentFocus: vi.fn(async () => ({ ok: true })),
       updateAuthorIntent: vi.fn(async () => ({ ok: true })),
       writeTruthFile: vi.fn(async () => ({ ok: true })),
@@ -69,6 +74,8 @@ describe("tui control flow", () => {
     const tools = {
       writeNextChapter: vi.fn(async () => ({ ok: true })),
       reviseDraft: vi.fn(async () => ({ ok: true })),
+      patchChapterText: vi.fn(async () => ({ ok: true })),
+      renameEntity: vi.fn(async () => ({ ok: true })),
       updateCurrentFocus: vi.fn(async () => ({ ok: true })),
       updateAuthorIntent: vi.fn(async () => ({ ok: true })),
       writeTruthFile: vi.fn(async () => ({ ok: true })),
@@ -88,6 +95,8 @@ describe("tui control flow", () => {
     const tools = {
       writeNextChapter: vi.fn(async () => ({ ok: true })),
       reviseDraft: vi.fn(async () => ({ ok: true })),
+      patchChapterText: vi.fn(async () => ({ ok: true })),
+      renameEntity: vi.fn(async () => ({ ok: true })),
       updateCurrentFocus: vi.fn(async () => ({ ok: true })),
       updateAuthorIntent: vi.fn(async () => ({ ok: true })),
       writeTruthFile: vi.fn(async () => ({ ok: true })),

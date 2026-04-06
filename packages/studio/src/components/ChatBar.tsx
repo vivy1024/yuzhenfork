@@ -44,6 +44,8 @@ interface ChatMessage {
 interface SharedSessionMeta {
   readonly activeBookId?: string;
   readonly automationMode?: string;
+  readonly currentStage?: string;
+  readonly pendingSummary?: string;
 }
 
 interface BookRef {
@@ -76,6 +78,14 @@ export function resolveDirectWriteTarget(
     return { bookId: null, reason: "missing" };
   }
   return { bookId: null, reason: "ambiguous" };
+}
+
+export function formatSharedSessionContext(meta: SharedSessionMeta): string {
+  return [
+    meta.activeBookId ?? "no-book",
+    meta.automationMode ?? "semi",
+    meta.currentStage,
+  ].filter(Boolean).join(" · ");
 }
 
 // ── Sub-components ──
@@ -245,6 +255,13 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
       session?: {
         activeBookId?: string;
         automationMode?: string;
+        currentExecution?: {
+          status?: string;
+          stageLabel?: string;
+        };
+        pendingDecision?: {
+          summary?: string;
+        };
         messages?: ReadonlyArray<{ role: "user" | "assistant" | "system"; content: string; timestamp: number }>;
       };
       activeBookId?: string;
@@ -253,6 +270,8 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
       setSessionMeta({
         activeBookId: data.activeBookId ?? data.session?.activeBookId,
         automationMode: data.session?.automationMode,
+        currentStage: data.session?.currentExecution?.stageLabel ?? data.session?.currentExecution?.status,
+        pendingSummary: data.session?.pendingDecision?.summary,
       });
       const restored = coerceSharedSessionMessages(data.session?.messages ?? []);
       if (restored.length > 0) {
@@ -354,6 +373,13 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
         session?: {
           activeBookId?: string;
           automationMode?: string;
+          currentExecution?: {
+            status?: string;
+            stageLabel?: string;
+          };
+          pendingDecision?: {
+            summary?: string;
+          };
           messages?: ReadonlyArray<{ role: "user" | "assistant" | "system"; content: string; timestamp: number }>;
         };
       }>("/agent", {
@@ -366,6 +392,8 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
         setSessionMeta({
           activeBookId: data.session.activeBookId ?? activeBookId,
           automationMode: data.session.automationMode,
+          currentStage: data.session.currentExecution?.stageLabel ?? data.session.currentExecution?.status,
+          pendingSummary: data.session.pendingDecision?.summary,
         });
         const restored = coerceSharedSessionMessages(data.session.messages ?? []);
         if (restored.length > 0) {
@@ -440,7 +468,11 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
                   InkOS Assistant
                 </div>
                 <div className="text-[10px] text-muted-foreground/60 truncate">
-                  {(sessionMeta.activeBookId ?? activeBookId ?? "no-book")} · {sessionMeta.automationMode ?? "semi"}
+                  {formatSharedSessionContext({
+                    activeBookId: sessionMeta.activeBookId ?? activeBookId,
+                    automationMode: sessionMeta.automationMode,
+                    currentStage: sessionMeta.currentStage,
+                  })}
                 </div>
               </div>
             </div>
@@ -475,6 +507,15 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
                   <span className="w-1 h-1 bg-primary/40 rounded-full chat-typing-dot" />
                   <span className="w-1 h-1 bg-primary/40 rounded-full chat-typing-dot" />
                 </div>
+              </div>
+            </div>
+          )}
+
+          {!loading && sessionMeta.pendingSummary && (
+            <div className="shrink-0 px-4 py-2 border-b border-border/30 bg-amber-500/[0.06] fade-in">
+              <div className="flex items-center gap-2 text-[11px] text-amber-700 dark:text-amber-300">
+                <AlertTriangle size={12} />
+                <span className="truncate">{sessionMeta.pendingSummary}</span>
               </div>
             </div>
           )}

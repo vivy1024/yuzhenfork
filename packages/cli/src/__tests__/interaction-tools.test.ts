@@ -45,6 +45,8 @@ describe("interaction tools adapter", () => {
     const state = {
       ensureControlDocuments: vi.fn(async () => {}),
       bookDir: vi.fn((bookId: string) => join(projectRoot, "books", bookId)),
+      loadChapterIndex: vi.fn(async () => []),
+      saveChapterIndex: vi.fn(async () => undefined),
     };
 
     const tools = createInteractionToolsFromDeps(projectRoot, pipeline, state);
@@ -64,6 +66,8 @@ describe("interaction tools adapter", () => {
     const state = {
       ensureControlDocuments: vi.fn(async () => {}),
       bookDir: vi.fn((bookId: string) => join(projectRoot, "books", bookId)),
+      loadChapterIndex: vi.fn(async () => []),
+      saveChapterIndex: vi.fn(async () => undefined),
     };
 
     const tools = createInteractionToolsFromDeps(projectRoot, pipeline, state);

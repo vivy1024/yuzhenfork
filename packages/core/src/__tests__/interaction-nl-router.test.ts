@@ -98,5 +98,33 @@ describe("interaction natural-language router", () => {
       fileName: "current_focus.md",
       instruction: "Bring it back",
     });
+    expect(routeNaturalLanguageIntent("/rename 陆尘 => 林砚", { activeBookId: "harbor" })).toEqual({
+      intent: "rename_entity",
+      bookId: "harbor",
+      oldValue: "陆尘",
+      newValue: "林砚",
+    });
+    expect(routeNaturalLanguageIntent("/replace 3 旧名字 => 新名字", { activeBookId: "harbor" })).toEqual({
+      intent: "patch_chapter_text",
+      bookId: "harbor",
+      chapterNumber: 3,
+      targetText: "旧名字",
+      replacementText: "新名字",
+    });
+  });
+
+  it("maps rename and chapter patch requests from natural language", () => {
+    expect(routeNaturalLanguageIntent("把陆尘改成林砚", { activeBookId: "harbor" })).toEqual({
+      intent: "rename_entity",
+      bookId: "harbor",
+      oldValue: "陆尘",
+      newValue: "林砚",
+    });
+    expect(routeNaturalLanguageIntent("rename Lu Chen to Lin Yan", { activeBookId: "harbor" })).toEqual({
+      intent: "rename_entity",
+      bookId: "harbor",
+      oldValue: "Lu Chen",
+      newValue: "Lin Yan",
+    });
   });
 });

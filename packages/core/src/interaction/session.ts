@@ -82,6 +82,6 @@ export function appendInteractionEvent(
 ): InteractionSession {
   return {
     ...session,
-    events: [...session.events, event].sort((left, right) => left.timestamp - right.timestamp),
+    events: [...session.events, event],
   };
 }
