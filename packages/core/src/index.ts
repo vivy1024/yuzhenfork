@@ -99,6 +99,10 @@ export {
 } from "./interaction/session.js";
 export { routeInteractionRequest } from "./interaction/request-router.js";
 export {
+  routeNaturalLanguageIntent,
+  type NaturalLanguageRoutingContext,
+} from "./interaction/nl-router.js";
+export {
   runInteractionRequest,
   type InteractionRuntimeTools,
   type InteractionRuntimeResult,
