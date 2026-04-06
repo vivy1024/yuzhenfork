@@ -21,5 +21,9 @@ export function createInteractionToolsFromDeps(
       await state.ensureControlDocuments(bookId);
       await writeFile(join(state.bookDir(bookId), "story", "author_intent.md"), content, "utf-8");
     },
+    writeTruthFile: async (bookId, fileName, content) => {
+      await state.ensureControlDocuments(bookId);
+      await writeFile(join(state.bookDir(bookId), "story", fileName), content, "utf-8");
+    },
   };
 }

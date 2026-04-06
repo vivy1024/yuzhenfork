@@ -80,6 +80,16 @@ export function routeNaturalLanguageIntent(
     };
   }
 
+  const slashTruth = trimmed.match(/^\/truth\s+([^\s]+)\s+([\s\S]+)$/i);
+  if (slashTruth) {
+    return {
+      intent: "edit_truth",
+      ...(bookId ? { bookId } : {}),
+      fileName: slashTruth[1]!.trim(),
+      instruction: slashTruth[2]!.trim(),
+    };
+  }
+
   const rewriteMatch = trimmed.match(/(?:rewrite chapter|重写第)\s*(\d+)\s*(?:章)?/i);
   if (rewriteMatch) {
     return {

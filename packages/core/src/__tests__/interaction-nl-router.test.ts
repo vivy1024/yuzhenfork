@@ -92,5 +92,11 @@ describe("interaction natural-language router", () => {
       bookId: "harbor",
       instruction: "bring it back to the old case",
     });
+    expect(routeNaturalLanguageIntent("/truth current_focus.md Bring it back", { activeBookId: "harbor" })).toEqual({
+      intent: "edit_truth",
+      bookId: "harbor",
+      fileName: "current_focus.md",
+      instruction: "Bring it back",
+    });
   });
 });

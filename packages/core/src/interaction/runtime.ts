@@ -11,6 +11,7 @@ export interface InteractionRuntimeTools {
   readonly reviseDraft: (bookId: string, chapterNumber: number, mode: ReviseMode) => Promise<unknown>;
   readonly updateCurrentFocus: (bookId: string, content: string) => Promise<unknown>;
   readonly updateAuthorIntent: (bookId: string, content: string) => Promise<unknown>;
+  readonly writeTruthFile: (bookId: string, fileName: string, content: string) => Promise<unknown>;
 }
 
 export interface InteractionRuntimeResult {
@@ -116,6 +117,22 @@ export async function runInteractionRequest(params: {
       return {
         session: addEvent(completed, "task.completed", "completed", `Updated author intent for ${bookId}.`),
         responseText: `Updated author intent for ${bookId}.`,
+      };
+    }
+    case "edit_truth": {
+      const bookId = request.bookId ?? session.activeBookId;
+      if (!bookId) {
+        throw new Error("No active book is bound to the interaction session.");
+      }
+      if (!request.fileName || !request.instruction) {
+        throw new Error("Truth-file edit requires a file name and content.");
+      }
+      await params.tools.writeTruthFile(bookId, request.fileName, request.instruction);
+      session = bindActiveBook(session, bookId);
+      const completed = markCompleted(session);
+      return {
+        session: addEvent(completed, "task.completed", "completed", `Updated ${request.fileName} for ${bookId}.`),
+        responseText: `Updated ${request.fileName} for ${bookId}.`,
       };
     }
     case "switch_mode":

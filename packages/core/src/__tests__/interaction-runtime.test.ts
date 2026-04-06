@@ -14,6 +14,7 @@ describe("interaction runtime", () => {
     const reviseDraft = vi.fn();
     const updateCurrentFocus = vi.fn();
     const updateAuthorIntent = vi.fn();
+    const writeTruthFile = vi.fn();
 
     const session = InteractionSessionSchema.parse({
       sessionId: "session-1",
@@ -26,7 +27,7 @@ describe("interaction runtime", () => {
     const result = await runInteractionRequest({
       session,
       request: { intent: "write_next", bookId: "harbor" },
-      tools: { writeNextChapter, reviseDraft, updateCurrentFocus, updateAuthorIntent },
+      tools: { writeNextChapter, reviseDraft, updateCurrentFocus, updateAuthorIntent, writeTruthFile },
     });
 
     expect(writeNextChapter).toHaveBeenCalledWith("harbor");
@@ -61,6 +62,7 @@ describe("interaction runtime", () => {
         reviseDraft,
         updateCurrentFocus: vi.fn(),
         updateAuthorIntent: vi.fn(),
+        writeTruthFile: vi.fn(),
       },
     });
 
@@ -90,6 +92,7 @@ describe("interaction runtime", () => {
         reviseDraft,
         updateCurrentFocus: vi.fn(),
         updateAuthorIntent: vi.fn(),
+        writeTruthFile: vi.fn(),
       },
     });
 
@@ -117,6 +120,7 @@ describe("interaction runtime", () => {
         reviseDraft: vi.fn(),
         updateCurrentFocus,
         updateAuthorIntent: vi.fn(),
+        writeTruthFile: vi.fn(),
       },
     });
 
@@ -126,11 +130,46 @@ describe("interaction runtime", () => {
     );
   });
 
+  it("routes edit_truth to the truth-file updater", async () => {
+    const writeTruthFile = vi.fn(async () => ({ ok: true }));
+
+    await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-4b",
+        projectRoot: "/tmp/project",
+        activeBookId: "harbor",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      }),
+      request: {
+        intent: "edit_truth",
+        bookId: "harbor",
+        fileName: "current_focus.md",
+        instruction: "# Current Focus\n\nBring the story back to the old harbor debt line.\n",
+      },
+      tools: {
+        writeNextChapter: vi.fn(),
+        reviseDraft: vi.fn(),
+        updateCurrentFocus: vi.fn(),
+        updateAuthorIntent: vi.fn(),
+        writeTruthFile,
+      },
+    });
+
+    expect(writeTruthFile).toHaveBeenCalledWith(
+      "harbor",
+      "current_focus.md",
+      "# Current Focus\n\nBring the story back to the old harbor debt line.\n",
+    );
+  });
+
   it("updates automation mode without invoking pipeline tools", async () => {
     const writeNextChapter = vi.fn();
     const reviseDraft = vi.fn();
     const updateCurrentFocus = vi.fn();
     const updateAuthorIntent = vi.fn();
+    const writeTruthFile = vi.fn();
 
     const result = await runInteractionRequest({
       session: InteractionSessionSchema.parse({
@@ -146,6 +185,7 @@ describe("interaction runtime", () => {
         reviseDraft,
         updateCurrentFocus,
         updateAuthorIntent,
+        writeTruthFile,
       },
     });
 
@@ -172,6 +212,7 @@ describe("interaction runtime", () => {
         reviseDraft: vi.fn(),
         updateCurrentFocus: vi.fn(),
         updateAuthorIntent: vi.fn(),
+        writeTruthFile: vi.fn(),
       },
     });
 
@@ -202,6 +243,7 @@ describe("interaction runtime", () => {
         reviseDraft: vi.fn(),
         updateCurrentFocus: vi.fn(),
         updateAuthorIntent: vi.fn(),
+        writeTruthFile: vi.fn(),
       },
     });
 

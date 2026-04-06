@@ -32,6 +32,7 @@ describe("project interaction control", () => {
       reviseDraft: vi.fn(async () => ({ ok: true })),
       updateCurrentFocus: vi.fn(async () => ({ ok: true })),
       updateAuthorIntent: vi.fn(async () => ({ ok: true })),
+      writeTruthFile: vi.fn(async () => ({ ok: true })),
     };
 
     const result = await processProjectInteractionInput({
@@ -59,6 +60,7 @@ describe("project interaction control", () => {
         reviseDraft: vi.fn(async () => ({ ok: true })),
         updateCurrentFocus: vi.fn(async () => ({ ok: true })),
         updateAuthorIntent: vi.fn(async () => ({ ok: true })),
+        writeTruthFile: vi.fn(async () => ({ ok: true })),
       },
     });
 

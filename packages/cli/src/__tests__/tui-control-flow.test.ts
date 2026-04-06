@@ -29,6 +29,7 @@ describe("tui control flow", () => {
       reviseDraft: vi.fn(async () => ({ ok: true })),
       updateCurrentFocus: vi.fn(async () => ({ ok: true })),
       updateAuthorIntent: vi.fn(async () => ({ ok: true })),
+      writeTruthFile: vi.fn(async () => ({ ok: true })),
     };
 
     const result = await processTuiInput(projectRoot, "continue", tools);
@@ -51,6 +52,7 @@ describe("tui control flow", () => {
       reviseDraft: vi.fn(async () => ({ ok: true })),
       updateCurrentFocus: vi.fn(async () => ({ ok: true })),
       updateAuthorIntent: vi.fn(async () => ({ ok: true })),
+      writeTruthFile: vi.fn(async () => ({ ok: true })),
     };
 
     await processTuiInput(projectRoot, "把 focus 拉回旧案线", tools);
@@ -69,10 +71,34 @@ describe("tui control flow", () => {
       reviseDraft: vi.fn(async () => ({ ok: true })),
       updateCurrentFocus: vi.fn(async () => ({ ok: true })),
       updateAuthorIntent: vi.fn(async () => ({ ok: true })),
+      writeTruthFile: vi.fn(async () => ({ ok: true })),
     };
 
     const result = await processTuiInput(projectRoot, "切换到全自动", tools);
 
     expect(result.session.automationMode).toBe("auto");
+  });
+
+  it("routes truth-file edits through the shared control flow", async () => {
+    await persistProjectSession(projectRoot, {
+      ...createProjectSession(projectRoot),
+      activeBookId: "harbor",
+    });
+
+    const tools = {
+      writeNextChapter: vi.fn(async () => ({ ok: true })),
+      reviseDraft: vi.fn(async () => ({ ok: true })),
+      updateCurrentFocus: vi.fn(async () => ({ ok: true })),
+      updateAuthorIntent: vi.fn(async () => ({ ok: true })),
+      writeTruthFile: vi.fn(async () => ({ ok: true })),
+    };
+
+    await processTuiInput(projectRoot, "/truth current_focus.md Bring it back", tools);
+
+    expect(tools.writeTruthFile).toHaveBeenCalledWith(
+      "harbor",
+      "current_focus.md",
+      "Bring it back",
+    );
   });
 });
