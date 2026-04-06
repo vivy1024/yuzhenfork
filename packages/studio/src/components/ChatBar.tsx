@@ -50,6 +50,18 @@ interface BookRef {
   readonly id: string;
 }
 
+export function coerceSharedSessionMessages(
+  messages: ReadonlyArray<{ role: "user" | "assistant" | "system"; content: string; timestamp: number }>,
+): ReadonlyArray<ChatMessage> {
+  return messages
+    .filter((message) => message.role === "user" || message.role === "assistant")
+    .map((message) => ({
+      role: message.role as "user" | "assistant",
+      content: message.content,
+      timestamp: message.timestamp,
+    }));
+}
+
 export function resolveDirectWriteTarget(
   activeBookId: string | undefined,
   books: ReadonlyArray<BookRef>,
@@ -242,13 +254,7 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
         activeBookId: data.activeBookId ?? data.session?.activeBookId,
         automationMode: data.session?.automationMode,
       });
-      const restored = (data.session?.messages ?? [])
-        .filter((message) => message.role === "user" || message.role === "assistant")
-        .map((message) => ({
-          role: message.role as "user" | "assistant",
-          content: message.content,
-          timestamp: message.timestamp,
-        }));
+      const restored = coerceSharedSessionMessages(data.session?.messages ?? []);
       if (restored.length > 0) {
         setMessages(restored);
       }
@@ -342,12 +348,31 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
         return;
       }
 
-      const data = await fetchJson<{ response?: string; error?: string }>("/agent", {
+      const data = await fetchJson<{
+        response?: string;
+        error?: string;
+        session?: {
+          activeBookId?: string;
+          automationMode?: string;
+          messages?: ReadonlyArray<{ role: "user" | "assistant" | "system"; content: string; timestamp: number }>;
+        };
+      }>("/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ instruction: text, activeBookId }),
       });
       setLoading(false);
+      if (data.session) {
+        setSessionMeta({
+          activeBookId: data.session.activeBookId ?? activeBookId,
+          automationMode: data.session.automationMode,
+        });
+        const restored = coerceSharedSessionMessages(data.session.messages ?? []);
+        if (restored.length > 0) {
+          setMessages(restored);
+          return;
+        }
+      }
       setMessages((prev) => [...prev, {
         role: "assistant",
         content: data.response ?? data.error ?? "Acknowledged.",

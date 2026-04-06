@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { resolveDirectWriteTarget } from "./ChatBar";
+import { coerceSharedSessionMessages, resolveDirectWriteTarget } from "./ChatBar";
 
 describe("resolveDirectWriteTarget", () => {
   it("prefers the active book when the user is already inside a book flow", () => {
@@ -34,5 +34,16 @@ describe("resolveDirectWriteTarget", () => {
       bookId: null,
       reason: "ambiguous",
     });
+  });
+
+  it("coerces shared session messages into chat bubbles", () => {
+    expect(coerceSharedSessionMessages([
+      { role: "user", content: "continue", timestamp: 1 },
+      { role: "assistant", content: "Completed write_next for harbor.", timestamp: 2 },
+      { role: "system", content: "internal", timestamp: 3 },
+    ])).toEqual([
+      { role: "user", content: "continue", timestamp: 1 },
+      { role: "assistant", content: "Completed write_next for harbor.", timestamp: 2 },
+    ]);
   });
 });
