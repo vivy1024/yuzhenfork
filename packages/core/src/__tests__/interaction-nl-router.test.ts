@@ -57,4 +57,19 @@ describe("interaction natural-language router", () => {
       instruction: "为什么主角名字没按设定走",
     });
   });
+
+  it("maps mode switch requests to switch_mode", () => {
+    expect(routeNaturalLanguageIntent("切换到全自动", { activeBookId: "harbor" })).toEqual({
+      intent: "switch_mode",
+      mode: "auto",
+    });
+    expect(routeNaturalLanguageIntent("半自动", { activeBookId: "harbor" })).toEqual({
+      intent: "switch_mode",
+      mode: "semi",
+    });
+    expect(routeNaturalLanguageIntent("切到全自主", { activeBookId: "harbor" })).toEqual({
+      intent: "switch_mode",
+      mode: "manual",
+    });
+  });
 });

@@ -55,4 +55,22 @@ describe("tui control flow", () => {
 
     expect(tools.updateCurrentFocus).toHaveBeenCalledWith("harbor", "把 focus 拉回旧案线");
   });
+
+  it("persists automation mode changes through the session", async () => {
+    await persistProjectSession(projectRoot, {
+      ...createProjectSession(projectRoot),
+      activeBookId: "harbor",
+    });
+
+    const tools = {
+      writeNextChapter: vi.fn(async () => ({ ok: true })),
+      reviseDraft: vi.fn(async () => ({ ok: true })),
+      updateCurrentFocus: vi.fn(async () => ({ ok: true })),
+      updateAuthorIntent: vi.fn(async () => ({ ok: true })),
+    };
+
+    const result = await processTuiInput(projectRoot, "切换到全自动", tools);
+
+    expect(result.session.automationMode).toBe("auto");
+  });
 });

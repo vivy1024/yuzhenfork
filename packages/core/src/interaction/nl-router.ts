@@ -26,6 +26,27 @@ export function routeNaturalLanguageIntent(
     };
   }
 
+  if (/(全自动|auto mode|switch to auto|切换到全自动)/i.test(trimmed)) {
+    return {
+      intent: "switch_mode",
+      mode: "auto",
+    };
+  }
+
+  if (/(半自动|semi mode|switch to semi)/i.test(trimmed)) {
+    return {
+      intent: "switch_mode",
+      mode: "semi",
+    };
+  }
+
+  if (/(全自主|手动模式|manual mode|switch to manual)/i.test(trimmed)) {
+    return {
+      intent: "switch_mode",
+      mode: "manual",
+    };
+  }
+
   const rewriteMatch = trimmed.match(/(?:rewrite chapter|重写第)\s*(\d+)\s*(?:章)?/i);
   if (rewriteMatch) {
     return {

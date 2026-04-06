@@ -14,6 +14,7 @@ import {
   resolveSessionActiveBook,
 } from "./session-store.js";
 import { createInteractionTools } from "./tools.js";
+import { formatTuiResult } from "./output.js";
 
 export interface TuiFrameState {
   readonly projectName: string;
@@ -54,7 +55,7 @@ export async function processTuiInput(
     tools,
   });
   await persistProjectSession(projectRoot, result.session);
-  return result;
+  return { ...result, request };
 }
 
 export async function launchTui(
@@ -86,7 +87,13 @@ export async function launchTui(
     if (!input.trim()) {
       return;
     }
-    await processTuiInput(projectRoot, input, tools ?? await createInteractionTools(projectRoot));
+    const result = await processTuiInput(projectRoot, input, tools ?? await createInteractionTools(projectRoot));
+    process.stdout.write(`\n${formatTuiResult({
+      intent: result.request.intent,
+      status: result.session.currentExecution?.status ?? "completed",
+      bookId: result.session.activeBookId,
+      mode: result.request.mode,
+    })}\n`);
   } finally {
     rl.close();
   }
