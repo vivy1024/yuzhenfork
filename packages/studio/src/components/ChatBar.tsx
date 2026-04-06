@@ -41,6 +41,11 @@ interface ChatMessage {
   readonly timestamp: number;
 }
 
+interface SharedSessionMeta {
+  readonly activeBookId?: string;
+  readonly automationMode?: string;
+}
+
 interface BookRef {
   readonly id: string;
 }
@@ -202,6 +207,7 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ReadonlyArray<ChatMessage>>([]);
   const [loading, setLoading] = useState(false);
+  const [sessionMeta, setSessionMeta] = useState<SharedSessionMeta>({});
   const inputRef = useRef<HTMLInputElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -225,10 +231,17 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
     let cancelled = false;
     void fetchJson<{
       session?: {
+        activeBookId?: string;
+        automationMode?: string;
         messages?: ReadonlyArray<{ role: "user" | "assistant" | "system"; content: string; timestamp: number }>;
       };
+      activeBookId?: string;
     }>("/interaction/session").then((data) => {
       if (cancelled) return;
+      setSessionMeta({
+        activeBookId: data.activeBookId ?? data.session?.activeBookId,
+        automationMode: data.session?.automationMode,
+      });
       const restored = (data.session?.messages ?? [])
         .filter((message) => message.role === "user" || message.role === "assistant")
         .map((message) => ({
@@ -390,16 +403,21 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
         <>
           {/* ── Section 1: Header ── */}
           <div className="h-12 shrink-0 px-4 flex items-center justify-between border-b border-border/40">
-            <div className="flex items-center gap-2.5">
-              <div className="relative">
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative shrink-0">
                 <Sparkles size={15} className="text-primary chat-icon-glow" />
                 {loading && (
                   <span className="absolute -top-0.5 -right-0.5 w-2 h-2 bg-primary rounded-full animate-ping" />
                 )}
               </div>
-              <span className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted-foreground">
-                InkOS Assistant
-              </span>
+              <div className="min-w-0">
+                <div className="text-[10px] uppercase tracking-[0.2em] font-bold text-muted-foreground">
+                  InkOS Assistant
+                </div>
+                <div className="text-[10px] text-muted-foreground/60 truncate">
+                  {(sessionMeta.activeBookId ?? activeBookId ?? "no-book")} · {sessionMeta.automationMode ?? "semi"}
+                </div>
+              </div>
             </div>
             <div className="flex items-center gap-1">
               <button
