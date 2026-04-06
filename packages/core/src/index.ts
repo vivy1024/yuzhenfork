@@ -96,6 +96,7 @@ export {
   bindActiveBook,
   clearPendingDecision,
   updateAutomationMode,
+  appendInteractionMessage,
 } from "./interaction/session.js";
 export { routeInteractionRequest } from "./interaction/request-router.js";
 export {

@@ -64,3 +64,13 @@ export function updateAutomationMode(
     automationMode,
   };
 }
+
+export function appendInteractionMessage(
+  session: InteractionSession,
+  message: InteractionMessage,
+): InteractionSession {
+  return {
+    ...session,
+    messages: [...session.messages, message].sort((left, right) => left.timestamp - right.timestamp),
+  };
+}

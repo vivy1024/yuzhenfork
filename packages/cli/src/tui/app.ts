@@ -1,6 +1,7 @@
 import { basename } from "node:path";
 import readline from "node:readline/promises";
 import {
+  appendInteractionMessage,
   routeNaturalLanguageIntent,
   runInteractionRequest,
   type AutomationMode,
@@ -21,6 +22,7 @@ export interface TuiFrameState {
   readonly activeBookTitle?: string;
   readonly automationMode: AutomationMode;
   readonly status: ExecutionStatus;
+  readonly messages?: ReadonlyArray<string>;
 }
 
 export function renderTuiFrame(state: TuiFrameState): string {
@@ -29,6 +31,11 @@ export function renderTuiFrame(state: TuiFrameState): string {
     `Book: ${state.activeBookTitle ?? "none"}`,
     `Mode: ${state.automationMode}`,
     `Stage: ${state.status}`,
+    "",
+    "Messages:",
+    ...(state.messages?.length
+      ? state.messages.slice(-3).map((message) => `- ${message}`)
+      : ["- (empty)"]),
     "",
     "> ",
   ];
@@ -43,9 +50,14 @@ export async function processTuiInput(
 ) {
   const session = await loadProjectSession(projectRoot);
   const activeBookId = await resolveSessionActiveBook(projectRoot, session);
-  const boundSession = activeBookId && session.activeBookId !== activeBookId
+  const sessionWithBook = activeBookId && session.activeBookId !== activeBookId
     ? { ...session, activeBookId }
     : session;
+  const boundSession = appendInteractionMessage(sessionWithBook, {
+    role: "user",
+    content: input,
+    timestamp: Date.now(),
+  });
   const request = routeNaturalLanguageIntent(input, {
     activeBookId: boundSession.activeBookId,
   });
@@ -54,8 +66,19 @@ export async function processTuiInput(
     request,
     tools,
   });
-  await persistProjectSession(projectRoot, result.session);
-  return { ...result, request };
+  const summary = formatTuiResult({
+    intent: request.intent,
+    status: result.session.currentExecution?.status ?? "completed",
+    bookId: result.session.activeBookId,
+    mode: request.mode,
+  });
+  const nextSession = appendInteractionMessage(result.session, {
+    role: "assistant",
+    content: summary,
+    timestamp: Date.now(),
+  });
+  await persistProjectSession(projectRoot, nextSession);
+  return { ...result, session: nextSession, request };
 }
 
 export async function launchTui(
@@ -69,6 +92,7 @@ export async function launchTui(
     activeBookTitle: activeBookId,
     automationMode: session.automationMode,
     status: session.currentExecution?.status ?? "idle",
+    messages: session.messages.map((message) => `${message.role}: ${message.content}`),
   });
 
   process.stdout.write(frame);
@@ -88,12 +112,7 @@ export async function launchTui(
       return;
     }
     const result = await processTuiInput(projectRoot, input, tools ?? await createInteractionTools(projectRoot));
-    process.stdout.write(`\n${formatTuiResult({
-      intent: result.request.intent,
-      status: result.session.currentExecution?.status ?? "completed",
-      bookId: result.session.activeBookId,
-      mode: result.request.mode,
-    })}\n`);
+    process.stdout.write(`\n${result.session.messages.at(-1)?.content ?? ""}\n`);
   } finally {
     rl.close();
   }

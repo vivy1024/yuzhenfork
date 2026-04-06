@@ -36,6 +36,8 @@ describe("tui control flow", () => {
     expect(tools.writeNextChapter).toHaveBeenCalledWith("harbor");
     expect(result.session.activeBookId).toBe("harbor");
     expect(result.session.currentExecution?.status).toBe("completed");
+    expect(result.session.messages.at(0)?.role).toBe("user");
+    expect(result.session.messages.at(-1)?.role).toBe("assistant");
   });
 
   it("routes focus updates through the interaction runtime", async () => {

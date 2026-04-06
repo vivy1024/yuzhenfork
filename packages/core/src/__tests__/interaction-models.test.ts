@@ -7,6 +7,7 @@ import {
   bindActiveBook,
   clearPendingDecision,
   isTerminalExecutionStatus,
+  appendInteractionMessage,
 } from "../index.js";
 
 describe("interaction models", () => {
@@ -75,5 +76,26 @@ describe("interaction models", () => {
       ...session,
       pendingDecision: undefined,
     });
+  });
+
+  it("appends interaction messages in timestamp order", () => {
+    const session = InteractionSessionSchema.parse({
+      sessionId: "session-3",
+      projectRoot: "/tmp/project",
+      automationMode: "semi",
+      messages: [],
+    });
+
+    const next = appendInteractionMessage(session, {
+      role: "user",
+      content: "continue",
+      timestamp: 1,
+    });
+
+    expect(next.messages).toEqual([{
+      role: "user",
+      content: "continue",
+      timestamp: 1,
+    }]);
   });
 });
