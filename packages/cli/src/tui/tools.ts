@@ -1,34 +1,35 @@
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { PipelineRunner, StateManager, type ReviseMode } from "@actalk/inkos-core";
-import type { InteractionRuntimeTools } from "@actalk/inkos-core";
-import { buildPipelineConfig, createClient, loadConfig } from "../utils.js";
+import {
+  PipelineRunner,
+  StateManager,
+  createInteractionToolsFromDeps,
+  type InteractionRuntimeTools,
+} from "@actalk/inkos-core";
+import { buildPipelineConfig, loadConfig } from "../utils.js";
 
-type PipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft">;
-type StateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir">;
+type CliPipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft">;
+type CliStateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir">;
 
-export function createInteractionToolsFromDeps(
-  _projectRoot: string,
-  pipeline: PipelineLike,
-  state: StateLike,
+export function createCliInteractionToolsFromDeps(
+  pipeline: CliPipelineLike,
+  state: CliStateLike,
 ): InteractionRuntimeTools {
-  return {
-    writeNextChapter: (bookId) => pipeline.writeNextChapter(bookId),
-    reviseDraft: (bookId, chapterNumber, mode) => pipeline.reviseDraft(bookId, chapterNumber, mode as ReviseMode),
-    updateCurrentFocus: async (bookId, content) => {
-      await state.ensureControlDocuments(bookId);
-      await writeFile(join(state.bookDir(bookId), "story", "current_focus.md"), content, "utf-8");
-    },
-    updateAuthorIntent: async (bookId, content) => {
-      await state.ensureControlDocuments(bookId);
-      await writeFile(join(state.bookDir(bookId), "story", "author_intent.md"), content, "utf-8");
-    },
-  };
+  return createInteractionToolsFromDeps(pipeline, state);
 }
+
+// Backward-compatible export for the current CLI tests during the extraction phase.
+export function createInteractionToolsFromDepsCompat(
+  _projectRoot: string,
+  pipeline: CliPipelineLike,
+  state: CliStateLike,
+): InteractionRuntimeTools {
+  return createInteractionToolsFromDeps(pipeline, state);
+}
+
+export { createInteractionToolsFromDepsCompat as createInteractionToolsFromDeps };
 
 export async function createInteractionTools(projectRoot: string): Promise<InteractionRuntimeTools> {
   const config = await loadConfig();
   const pipeline = new PipelineRunner(buildPipelineConfig(config, projectRoot));
   const state = new StateManager(projectRoot);
-  return createInteractionToolsFromDeps(projectRoot, pipeline, state);
+  return createInteractionToolsFromDeps(pipeline, state);
 }

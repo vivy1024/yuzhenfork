@@ -7,8 +7,13 @@ import {
   PipelineRunner,
   createLLMClient,
   createLogger,
+  createInteractionToolsFromDeps,
   computeAnalytics,
   loadProjectConfig,
+  loadProjectSession,
+  processProjectInteractionInput,
+  processProjectInteractionRequest,
+  resolveSessionActiveBook,
   type PipelineConfig,
   type ProjectConfig,
   type LogSink,
@@ -182,10 +187,27 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     bookCreateStatus.set(bookId, { status: "creating" });
 
     const pipeline = new PipelineRunner(await buildPipelineConfig());
-    pipeline.initBook(bookConfig).then(
-      () => {
-        bookCreateStatus.delete(bookId);
-        broadcast("book:created", { bookId });
+    const tools = createInteractionToolsFromDeps(pipeline, state);
+    processProjectInteractionRequest({
+      projectRoot: root,
+      request: {
+        intent: "create_book",
+        title: body.title,
+        genre: body.genre,
+        language: body.language === "en" ? "en" : body.language === "zh" ? "zh" : undefined,
+        platform: body.platform,
+        chapterWordCount: body.chapterWordCount,
+        targetChapters: body.targetChapters,
+      },
+      tools,
+    }).then(
+      (result: {
+        readonly session: { readonly activeBookId?: string };
+        readonly details?: Readonly<Record<string, unknown>>;
+      }) => {
+        const createdBookId = (result.details?.bookId as string | undefined) ?? result.session.activeBookId ?? bookId;
+        bookCreateStatus.delete(createdBookId);
+        broadcast("book:created", { bookId: createdBookId });
       },
       (e) => {
         const error = e instanceof Error ? e.message : String(e);
@@ -542,27 +564,41 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   // --- Agent chat ---
 
+  app.get("/api/interaction/session", async (c) => {
+    const session = await loadProjectSession(root);
+    const activeBookId = await resolveSessionActiveBook(root, session);
+    return c.json({
+      session: activeBookId && session.activeBookId !== activeBookId
+        ? { ...session, activeBookId }
+        : session,
+      activeBookId,
+    });
+  });
+
   app.post("/api/agent", async (c) => {
-    const { instruction } = await c.req.json<{ instruction: string }>();
+    const { instruction, activeBookId } = await c.req.json<{ instruction: string; activeBookId?: string }>();
     if (!instruction?.trim()) {
       return c.json({ error: "No instruction provided" }, 400);
     }
 
-    broadcast("agent:start", { instruction });
+    broadcast("agent:start", { instruction, activeBookId });
 
     try {
-      const { runAgentLoop } = await import("@actalk/inkos-core");
+      const pipeline = new PipelineRunner(await buildPipelineConfig());
+      const tools = createInteractionToolsFromDeps(pipeline, state);
+      const result = await processProjectInteractionInput({
+        projectRoot: root,
+        input: instruction,
+        tools,
+        activeBookId,
+      });
+      const response = result.session.messages.at(-1)?.content ?? "Acknowledged.";
 
-      const result = await runAgentLoop(
-        await buildPipelineConfig(),
-        instruction
-      );
-
-      broadcast("agent:complete", { instruction, response: result });
-      return c.json({ response: result });
+      broadcast("agent:complete", { instruction, activeBookId, response });
+      return c.json({ response, session: result.session, request: result.request });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      broadcast("agent:error", { instruction, error: msg });
+      broadcast("agent:error", { instruction, activeBookId, error: msg });
       return c.json({ response: msg });
     }
   });
@@ -623,19 +659,26 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   app.post("/api/books/:id/revise/:chapter", async (c) => {
     const id = c.req.param("id");
     const chapterNum = parseInt(c.req.param("chapter"), 10);
-    const body: { mode?: string; brief?: string } = await c.req
-      .json<{ mode?: string; brief?: string }>()
-      .catch(() => ({ mode: "spot-fix" }));
+    const bookDir = state.bookDir(id);
+    const body = await c.req.json<{ mode?: string; brief?: string }>().catch(() => ({ mode: "local-fix" }));
 
     broadcast("revise:start", { bookId: id, chapter: chapterNum });
     try {
+      const book = await state.loadBookConfig(id);
+      const chaptersDir = join(bookDir, "chapters");
+      const files = await readdir(chaptersDir);
+      const paddedNum = String(chapterNum).padStart(4, "0");
+      const match = files.find((f) => f.startsWith(paddedNum) && f.endsWith(".md"));
+      if (!match) return c.json({ error: "Chapter not found" }, 404);
+
       const pipeline = new PipelineRunner(await buildPipelineConfig({
         externalContext: body.brief,
       }));
+      const normalizedMode = body.mode === "spot-fix" ? "local-fix" : (body.mode ?? "local-fix");
       const result = await pipeline.reviseDraft(
         id,
         chapterNum,
-        (body.mode ?? "spot-fix") as "spot-fix" | "polish" | "rewrite" | "rework" | "anti-detect",
+        normalizedMode as "polish" | "rewrite" | "rework" | "local-fix" | "anti-detect",
       );
       broadcast("revise:complete", { bookId: id, chapter: chapterNum });
       return c.json(result);

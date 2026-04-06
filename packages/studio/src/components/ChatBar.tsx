@@ -303,7 +303,7 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
       const data = await fetchJson<{ response?: string; error?: string }>("/agent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction: text }),
+        body: JSON.stringify({ instruction: text, activeBookId }),
       });
       setLoading(false);
       setMessages((prev) => [...prev, {

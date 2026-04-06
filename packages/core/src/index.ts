@@ -98,11 +98,20 @@ export {
   updateAutomationMode,
   appendInteractionMessage,
 } from "./interaction/session.js";
+export {
+  resolveProjectSessionPath,
+  createProjectSession,
+  loadProjectSession,
+  persistProjectSession,
+  resolveSessionActiveBook,
+} from "./interaction/project-session-store.js";
 export { routeInteractionRequest } from "./interaction/request-router.js";
 export {
   routeNaturalLanguageIntent,
   type NaturalLanguageRoutingContext,
 } from "./interaction/nl-router.js";
+export { processProjectInteractionInput } from "./interaction/project-control.js";
+export { createInteractionToolsFromDeps } from "./interaction/project-tools.js";
 export {
   runInteractionRequest,
   type InteractionRuntimeTools,
