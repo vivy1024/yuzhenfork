@@ -2,6 +2,20 @@ import { describe, expect, it, vi } from "vitest";
 import { InteractionSessionSchema } from "../interaction/session.js";
 import { runInteractionRequest } from "../interaction/runtime.js";
 
+function makeTools(overrides: Partial<Parameters<typeof runInteractionRequest>[0]["tools"]> = {}) {
+  return {
+    listBooks: vi.fn(async () => ["harbor"]),
+    writeNextChapter: vi.fn(),
+    reviseDraft: vi.fn(),
+    patchChapterText: vi.fn(),
+    renameEntity: vi.fn(),
+    updateCurrentFocus: vi.fn(),
+    updateAuthorIntent: vi.fn(),
+    writeTruthFile: vi.fn(),
+    ...overrides,
+  };
+}
+
 describe("interaction runtime", () => {
   it("keeps write_next completed in auto mode", async () => {
     const writeNextChapter = vi.fn(async () => ({
@@ -28,15 +42,13 @@ describe("interaction runtime", () => {
     const result = await runInteractionRequest({
       session,
       request: { intent: "write_next", bookId: "harbor" },
-      tools: {
+      tools: makeTools({
         writeNextChapter,
         reviseDraft,
-        patchChapterText: vi.fn(),
-        renameEntity: vi.fn(),
         updateCurrentFocus,
         updateAuthorIntent,
         writeTruthFile,
-      },
+      }),
     });
 
     expect(writeNextChapter).toHaveBeenCalledWith("harbor");
@@ -81,15 +93,9 @@ describe("interaction runtime", () => {
         events: [],
       }),
       request: { intent: "write_next", bookId: "harbor" },
-      tools: {
+      tools: makeTools({
         writeNextChapter,
-        reviseDraft: vi.fn(),
-        patchChapterText: vi.fn(),
-        renameEntity: vi.fn(),
-        updateCurrentFocus: vi.fn(),
-        updateAuthorIntent: vi.fn(),
-        writeTruthFile: vi.fn(),
-      },
+      }),
     });
 
     expect(result.session.currentExecution?.status).toBe("waiting_human");
@@ -124,15 +130,10 @@ describe("interaction runtime", () => {
     await runInteractionRequest({
       session,
       request: { intent: "revise_chapter", bookId: "harbor", chapterNumber: 3 },
-      tools: {
+      tools: makeTools({
         writeNextChapter,
         reviseDraft,
-        patchChapterText: vi.fn(),
-        renameEntity: vi.fn(),
-        updateCurrentFocus: vi.fn(),
-        updateAuthorIntent: vi.fn(),
-        writeTruthFile: vi.fn(),
-      },
+      }),
     });
 
     expect(reviseDraft).toHaveBeenCalledWith("harbor", 3, "local-fix");
@@ -156,15 +157,9 @@ describe("interaction runtime", () => {
         messages: [],
       }),
       request: { intent: "rewrite_chapter", bookId: "harbor", chapterNumber: 5 },
-      tools: {
-        writeNextChapter: vi.fn(),
+      tools: makeTools({
         reviseDraft,
-        patchChapterText: vi.fn(),
-        renameEntity: vi.fn(),
-        updateCurrentFocus: vi.fn(),
-        updateAuthorIntent: vi.fn(),
-        writeTruthFile: vi.fn(),
-      },
+      }),
     });
 
     expect(reviseDraft).toHaveBeenCalledWith("harbor", 5, "rewrite");
@@ -186,15 +181,9 @@ describe("interaction runtime", () => {
         bookId: "harbor",
         instruction: "Bring the story back to the old harbor debt line.",
       },
-      tools: {
-        writeNextChapter: vi.fn(),
-        reviseDraft: vi.fn(),
-        patchChapterText: vi.fn(),
-        renameEntity: vi.fn(),
+      tools: makeTools({
         updateCurrentFocus,
-        updateAuthorIntent: vi.fn(),
-        writeTruthFile: vi.fn(),
-      },
+      }),
     });
 
     expect(updateCurrentFocus).toHaveBeenCalledWith(
@@ -221,15 +210,9 @@ describe("interaction runtime", () => {
         fileName: "current_focus.md",
         instruction: "# Current Focus\n\nBring the story back to the old harbor debt line.\n",
       },
-      tools: {
-        writeNextChapter: vi.fn(),
-        reviseDraft: vi.fn(),
-        patchChapterText: vi.fn(),
-        renameEntity: vi.fn(),
-        updateCurrentFocus: vi.fn(),
-        updateAuthorIntent: vi.fn(),
+      tools: makeTools({
         writeTruthFile,
-      },
+      }),
     });
 
     expect(writeTruthFile).toHaveBeenCalledWith(
@@ -257,15 +240,9 @@ describe("interaction runtime", () => {
         oldValue: "陆尘",
         newValue: "林砚",
       },
-      tools: {
-        writeNextChapter: vi.fn(),
-        reviseDraft: vi.fn(),
-        updateCurrentFocus: vi.fn(),
-        updateAuthorIntent: vi.fn(),
-        writeTruthFile: vi.fn(),
+      tools: makeTools({
         renameEntity,
-        patchChapterText: vi.fn(),
-      },
+      }),
     });
 
     expect(renameEntity).toHaveBeenCalledWith("harbor", "陆尘", "林砚");
@@ -295,15 +272,9 @@ describe("interaction runtime", () => {
         targetText: "旧名字",
         replacementText: "新名字",
       },
-      tools: {
-        writeNextChapter: vi.fn(),
-        reviseDraft: vi.fn(),
-        updateCurrentFocus: vi.fn(),
-        updateAuthorIntent: vi.fn(),
-        writeTruthFile: vi.fn(),
-        renameEntity: vi.fn(),
+      tools: makeTools({
         patchChapterText,
-      },
+      }),
     });
 
     expect(patchChapterText).toHaveBeenCalledWith("harbor", 3, "旧名字", "新名字");
@@ -329,15 +300,13 @@ describe("interaction runtime", () => {
         events: [],
       }),
       request: { intent: "switch_mode", mode: "auto" },
-      tools: {
+      tools: makeTools({
         writeNextChapter,
         reviseDraft,
-        patchChapterText: vi.fn(),
-        renameEntity: vi.fn(),
         updateCurrentFocus,
         updateAuthorIntent,
         writeTruthFile,
-      },
+      }),
     });
 
     expect(result.session.automationMode).toBe("auto");
@@ -351,6 +320,47 @@ describe("interaction runtime", () => {
     ]);
   });
 
+  it("binds the selected book without invoking pipeline tools", async () => {
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-5b",
+        projectRoot: "/tmp/project",
+        activeBookId: "harbor",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      }),
+      request: { intent: "select_book", bookId: "beta" },
+      tools: makeTools({
+        listBooks: vi.fn(async () => ["harbor", "beta"]),
+      }),
+    });
+
+    expect(result.session.activeBookId).toBe("beta");
+    expect(result.responseText).toContain("beta");
+  });
+
+  it("lists project books through the shared runtime", async () => {
+    const listBooks = vi.fn(async () => ["harbor", "beta"]);
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-5c",
+        projectRoot: "/tmp/project",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      }),
+      request: { intent: "list_books" },
+      tools: makeTools({
+        listBooks,
+      }),
+    });
+
+    expect(listBooks).toHaveBeenCalledTimes(1);
+    expect(result.responseText).toContain("harbor");
+    expect(result.responseText).toContain("beta");
+  });
+
   it("pauses the active book without invoking pipeline tools", async () => {
     const result = await runInteractionRequest({
       session: InteractionSessionSchema.parse({
@@ -362,15 +372,7 @@ describe("interaction runtime", () => {
         events: [],
       }),
       request: { intent: "pause_book", bookId: "harbor" },
-      tools: {
-        writeNextChapter: vi.fn(),
-        reviseDraft: vi.fn(),
-        patchChapterText: vi.fn(),
-        renameEntity: vi.fn(),
-        updateCurrentFocus: vi.fn(),
-        updateAuthorIntent: vi.fn(),
-        writeTruthFile: vi.fn(),
-      },
+      tools: makeTools(),
     });
 
     expect(result.session.currentExecution?.status).toBe("blocked");
@@ -398,15 +400,7 @@ describe("interaction runtime", () => {
         },
       }),
       request: { intent: "explain_status", bookId: "harbor", instruction: "what are you doing?" },
-      tools: {
-        writeNextChapter: vi.fn(),
-        reviseDraft: vi.fn(),
-        patchChapterText: vi.fn(),
-        renameEntity: vi.fn(),
-        updateCurrentFocus: vi.fn(),
-        updateAuthorIntent: vi.fn(),
-        writeTruthFile: vi.fn(),
-      },
+      tools: makeTools(),
     });
 
     expect(result.responseText).toContain("repairing");

@@ -46,6 +46,7 @@ describe("interaction tools", () => {
       bookDir: vi.fn((bookId: string) => join(projectRoot, "books", bookId)),
       loadChapterIndex: vi.fn(async () => []),
       saveChapterIndex: vi.fn(async () => undefined),
+      listBooks: vi.fn(async () => ["harbor"]),
     };
 
     const tools = createInteractionToolsFromDeps(pipeline, state);
@@ -94,6 +95,7 @@ describe("interaction tools", () => {
       bookDir: vi.fn((bookId: string) => join(projectRoot, "books", bookId)),
       loadChapterIndex: vi.fn(async () => []),
       saveChapterIndex: vi.fn(async () => undefined),
+      listBooks: vi.fn(async () => ["harbor"]),
     };
 
     const tools = createInteractionToolsFromDeps(pipeline, state);
@@ -133,6 +135,7 @@ describe("interaction tools", () => {
         bookDir: vi.fn((bookId: string) => join(projectRoot, "books", bookId)),
         loadChapterIndex: vi.fn(async () => []),
         saveChapterIndex: vi.fn(async () => undefined),
+        listBooks: vi.fn(async () => ["harbor"]),
       },
     );
 

@@ -13,6 +13,7 @@ import {
 type ReviseMode = "local-fix" | "rewrite";
 
 export interface InteractionRuntimeTools {
+  readonly listBooks: () => Promise<ReadonlyArray<string>>;
   readonly writeNextChapter: (bookId: string) => Promise<unknown>;
   readonly reviseDraft: (bookId: string, chapterNumber: number, mode: ReviseMode) => Promise<unknown>;
   readonly patchChapterText: (
@@ -264,6 +265,30 @@ export async function runInteractionRequest(params: {
             ? `Completed write_next for ${bookId}; waiting for your next decision.`
             : `Completed write_next for ${bookId}.`
         ),
+      };
+    }
+    case "list_books": {
+      const books = await params.tools.listBooks();
+      const completed = markCompleted(session);
+      return {
+        session: addEvent(completed, "task.completed", "completed", `Listed ${books.length} book(s).`),
+        responseText: books.length > 0
+          ? `Books: ${books.join(", ")}`
+          : "No books found in this project.",
+      };
+    }
+    case "select_book": {
+      if (!request.bookId) {
+        throw new Error("Book selection requires a book id.");
+      }
+      const books = await params.tools.listBooks();
+      if (!books.includes(request.bookId)) {
+        throw new Error(`Book "${request.bookId}" not found in this project.`);
+      }
+      const completed = markCompleted(bindActiveBook(session, request.bookId));
+      return {
+        session: addEvent(completed, "task.completed", "completed", `Bound active book to ${request.bookId}.`),
+        responseText: `Opened ${request.bookId}.`,
       };
     }
     case "revise_chapter":

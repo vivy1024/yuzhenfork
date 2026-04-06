@@ -74,6 +74,13 @@ describe("interaction natural-language router", () => {
   });
 
   it("maps slash commands for direct control", () => {
+    expect(routeNaturalLanguageIntent("/books", { activeBookId: "harbor" })).toEqual({
+      intent: "list_books",
+    });
+    expect(routeNaturalLanguageIntent("/open beta", { activeBookId: "harbor" })).toEqual({
+      intent: "select_book",
+      bookId: "beta",
+    });
     expect(routeNaturalLanguageIntent("/write", { activeBookId: "harbor" })).toEqual({
       intent: "write_next",
       bookId: "harbor",
@@ -114,6 +121,10 @@ describe("interaction natural-language router", () => {
   });
 
   it("maps rename and chapter patch requests from natural language", () => {
+    expect(routeNaturalLanguageIntent("open beta", { activeBookId: "harbor" })).toEqual({
+      intent: "select_book",
+      bookId: "beta",
+    });
     expect(routeNaturalLanguageIntent("把陆尘改成林砚", { activeBookId: "harbor" })).toEqual({
       intent: "rename_entity",
       bookId: "harbor",

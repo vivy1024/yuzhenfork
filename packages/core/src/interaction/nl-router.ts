@@ -26,6 +26,20 @@ export function routeNaturalLanguageIntent(
     };
   }
 
+  if (/^\/books$/i.test(trimmed)) {
+    return {
+      intent: "list_books",
+    };
+  }
+
+  const openCommand = trimmed.match(/^\/open\s+(.+)$/i);
+  if (openCommand) {
+    return {
+      intent: "select_book",
+      bookId: openCommand[1]!.trim(),
+    };
+  }
+
   if (/^(pause|pause this book|暂停|暂停这本书)$/i.test(trimmed)) {
     return {
       intent: "pause_book",
@@ -148,6 +162,14 @@ export function routeNaturalLanguageIntent(
       ...(bookId ? { bookId } : {}),
       oldValue: enRenameMatch[1]!.trim(),
       newValue: enRenameMatch[2]!.trim(),
+    };
+  }
+
+  const openMatch = trimmed.match(/^open\s+(.+)$/i);
+  if (openMatch) {
+    return {
+      intent: "select_book",
+      bookId: openMatch[1]!.trim(),
     };
   }
 

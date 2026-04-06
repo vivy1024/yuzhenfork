@@ -29,6 +29,7 @@ describe("project interaction control", () => {
     });
 
     const tools = {
+      listBooks: vi.fn(async () => ["harbor"]),
       writeNextChapter: vi.fn(async () => ({ ok: true })),
       reviseDraft: vi.fn(async () => ({ ok: true })),
       patchChapterText: vi.fn(async () => ({ ok: true })),
@@ -63,6 +64,7 @@ describe("project interaction control", () => {
       projectRoot,
       input: "切换到全自动",
       tools: {
+        listBooks: vi.fn(async () => ["harbor"]),
         writeNextChapter: vi.fn(async () => ({ ok: true })),
         reviseDraft: vi.fn(async () => ({ ok: true })),
         patchChapterText: vi.fn(async () => ({ ok: true })),
@@ -90,6 +92,7 @@ describe("project interaction control", () => {
       projectRoot,
       input: "continue",
       tools: {
+        listBooks: vi.fn(async () => ["harbor"]),
         writeNextChapter: vi.fn(async () => {
           throw new Error("boom");
         }),
@@ -106,5 +109,27 @@ describe("project interaction control", () => {
     expect(failedSession.currentExecution?.status).toBe("failed");
     expect(failedSession.events.at(-1)?.kind).toBe("task.failed");
     expect(failedSession.events.at(-1)?.detail).toContain("boom");
+  });
+
+  it("persists book selection into the shared project session", async () => {
+    await persistProjectSession(projectRoot, createProjectSession(projectRoot));
+
+    const result = await processProjectInteractionInput({
+      projectRoot,
+      input: "/open harbor",
+      tools: {
+        writeNextChapter: vi.fn(async () => ({ ok: true })),
+        reviseDraft: vi.fn(async () => ({ ok: true })),
+        patchChapterText: vi.fn(async () => ({ ok: true })),
+        renameEntity: vi.fn(async () => ({ ok: true })),
+        updateCurrentFocus: vi.fn(async () => ({ ok: true })),
+        updateAuthorIntent: vi.fn(async () => ({ ok: true })),
+        writeTruthFile: vi.fn(async () => ({ ok: true })),
+        listBooks: vi.fn(async () => ["harbor"]),
+      },
+    });
+
+    expect(result.session.activeBookId).toBe("harbor");
+    expect(result.request.intent).toBe("select_book");
   });
 });

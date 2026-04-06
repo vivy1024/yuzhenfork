@@ -25,6 +25,7 @@ describe("tui control flow", () => {
     });
 
     const tools = {
+      listBooks: vi.fn(async () => ["harbor"]),
       writeNextChapter: vi.fn(async () => ({ ok: true })),
       reviseDraft: vi.fn(async () => ({ ok: true })),
       patchChapterText: vi.fn(async () => ({ ok: true })),
@@ -51,6 +52,7 @@ describe("tui control flow", () => {
     });
 
     const tools = {
+      listBooks: vi.fn(async () => ["harbor"]),
       writeNextChapter: vi.fn(async () => ({ ok: true })),
       reviseDraft: vi.fn(async () => ({ ok: true })),
       patchChapterText: vi.fn(async () => ({ ok: true })),
@@ -72,6 +74,7 @@ describe("tui control flow", () => {
     });
 
     const tools = {
+      listBooks: vi.fn(async () => ["harbor"]),
       writeNextChapter: vi.fn(async () => ({ ok: true })),
       reviseDraft: vi.fn(async () => ({ ok: true })),
       patchChapterText: vi.fn(async () => ({ ok: true })),
@@ -93,6 +96,7 @@ describe("tui control flow", () => {
     });
 
     const tools = {
+      listBooks: vi.fn(async () => ["harbor"]),
       writeNextChapter: vi.fn(async () => ({ ok: true })),
       reviseDraft: vi.fn(async () => ({ ok: true })),
       patchChapterText: vi.fn(async () => ({ ok: true })),
@@ -109,5 +113,27 @@ describe("tui control flow", () => {
       "current_focus.md",
       "Bring it back",
     );
+  });
+
+  it("binds the active book through /open in multi-book projects", async () => {
+    await mkdir(join(projectRoot, "books", "beta"), { recursive: true });
+    await writeFile(join(projectRoot, "books", "beta", "book.json"), "{}", "utf-8");
+    await persistProjectSession(projectRoot, createProjectSession(projectRoot));
+
+    const tools = {
+      listBooks: vi.fn(async () => ["harbor", "beta"]),
+      writeNextChapter: vi.fn(async () => ({ ok: true })),
+      reviseDraft: vi.fn(async () => ({ ok: true })),
+      patchChapterText: vi.fn(async () => ({ ok: true })),
+      renameEntity: vi.fn(async () => ({ ok: true })),
+      updateCurrentFocus: vi.fn(async () => ({ ok: true })),
+      updateAuthorIntent: vi.fn(async () => ({ ok: true })),
+      writeTruthFile: vi.fn(async () => ({ ok: true })),
+    };
+
+    const result = await processTuiInput(projectRoot, "/open beta", tools);
+
+    expect(result.session.activeBookId).toBe("beta");
+    expect(result.session.messages.at(-1)?.content).toContain("beta");
   });
 });

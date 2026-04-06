@@ -7,7 +7,7 @@ import {
 import { buildPipelineConfig, loadConfig } from "../utils.js";
 
 type CliPipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft">;
-type CliStateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir" | "loadChapterIndex" | "saveChapterIndex">;
+type CliStateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir" | "loadChapterIndex" | "saveChapterIndex" | "listBooks">;
 
 export function createCliInteractionToolsFromDeps(
   pipeline: CliPipelineLike,

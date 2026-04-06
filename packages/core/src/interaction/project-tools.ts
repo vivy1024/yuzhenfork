@@ -11,7 +11,7 @@ import { executeEditTransaction } from "./edit-controller.js";
 import type { InteractionRuntimeTools } from "./runtime.js";
 
 type PipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft">;
-type StateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir" | "loadChapterIndex" | "saveChapterIndex">;
+type StateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir" | "loadChapterIndex" | "saveChapterIndex" | "listBooks">;
 type InstrumentablePipelineLike = PipelineLike & {
   readonly config?: {
     logger?: Logger;
@@ -196,6 +196,7 @@ export function createInteractionToolsFromDeps(
   const instrumentedPipeline = pipeline as InstrumentablePipelineLike;
 
   return {
+    listBooks: () => state.listBooks(),
     writeNextChapter: (bookId) => withPipelineInteractionTelemetry(
       instrumentedPipeline,
       bookId,
