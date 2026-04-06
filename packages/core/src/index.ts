@@ -116,6 +116,16 @@ export {
 export { processProjectInteractionInput } from "./interaction/project-control.js";
 export { createInteractionToolsFromDeps } from "./interaction/project-tools.js";
 export {
+  normalizeTruthFileName,
+  classifyTruthAuthority,
+  type TruthAuthority,
+} from "./interaction/truth-authority.js";
+export {
+  planEditTransaction,
+  type EditRequest,
+  type PlannedEditTransaction,
+} from "./interaction/edit-controller.js";
+export {
   runInteractionRequest,
   type InteractionRuntimeTools,
   type InteractionRuntimeResult,
