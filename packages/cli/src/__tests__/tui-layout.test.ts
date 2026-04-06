@@ -15,6 +15,7 @@ describe("tui layout", () => {
     expect(frame).toContain("Mode: semi");
     expect(frame).toContain("Stage: idle");
     expect(frame).toContain("Messages:");
+    expect(frame).toContain("Events:");
     expect(frame).toContain(">");
   });
 
@@ -25,11 +26,13 @@ describe("tui layout", () => {
       automationMode: "auto",
       status: "writing",
       messages: ["user: continue", "assistant: Completed write_next for harbor."],
+      events: ["task.completed: Completed write_next for harbor."],
     });
 
     expect(frame).toContain("Book: Night Harbor Echo");
     expect(frame).toContain("Mode: auto");
     expect(frame).toContain("Stage: writing");
     expect(frame).toContain("user: continue");
+    expect(frame).toContain("task.completed: Completed write_next for harbor.");
   });
 });

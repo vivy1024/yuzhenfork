@@ -155,4 +155,57 @@ describe("interaction runtime", () => {
     expect(updateCurrentFocus).not.toHaveBeenCalled();
     expect(updateAuthorIntent).not.toHaveBeenCalled();
   });
+
+  it("pauses the active book without invoking pipeline tools", async () => {
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-6",
+        projectRoot: "/tmp/project",
+        activeBookId: "harbor",
+        automationMode: "auto",
+        messages: [],
+        events: [],
+      }),
+      request: { intent: "pause_book", bookId: "harbor" },
+      tools: {
+        writeNextChapter: vi.fn(),
+        reviseDraft: vi.fn(),
+        updateCurrentFocus: vi.fn(),
+        updateAuthorIntent: vi.fn(),
+      },
+    });
+
+    expect(result.session.currentExecution?.status).toBe("blocked");
+    expect(result.responseText).toContain("Paused");
+    expect(result.session.events.at(-1)?.kind).toBe("task.completed");
+  });
+
+  it("returns a human-readable explanation for explain_status", async () => {
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-7",
+        projectRoot: "/tmp/project",
+        activeBookId: "harbor",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+        currentExecution: {
+          status: "repairing",
+          bookId: "harbor",
+          chapterNumber: 3,
+          stageLabel: "repairing chapter 3",
+        },
+      }),
+      request: { intent: "explain_status", bookId: "harbor", instruction: "what are you doing?" },
+      tools: {
+        writeNextChapter: vi.fn(),
+        reviseDraft: vi.fn(),
+        updateCurrentFocus: vi.fn(),
+        updateAuthorIntent: vi.fn(),
+      },
+    });
+
+    expect(result.responseText).toContain("repairing");
+    expect(result.responseText).toContain("harbor");
+  });
 });

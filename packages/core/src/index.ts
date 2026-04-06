@@ -82,8 +82,10 @@ export {
 export {
   ExecutionStatusSchema,
   ExecutionStateSchema,
+  InteractionEventSchema,
   type ExecutionStatus,
   type ExecutionState,
+  type InteractionEvent,
   isTerminalExecutionStatus,
 } from "./interaction/events.js";
 export {
@@ -97,6 +99,7 @@ export {
   clearPendingDecision,
   updateAutomationMode,
   appendInteractionMessage,
+  appendInteractionEvent,
 } from "./interaction/session.js";
 export {
   resolveProjectSessionPath,

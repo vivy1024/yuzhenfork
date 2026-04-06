@@ -21,6 +21,7 @@ export interface TuiFrameState {
   readonly automationMode: AutomationMode;
   readonly status: ExecutionStatus;
   readonly messages?: ReadonlyArray<string>;
+  readonly events?: ReadonlyArray<string>;
 }
 
 export function renderTuiFrame(state: TuiFrameState): string {
@@ -33,6 +34,11 @@ export function renderTuiFrame(state: TuiFrameState): string {
     "Messages:",
     ...(state.messages?.length
       ? state.messages.slice(-3).map((message) => `- ${message}`)
+      : ["- (empty)"]),
+    "",
+    "Events:",
+    ...(state.events?.length
+      ? state.events.slice(-3).map((event) => `- ${event}`)
       : ["- (empty)"]),
     "",
     "> ",
@@ -56,6 +62,7 @@ export async function processTuiInput(
     status: result.session.currentExecution?.status ?? "completed",
     bookId: result.session.activeBookId,
     mode: result.request.mode,
+    responseText: result.responseText,
   });
   const nextSession = appendInteractionMessage(result.session, {
     role: "assistant",
@@ -78,6 +85,7 @@ export async function launchTui(
     automationMode: session.automationMode,
     status: session.currentExecution?.status ?? "idle",
     messages: session.messages.map((message) => `${message.role}: ${message.content}`),
+    events: session.events.map((event) => `${event.kind}: ${event.detail ?? event.status}`),
   });
 
   process.stdout.write(frame);

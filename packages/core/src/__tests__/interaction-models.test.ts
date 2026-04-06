@@ -8,6 +8,7 @@ import {
   clearPendingDecision,
   isTerminalExecutionStatus,
   appendInteractionMessage,
+  appendInteractionEvent,
 } from "../index.js";
 
 describe("interaction models", () => {
@@ -96,6 +97,32 @@ describe("interaction models", () => {
       role: "user",
       content: "continue",
       timestamp: 1,
+    }]);
+  });
+
+  it("appends interaction events in timestamp order", () => {
+    const session = InteractionSessionSchema.parse({
+      sessionId: "session-4",
+      projectRoot: "/tmp/project",
+      automationMode: "semi",
+      messages: [],
+      events: [],
+    });
+
+    const next = appendInteractionEvent(session, {
+      kind: "task.completed",
+      timestamp: 2,
+      status: "completed",
+      bookId: "harbor",
+      detail: "Completed write_next for harbor.",
+    });
+
+    expect(next.events).toEqual([{
+      kind: "task.completed",
+      timestamp: 2,
+      status: "completed",
+      bookId: "harbor",
+      detail: "Completed write_next for harbor.",
     }]);
   });
 });

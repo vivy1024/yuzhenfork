@@ -17,4 +17,12 @@ describe("tui output", () => {
       mode: "auto",
     })).toContain("Switched mode to auto");
   });
+
+  it("prefers explicit response text when provided", () => {
+    expect(formatTuiResult({
+      intent: "explain_status",
+      status: "completed",
+      responseText: "Current status: harbor is at repairing chapter 3.",
+    })).toBe("Current status: harbor is at repairing chapter 3.");
+  });
 });

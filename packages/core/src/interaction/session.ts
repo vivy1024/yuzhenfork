@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AutomationModeSchema, type AutomationMode } from "./modes.js";
-import { ExecutionStateSchema } from "./events.js";
+import { ExecutionStateSchema, InteractionEventSchema, type InteractionEvent } from "./events.js";
 
 export const PendingDecisionSchema = z.object({
   kind: z.string().min(1),
@@ -26,6 +26,7 @@ export const InteractionSessionSchema = z.object({
   activeChapterNumber: z.number().int().min(1).optional(),
   automationMode: AutomationModeSchema.default("semi"),
   messages: z.array(InteractionMessageSchema).default([]),
+  events: z.array(InteractionEventSchema).default([]),
   pendingDecision: PendingDecisionSchema.optional(),
   currentExecution: ExecutionStateSchema.optional(),
 });
@@ -72,5 +73,15 @@ export function appendInteractionMessage(
   return {
     ...session,
     messages: [...session.messages, message].sort((left, right) => left.timestamp - right.timestamp),
+  };
+}
+
+export function appendInteractionEvent(
+  session: InteractionSession,
+  event: InteractionEvent,
+): InteractionSession {
+  return {
+    ...session,
+    events: [...session.events, event].sort((left, right) => left.timestamp - right.timestamp),
   };
 }
