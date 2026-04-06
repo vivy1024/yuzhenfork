@@ -14,6 +14,8 @@ export interface AuditResult {
   readonly passed: boolean;
   readonly issues: ReadonlyArray<AuditIssue>;
   readonly summary: string;
+  /** 0-100 overall quality score. Present when the auditor supports scoring. */
+  readonly overallScore?: number;
   readonly tokenUsage?: {
     readonly promptTokens: number;
     readonly completionTokens: number;
@@ -400,6 +402,7 @@ ${dimList}
 Output format MUST be JSON:
 {
   "passed": true/false,
+  "overall_score": 0-100,
   "issues": [
     {
       "severity": "critical|warning|info",
@@ -411,7 +414,15 @@ Output format MUST be JSON:
   "summary": "one-sentence audit conclusion"
 }
 
-passed is false ONLY when critical-severity issues exist.`
+passed is false ONLY when critical-severity issues exist.
+
+overall_score calibration:
+- 95-100: Publishable as-is, no noticeable issues
+- 85-94: Minor blemishes but smooth reading, the reader won't break immersion
+- 75-84: Noticeable problems but the story backbone holds, needs revision but not urgent
+- 65-74: Multiple issues hurt the reading experience, pacing or continuity has gaps
+- < 65: Structural breakdown, needs major rewrite
+Score holistically — do not let a single minor issue tank the score.`
       : `你是一位严格的${gp.name}网络小说审稿编辑。你的任务是对章节进行连续性、一致性和质量审查。${protagonistBlock}${searchNote}
 
 审查维度：
@@ -420,6 +431,7 @@ ${dimList}
 输出格式必须为 JSON：
 {
   "passed": true/false,
+  "overall_score": 0-100,
   "issues": [
     {
       "severity": "critical|warning|info",
@@ -431,7 +443,15 @@ ${dimList}
   "summary": "一句话总结审查结论"
 }
 
-只有当存在 critical 级别问题时，passed 才为 false。`;
+只有当存在 critical 级别问题时，passed 才为 false。
+
+overall_score 评分校准：
+- 95-100：可直接发布，无明显问题
+- 85-94：有小瑕疵但整体流畅可读，读者不会出戏
+- 75-84：有明显问题但故事主干完整，需要修但不紧急
+- 65-74：多处影响阅读体验的问题，节奏或连续性有断裂
+- < 65：结构性问题，需要大幅重写
+综合评分，不要因为单一小问题大幅拉低分数。`;
 
     const ledgerBlock = gp.numericalSystem
       ? isEnglish
@@ -678,6 +698,10 @@ ${overrides}\n`;
     try {
       const parsed = JSON.parse(json);
       if (typeof parsed.passed !== "boolean" && parsed.passed !== undefined) return null;
+      const rawScore = parsed.overall_score ?? parsed.overallScore;
+      const overallScore = typeof rawScore === "number" && Number.isFinite(rawScore)
+        ? Math.round(Math.max(0, Math.min(100, rawScore)))
+        : undefined;
       return {
         passed: Boolean(parsed.passed ?? false),
         issues: Array.isArray(parsed.issues)
@@ -689,6 +713,7 @@ ${overrides}\n`;
             }))
           : [],
         summary: String(parsed.summary ?? ""),
+        overallScore,
       };
     } catch {
       return null;

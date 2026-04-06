@@ -52,6 +52,7 @@ function createAuditResult(overrides: Partial<AuditResult>): AuditResult {
     passed: true,
     issues: [],
     summary: "ok",
+    overallScore: 90,
     tokenUsage: ZERO_USAGE,
     ...overrides,
   };
@@ -219,6 +220,16 @@ describe("PipelineRunner", () => {
       warnings: [],
       passed: true,
     });
+    // Default reviser mock: return input content unchanged so the review cycle's
+    // repair loop exits immediately when triggered by length-out-of-range content.
+    // Tests that need specific revision behavior override this mock explicitly.
+    vi.spyOn(ReviserAgent.prototype, "reviseChapter").mockImplementation(
+      async (_bookDir, chapterContent, _chapterNumber, _issues, _mode, _genre, _options) =>
+        createReviseOutput({
+          revisedContent: chapterContent,
+          wordCount: chapterContent.length,
+        }),
+    );
   });
 
   afterEach(() => {
@@ -1489,6 +1500,7 @@ describe("PipelineRunner", () => {
           passed: false,
           issues: [CRITICAL_ISSUE],
           summary: "needs revision",
+          overallScore: 40,
         }),
       )
       .mockResolvedValueOnce(
@@ -1496,6 +1508,7 @@ describe("PipelineRunner", () => {
           passed: true,
           issues: [],
           summary: "clean",
+          overallScore: 95,
         }),
       );
     vi.spyOn(ReviserAgent.prototype, "reviseChapter").mockResolvedValue(
@@ -1530,71 +1543,49 @@ describe("PipelineRunner", () => {
 
   it("normalizes revised output once before re-audit when it leaves the target band", async () => {
     const { root, runner, bookId } = await createRunnerFixture();
-    const writerDraft = "中段正文。".repeat(40);
-    const overlongRevision = "修订后正文。".repeat(60);
-    const normalizedRevision = "归一正文。".repeat(40);
+    const overlongDraft = "修订后正文。".repeat(60);
+    const normalizedDraft = "归一正文。".repeat(40);
 
     vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(
       createWriterOutput({
-        content: writerDraft,
-        wordCount: writerDraft.length,
+        content: overlongDraft,
+        wordCount: overlongDraft.length,
       }),
     );
-    const auditChapter = vi.spyOn(ContinuityAuditor.prototype, "auditChapter")
-      .mockResolvedValueOnce(
-        createAuditResult({
-          passed: false,
-          issues: [CRITICAL_ISSUE],
-          summary: "needs revision",
-        }),
-      )
-      .mockResolvedValueOnce(
-        createAuditResult({
-          passed: true,
-          issues: [],
-          summary: "clean",
-        }),
-      );
-    const reviseChapter = vi.spyOn(ReviserAgent.prototype, "reviseChapter").mockResolvedValue(
-      createReviseOutput({
-        revisedContent: overlongRevision,
-        wordCount: overlongRevision.length,
+    vi.spyOn(ContinuityAuditor.prototype, "auditChapter").mockResolvedValue(
+      createAuditResult({
+        passed: true,
+        issues: [],
+        summary: "clean",
       }),
     );
     const normalizeChapter = vi.mocked(
       LengthNormalizerAgent.prototype.normalizeChapter,
     ).mockResolvedValue({
-      normalizedContent: normalizedRevision,
-      finalCount: normalizedRevision.length,
+      normalizedContent: normalizedDraft,
+      finalCount: normalizedDraft.length,
       applied: true,
       mode: "compress",
       tokenUsage: ZERO_USAGE,
     });
     vi.spyOn(ChapterAnalyzerAgent.prototype, "analyzeChapter").mockResolvedValue(
       createAnalyzedOutput({
-        content: normalizedRevision,
-        wordCount: normalizedRevision.length,
+        content: normalizedDraft,
+        wordCount: normalizedDraft.length,
       }),
     );
 
     try {
       await runner.writeNextChapter(bookId, 220);
 
-      expect(reviseChapter.mock.calls[0]?.[6]).toMatchObject({
-        lengthSpec: expect.objectContaining({
-          target: 220,
-          softMin: 190,
-          softMax: 250,
-        }),
-      });
+      // v9: normalization happens once before the scoring loop, not after revision
       expect(normalizeChapter).toHaveBeenCalledTimes(1);
       expect(normalizeChapter.mock.calls[0]?.[0]).toMatchObject({
-        chapterContent: overlongRevision,
+        chapterContent: overlongDraft,
         lengthSpec: expect.objectContaining({
           target: 220,
         }),
       });
-      expect(auditChapter.mock.calls[1]?.[1]).toBe(normalizedRevision);
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -1859,7 +1850,7 @@ describe("PipelineRunner", () => {
     }
   });
 
-  it("uses the latest revised content as the input for follow-up spot-fix revisions", async () => {
+  it("feeds postWriteErrors into the scoring loop as extra issues", async () => {
     const { root, runner, bookId } = await createRunnerFixture();
 
     vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(
@@ -1876,39 +1867,40 @@ describe("PipelineRunner", () => {
         ],
       }),
     );
+    // First audit: postWriteErrors make it fail even though LLM says passed
+    // Second audit (after repair): clean
     vi.spyOn(ContinuityAuditor.prototype, "auditChapter")
       .mockResolvedValueOnce(createAuditResult({
-        passed: false,
-        issues: [CRITICAL_ISSUE],
-        summary: "needs another revision",
+        passed: true,
+        overallScore: 88,
+        issues: [],
+        summary: "LLM thinks clean but postWriteErrors will override",
       }))
       .mockResolvedValueOnce(createAuditResult({
         passed: true,
+        overallScore: 92,
         issues: [],
-        summary: "clean",
+        summary: "clean after fix",
       }));
     const reviseChapter = vi.spyOn(ReviserAgent.prototype, "reviseChapter")
       .mockResolvedValueOnce(createReviseOutput({
-        revisedContent: "After first fix.",
-        wordCount: "After first fix.".length,
-      }))
-      .mockResolvedValueOnce(createReviseOutput({
-        revisedContent: "After second fix.",
-        wordCount: "After second fix.".length,
+        revisedContent: "After auto fix.",
+        wordCount: "After auto fix.".length,
       }));
     vi.spyOn(WriterAgent.prototype, "saveChapter").mockResolvedValue(undefined);
     vi.spyOn(WriterAgent.prototype, "saveNewTruthFiles").mockResolvedValue(undefined);
     vi.spyOn(ChapterAnalyzerAgent.prototype, "analyzeChapter").mockResolvedValue(
       createAnalyzedOutput({
-        content: "After second fix.",
-        wordCount: "After second fix.".length,
+        content: "After auto fix.",
+        wordCount: "After auto fix.".length,
       }),
     );
 
     await runner.writeNextChapter(bookId);
 
-    expect(reviseChapter).toHaveBeenCalledTimes(2);
-    expect(reviseChapter.mock.calls[1]?.[1]).toBe("After first fix.");
+    // Reviser called via scoring loop (auto mode), not pre-audit spot-fix
+    expect(reviseChapter).toHaveBeenCalled();
+    expect(reviseChapter.mock.calls[0]?.[4]).toBe("auto");
 
     await rm(root, { recursive: true, force: true });
   });
@@ -1937,13 +1929,21 @@ describe("PipelineRunner", () => {
         ],
       }),
     );
-    vi.spyOn(ContinuityAuditor.prototype, "auditChapter").mockResolvedValue(
-      createAuditResult({
+    // First audit: postWriteErrors force passed=false, score 40 triggers loop
+    // Second audit: after repair, passes
+    vi.spyOn(ContinuityAuditor.prototype, "auditChapter")
+      .mockResolvedValueOnce(createAuditResult({
         passed: true,
+        overallScore: 40,
         issues: [],
-        summary: "clean",
-      }),
-    );
+        summary: "postWriteErrors will override passed",
+      }))
+      .mockResolvedValueOnce(createAuditResult({
+        passed: true,
+        overallScore: 95,
+        issues: [],
+        summary: "clean after fix",
+      }));
     vi.spyOn(ReviserAgent.prototype, "reviseChapter").mockResolvedValue(
       createReviseOutput({
         revisedContent: "Final revised body.",
@@ -2510,6 +2510,13 @@ describe("PipelineRunner", () => {
         tokenUsage: ZERO_USAGE,
       }),
     );
+    vi.spyOn(ReviserAgent.prototype, "reviseChapter").mockImplementation(
+      async (_bookDir, chapterContent) =>
+        createReviseOutput({
+          revisedContent: chapterContent,
+          wordCount: chapterContent.length,
+        }),
+    );
 
     const { root, runner, state, bookId } = await createRunnerFixture({
       inputGovernanceMode: "legacy",
@@ -2585,6 +2592,7 @@ describe("PipelineRunner", () => {
           passed: false,
           issues: [CRITICAL_ISSUE],
           summary: "needs revision",
+          overallScore: 40,
         }),
       )
       .mockResolvedValueOnce(
@@ -2592,6 +2600,7 @@ describe("PipelineRunner", () => {
           passed: true,
           issues: [],
           summary: "clean",
+          overallScore: 95,
         }),
       );
     vi.spyOn(ReviserAgent.prototype, "reviseChapter").mockResolvedValue(
@@ -3662,6 +3671,7 @@ describe("PipelineRunner", () => {
           passed: false,
           issues: [CRITICAL_ISSUE],
           summary: "needs revision",
+          overallScore: 40,
         }),
       )
       .mockResolvedValueOnce(
@@ -3669,6 +3679,7 @@ describe("PipelineRunner", () => {
           passed: true,
           issues: [],
           summary: "clean",
+          overallScore: 95,
         }),
       );
     vi.spyOn(ReviserAgent.prototype, "reviseChapter").mockResolvedValue(
@@ -3825,7 +3836,7 @@ describe("PipelineRunner", () => {
     }
   });
 
-  it("defaults manual reviseDraft to spot-fix when mode is omitted", async () => {
+  it("defaults manual reviseDraft to auto when mode is omitted", async () => {
     const { root, runner, state, bookId } = await createRunnerFixture();
     const storyDir = join(state.bookDir(bookId), "story");
     const chaptersDir = join(state.bookDir(bookId), "chapters");
@@ -3878,7 +3889,7 @@ describe("PipelineRunner", () => {
       await runner.reviseDraft(bookId, 1);
 
       expect(reviseChapter).toHaveBeenCalledTimes(1);
-      expect(reviseChapter.mock.calls[0]?.[4]).toBe("spot-fix");
+      expect(reviseChapter.mock.calls[0]?.[4]).toBe("auto");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

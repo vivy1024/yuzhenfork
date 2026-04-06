@@ -1215,9 +1215,8 @@ export class PipelineRunner {
       assertChapterContentNotEmpty: (content, stage) =>
         this.assertChapterContentNotEmpty(content, chapterNumber, stage),
       addUsage: PipelineRunner.addUsage,
-      restoreLostAuditIssues: (previous, next) => this.restoreLostAuditIssues(previous, next),
-      analyzeAITells,
-      analyzeSensitiveWords,
+      analyzeAITells: (content) => analyzeAITells(content, pipelineLang),
+      analyzeSensitiveWords: (content) => analyzeSensitiveWords(content, undefined, pipelineLang),
       logWarn: (message) => this.logWarn(pipelineLang, message),
       logStage: (message) => this.logStage(stageLanguage, message),
     });

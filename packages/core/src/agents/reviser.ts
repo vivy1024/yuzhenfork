@@ -17,9 +17,9 @@ import { applySpotFixPatches, parseSpotFixPatches } from "../utils/spot-fix-patc
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
-export type ReviseMode = "polish" | "rewrite" | "rework" | "anti-detect" | "spot-fix";
+export type ReviseMode = "auto" | "polish" | "rewrite" | "rework" | "anti-detect" | "spot-fix";
 
-export const DEFAULT_REVISE_MODE: ReviseMode = "spot-fix";
+export const DEFAULT_REVISE_MODE: ReviseMode = "auto";
 
 export interface ReviseOutput {
   readonly revisedContent: string;
@@ -36,6 +36,7 @@ export interface ReviseOutput {
 }
 
 const MODE_DESCRIPTIONS: Record<ReviseMode, string> = {
+  auto: "", // auto mode uses buildAutoSystemPrompt instead
   polish: "润色：只改表达、节奏、段落呼吸，不改事实与剧情结论。禁止：增删段落、改变人名/地名/物品名、增加新情节或新对话、改变因果关系。只允许：替换用词、调整句序、修改标点节奏",
   rewrite: "改写：允许重组问题段落、调整画面和叙述力度，但优先保留原文的绝大部分句段。除非问题跨越整章，否则禁止整章推倒重写；只能围绕问题段落及其直接上下文改写，同时保留核心事实与人物动机",
   rework: "重写：可重构场景推进和冲突组织，但不改主设定和大事件结果",
@@ -100,27 +101,31 @@ export class ReviserAgent extends BaseAgent {
       ? styleGuideRaw
       : (parsedRules?.body ?? "(无文风指南)");
 
-    const issueList = issues
-      .map((i) => `- [${i.severity}] ${i.category}: ${i.description}\n  建议: ${i.suggestion}`)
-      .join("\n");
-
-    const modeDesc = MODE_DESCRIPTIONS[mode];
-    const numericalRule = gp.numericalSystem
-      ? "\n3. 数值错误必须精确修正，前后对账"
-      : "";
-    const protagonistBlock = bookRules?.protagonist
-      ? `\n\n主角人设锁定：${bookRules.protagonist.name}，${bookRules.protagonist.personalityLock.join("、")}。修改不得违反人设。`
-      : "";
-    const lengthGuardrail = options?.lengthSpec
-      ? `\n8. 保持章节字数在目标区间内；只有在修复关键问题确实需要时才允许轻微偏离`
-      : "";
-
     const isEnglish = (bookLanguage ?? gp.language) === "en";
     const resolvedLanguage = isEnglish ? "en" : "zh";
+    const suggestionLabel = isEnglish ? "Suggestion" : "建议";
+
+    const issueList = issues
+      .map((i) => `- [${i.severity}] ${i.category}: ${i.description}\n  ${suggestionLabel}: ${i.suggestion}`)
+      .join("\n");
+
+    const numericalRule = gp.numericalSystem
+      ? (isEnglish
+          ? "\n3. Numerical errors must be fixed precisely — cross-check before and after"
+          : "\n3. 数值错误必须精确修正，前后对账")
+      : "";
+    const protagonistBlock = bookRules?.protagonist
+      ? (isEnglish
+          ? `\n\nProtagonist lock: ${bookRules.protagonist.name} — ${bookRules.protagonist.personalityLock.join(", ")}. Revisions must not violate the protagonist profile.`
+          : `\n\n主角人设锁定：${bookRules.protagonist.name}，${bookRules.protagonist.personalityLock.join("、")}。修改不得违反人设。`)
+      : "";
+    const lengthGuardrail = options?.lengthSpec
+      ? (isEnglish
+          ? "\n8. Keep the chapter word count within the target range; only allow minor deviation when fixing critical issues truly requires it"
+          : "\n8. 保持章节字数在目标区间内；只有在修复关键问题确实需要时才允许轻微偏离")
+      : "";
     const langPrefix = isEnglish
-      ? mode === "spot-fix"
-        ? `【LANGUAGE OVERRIDE】ALL output (FIXED_ISSUES, PATCHES, UPDATED_STATE, UPDATED_HOOKS) MUST be in English. Every TARGET_TEXT and REPLACEMENT_TEXT must be written entirely in English.\n\n`
-        : `【LANGUAGE OVERRIDE】ALL output (FIXED_ISSUES, REVISED_CONTENT, UPDATED_STATE, UPDATED_HOOKS) MUST be in English. The revised chapter content must be written entirely in English.\n\n`
+      ? `【LANGUAGE OVERRIDE】ALL output (FIXED_ISSUES, PATCHES, REVISED_CONTENT, UPDATED_STATE, UPDATED_HOOKS) MUST be in English.\n\n`
       : "";
     const governedMode = Boolean(options?.chapterIntent && options?.contextPackage && options?.ruleStack);
     const hooksWorkingSet = governedMode && options?.contextPackage
@@ -143,53 +148,9 @@ export class ReviserAgent extends BaseAgent {
         })
       : characterMatrix;
 
-    const outputFormat = mode === "spot-fix"
-      ? `=== FIXED_ISSUES ===
-(逐条说明修正了什么，一行一条；如果无法安全定点修复，也在这里说明)
-
-=== PATCHES ===
-(只输出需要替换的局部补丁，不得输出整章重写。格式如下，可重复多个 PATCH 区块)
---- PATCH 1 ---
-TARGET_TEXT:
-(必须从原文中精确复制、且能唯一命中的原句或原段)
-REPLACEMENT_TEXT:
-(替换后的局部文本)
---- END PATCH ---
-
-=== UPDATED_STATE ===
-(更新后的完整状态卡)
-${gp.numericalSystem ? "\n=== UPDATED_LEDGER ===\n(更新后的完整资源账本)" : ""}
-=== UPDATED_HOOKS ===
-(更新后的完整伏笔池)`
-      : `=== FIXED_ISSUES ===
-(逐条说明修正了什么，一行一条)
-
-=== REVISED_CONTENT ===
-(修正后的完整正文)
-
-=== UPDATED_STATE ===
-(更新后的完整状态卡)
-${gp.numericalSystem ? "\n=== UPDATED_LEDGER ===\n(更新后的完整资源账本)" : ""}
-=== UPDATED_HOOKS ===
-(更新后的完整伏笔池)`;
-
-    const systemPrompt = `${langPrefix}你是一位专业的${gp.name}网络小说修稿编辑。你的任务是根据审稿意见对章节进行修正。${protagonistBlock}
-
-修稿模式：${modeDesc}
-
-修稿原则：
-1. 按模式控制修改幅度
-2. 修根因，不做表面润色${numericalRule}
-4. 伏笔状态必须与伏笔池同步
-5. 不改变剧情走向和核心冲突
-6. 保持原文的语言风格和节奏
-7. 修改后同步更新状态卡${gp.numericalSystem ? "、账本" : ""}、伏笔池
-${lengthGuardrail}
-${mode === "spot-fix" ? "\n9. spot-fix 只能输出局部补丁，禁止输出整章改写；TARGET_TEXT 必须能在原文中唯一命中\n10. 如果需要大面积改写，说明无法安全 spot-fix，并让 PATCHES 留空" : ""}
-
-输出格式：
-
-${outputFormat}`;
+    const systemPrompt = mode === "auto"
+      ? this.buildAutoSystemPrompt({ langPrefix, gp, protagonistBlock, numericalRule, lengthGuardrail, resolvedLanguage })
+      : this.buildLegacySystemPrompt({ langPrefix, gp, protagonistBlock, numericalRule, lengthGuardrail, mode, resolvedLanguage });
 
     const ledgerBlock = gp.numericalSystem
       ? `\n## 资源账本\n${ledger}`
@@ -248,14 +209,12 @@ ${hookDebtBlock}${hooksBlock}${volumeSummariesBlock}${reducedControlBlock || out
 ## 待修正章节
 ${chapterContent}`;
 
-    const maxTokens = mode === "spot-fix" ? 8192 : 16384;
-
     const response = await this.chat(
       [
         { role: "system", content: systemPrompt },
         { role: "user", content: userPrompt },
       ],
-      { temperature: 0.3, maxTokens },
+      { temperature: 0.3, maxTokens: 16384 },
     );
 
     const output = this.parseOutput(response.content, gp, mode, chapterContent);
@@ -291,34 +250,198 @@ ${chapterContent}`;
       .map((l) => l.trim())
       .filter((l) => l.length > 0);
 
-    if (mode === "spot-fix") {
-      const patches = parseSpotFixPatches(extract("PATCHES"));
-      const patchResult = applySpotFixPatches(originalChapter, patches);
-
-      return {
-        revisedContent: patchResult.revisedContent,
-        wordCount: patchResult.revisedContent.length,
-        fixedIssues: patchResult.applied ? fixedIssues : [],
-        updatedState: extract("UPDATED_STATE") || "(状态卡未更新)",
-        updatedLedger: gp.numericalSystem
-          ? (extract("UPDATED_LEDGER") || "(账本未更新)")
-          : "",
-        updatedHooks: extract("UPDATED_HOOKS") || "(伏笔池未更新)",
-      };
-    }
-
-    const revisedContent = extract("REVISED_CONTENT");
-
-    return {
+    const makeResult = (revisedContent: string, applied: boolean): ReviseOutput => ({
       revisedContent,
       wordCount: revisedContent.length,
-      fixedIssues,
+      fixedIssues: applied ? fixedIssues : [],
       updatedState: extract("UPDATED_STATE") || "(状态卡未更新)",
       updatedLedger: gp.numericalSystem
         ? (extract("UPDATED_LEDGER") || "(账本未更新)")
         : "",
       updatedHooks: extract("UPDATED_HOOKS") || "(伏笔池未更新)",
-    };
+    });
+
+    // Auto mode: try PATCHES first, fall back to REVISED_CONTENT
+    if (mode === "auto") {
+      const patchesRaw = extract("PATCHES");
+      if (patchesRaw) {
+        const patches = parseSpotFixPatches(patchesRaw);
+        if (patches.length > 0) {
+          const patchResult = applySpotFixPatches(originalChapter, patches);
+          // Accept patches only if majority applied (≥ 50% success rate)
+          const successRate = patches.length > 0
+            ? patchResult.appliedPatchCount / patches.length
+            : 0;
+          if (patchResult.applied && successRate >= 0.5) {
+            return makeResult(patchResult.revisedContent, true);
+          }
+          // Low success rate or no patches applied — fall through to REVISED_CONTENT
+        }
+      }
+      const revisedContent = extract("REVISED_CONTENT");
+      if (revisedContent) {
+        return makeResult(revisedContent, true);
+      }
+      // Both empty — no fix
+      return makeResult(originalChapter, false);
+    }
+
+    // Legacy spot-fix mode: patches only
+    if (mode === "spot-fix") {
+      const patches = parseSpotFixPatches(extract("PATCHES"));
+      const patchResult = applySpotFixPatches(originalChapter, patches);
+      return makeResult(patchResult.revisedContent, patchResult.applied);
+    }
+
+    // Legacy rewrite/polish/rework/anti-detect: full content
+    const revisedContent = extract("REVISED_CONTENT");
+    return makeResult(revisedContent || originalChapter, revisedContent.length > 0);
+  }
+
+  private buildAutoSystemPrompt(params: {
+    langPrefix: string;
+    gp: GenreProfile;
+    protagonistBlock: string;
+    numericalRule: string;
+    lengthGuardrail: string;
+    resolvedLanguage: "zh" | "en";
+  }): string {
+    const { langPrefix, gp, protagonistBlock, numericalRule, lengthGuardrail, resolvedLanguage } = params;
+    const en = resolvedLanguage === "en";
+    const ledgerSection = gp.numericalSystem
+      ? (en ? "\n=== UPDATED_LEDGER ===\n(Full updated resource ledger)" : "\n=== UPDATED_LEDGER ===\n(更新后的完整资源账本)")
+      : "";
+
+    return en
+      ? `${langPrefix}You are a professional ${gp.name} web-fiction revision editor. Fix the chapter according to the review notes.${protagonistBlock}
+
+Revision principles:
+1. For local issues (wording, small continuity errors, AI-tell phrases), output PATCHES — surgical replacements that leave the rest of the chapter untouched
+2. For structural issues (pacing collapse, major timeline errors, severe length deviation), output REVISED_CONTENT — a full rewrite of the chapter
+3. Prefer PATCHES whenever possible. Only use REVISED_CONTENT when local patches cannot fix the problem
+4. Fix root causes — do not apply superficial polish${numericalRule}
+5. Hook status must stay in sync with the hooks board. If hook debt briefs are provided, preserve hook payoff scenes
+6. Do not alter the plot direction or core conflicts
+7. Preserve the original language style, rhythm, and pacing — do not compress transitional scenes or remove breathing room${lengthGuardrail}
+
+Each PATCH's TARGET_TEXT should quote the passage you want to change — it can be a sentence, a paragraph, or multiple paragraphs, whatever the problem requires. Do not artificially constrain patch scope.
+
+Output format:
+
+=== FIXED_ISSUES ===
+(List each fix on its own line; if a safe local fix is not possible, explain here)
+
+=== PATCHES ===
+(Output local patches if applicable. Omit this section entirely if using REVISED_CONTENT)
+--- PATCH 1 ---
+TARGET_TEXT:
+(Exact quote from the original that identifies the passage to change)
+REPLACEMENT_TEXT:
+(Replacement text for this passage)
+--- END PATCH ---
+
+=== REVISED_CONTENT ===
+(Full revised chapter content — only when PATCHES cannot solve the problem. Omit this section if using PATCHES)
+
+=== UPDATED_STATE ===
+(Full updated state card)
+${ledgerSection}
+=== UPDATED_HOOKS ===
+(Full updated hooks board)`
+      : `${langPrefix}你是一位专业的${gp.name}网络小说修稿编辑。你的任务是根据审稿意见对章节进行修正。${protagonistBlock}
+
+修稿原则：
+1. 局部问题（措辞、小的连续性错误、AI痕迹用词），输出 PATCHES——定点替换，不碰无关段落
+2. 结构性问题（节奏坍塌、严重时间线错误、字数严重偏离），输出 REVISED_CONTENT——整章重写
+3. 优先使用 PATCHES。只有局部修复确实无法解决问题时才用 REVISED_CONTENT
+4. 修根因，不做表面润色${numericalRule}
+5. 伏笔状态必须与伏笔池同步。如果提供了 Hook Debt 简报，必须保留伏笔兑现段落
+6. 不改变剧情走向和核心冲突
+7. 保持原文的语言风格、节奏和呼吸——不要压缩过渡段、不要删掉减速段${lengthGuardrail}
+
+每个 PATCH 的 TARGET_TEXT 引用你要修改的段落——可以是一句话、一段、或多段，由问题范围决定。不要人为限制修改范围。
+
+输出格式：
+
+=== FIXED_ISSUES ===
+(逐条说明修正了什么，一行一条；如果无法安全局部修复，也在这里说明)
+
+=== PATCHES ===
+(输出局部补丁。如果使用 REVISED_CONTENT 则完全省略此区块)
+--- PATCH 1 ---
+TARGET_TEXT:
+(从原文中精确引用要修改的段落)
+REPLACEMENT_TEXT:
+(替换后的文本)
+--- END PATCH ---
+
+=== REVISED_CONTENT ===
+(修正后的完整正文——仅在 PATCHES 无法解决问题时使用。如果使用 PATCHES 则完全省略此区块)
+
+=== UPDATED_STATE ===
+(更新后的完整状态卡)
+${ledgerSection}
+=== UPDATED_HOOKS ===
+(更新后的完整伏笔池)`;
+  }
+
+  private buildLegacySystemPrompt(params: {
+    langPrefix: string;
+    gp: GenreProfile;
+    protagonistBlock: string;
+    numericalRule: string;
+    lengthGuardrail: string;
+    mode: ReviseMode;
+    resolvedLanguage: "zh" | "en";
+  }): string {
+    const { langPrefix, gp, protagonistBlock, numericalRule, lengthGuardrail, mode } = params;
+    const modeDesc = MODE_DESCRIPTIONS[mode];
+    const outputFormat = mode === "spot-fix"
+      ? `=== FIXED_ISSUES ===
+(逐条说明修正了什么，一行一条；如果无法安全定点修复，也在这里说明)
+
+=== PATCHES ===
+--- PATCH 1 ---
+TARGET_TEXT:
+(必须从原文中精确复制、且能唯一命中的原句或原段)
+REPLACEMENT_TEXT:
+(替换后的局部文本)
+--- END PATCH ---
+
+=== UPDATED_STATE ===
+(更新后的完整状态卡)
+${gp.numericalSystem ? "\n=== UPDATED_LEDGER ===\n(更新后的完整资源账本)" : ""}
+=== UPDATED_HOOKS ===
+(更新后的完整伏笔池)`
+      : `=== FIXED_ISSUES ===
+(逐条说明修正了什么，一行一条)
+
+=== REVISED_CONTENT ===
+(修正后的完整正文)
+
+=== UPDATED_STATE ===
+(更新后的完整状态卡)
+${gp.numericalSystem ? "\n=== UPDATED_LEDGER ===\n(更新后的完整资源账本)" : ""}
+=== UPDATED_HOOKS ===
+(更新后的完整伏笔池)`;
+
+    return `${langPrefix}你是一位专业的${gp.name}网络小说修稿编辑。你的任务是根据审稿意见对章节进行修正。${protagonistBlock}
+
+修稿模式：${modeDesc}
+
+修稿原则：
+1. 按模式控制修改幅度
+2. 修根因，不做表面润色${numericalRule}
+4. 伏笔状态必须与伏笔池同步
+5. 不改变剧情走向和核心冲突
+6. 保持原文的语言风格和节奏
+7. 修改后同步更新状态卡${gp.numericalSystem ? "、账本" : ""}、伏笔池
+${lengthGuardrail}
+${mode === "spot-fix" ? "\n9. spot-fix 只能输出局部补丁，禁止输出整章改写；TARGET_TEXT 必须能在原文中唯一命中\n10. 如果需要大面积改写，说明无法安全 spot-fix，并让 PATCHES 留空" : ""}
+
+输出格式：
+
+${outputFormat}`;
   }
 
   private async readFileSafe(path: string): Promise<string> {

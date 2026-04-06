@@ -88,7 +88,6 @@ describe("ReviserAgent", () => {
       const systemPrompt = messages?.[0]?.content ?? "";
 
       expect(systemPrompt).toContain("MUST be in English");
-      expect(systemPrompt).toContain("written entirely in English");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
