@@ -1177,6 +1177,9 @@ export class PipelineRunner {
       wordCount ?? book.chapterWordCount,
       pipelineLang,
     );
+    const { validatePostWrite: postWriteValidate } = await import("../agents/post-write-validator.js");
+    const { readBookRules } = await import("../agents/rules-reader.js");
+    const parsedBookRules = (await readBookRules(bookDir))?.rules ?? null;
 
     // 1. Write chapter
     const writer = new WriterAgent(this.agentCtxFor("writer", bookId));
@@ -1217,6 +1220,16 @@ export class PipelineRunner {
       addUsage: PipelineRunner.addUsage,
       analyzeAITells: (content) => analyzeAITells(content, pipelineLang),
       analyzeSensitiveWords: (content) => analyzeSensitiveWords(content, undefined, pipelineLang),
+      runPostWriteChecks: (content) => {
+        return postWriteValidate(content, gp, parsedBookRules, pipelineLang)
+          .filter((v) => v.severity === "error")
+          .map((v) => ({
+            severity: "critical" as const,
+            category: v.rule,
+            description: v.description,
+            suggestion: v.suggestion,
+          }));
+      },
       logWarn: (message) => this.logWarn(pipelineLang, message),
       logStage: (message) => this.logStage(stageLanguage, message),
     });

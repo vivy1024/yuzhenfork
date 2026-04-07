@@ -87,9 +87,14 @@ describe("runChapterReviewCycle v9", () => {
       createReviser: () => ({ reviseChapter }),
       auditor: { auditChapter },
       normalizeDraftLengthIfNeeded,
+      // Simulates: the reviser fixed the chapter-ref, so re-check returns empty
+      runPostWriteChecks: (content) =>
+        content === "b".repeat(200)
+          ? [{ severity: "critical" as const, category: "chapter-number-reference", description: "contains chapter ref", suggestion: "remove it" }]
+          : [],
     });
 
-    // postWriteErrors should appear in first audit issues
+    // After repair, postWriteChecks on the revised content returns empty → issue gone
     expect(result.auditResult.issues.some(i => i.category === "chapter-number-reference")).toBe(false);
     // The loop should have run at least once to fix the critical postWriteError
     expect(reviseChapter).toHaveBeenCalled();

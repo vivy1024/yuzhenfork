@@ -304,26 +304,22 @@ ${chapterContent}`;
       updatedHooks: extract("UPDATED_HOOKS") || "(伏笔池未更新)",
     });
 
-    // Auto mode: try PATCHES first, fall back to REVISED_CONTENT
+    // Auto mode: REVISED_CONTENT takes priority (whole-chapter fix),
+    // PATCHES only used when REVISED_CONTENT is absent (local-only fix).
     if (mode === "auto") {
+      const revisedContent = extract("REVISED_CONTENT");
+      if (revisedContent) {
+        return makeResult(revisedContent, true);
+      }
       const patchesRaw = extract("PATCHES");
       if (patchesRaw) {
         const patches = parseSpotFixPatches(patchesRaw);
         if (patches.length > 0) {
           const patchResult = applySpotFixPatches(originalChapter, patches);
-          // Accept patches only if majority applied (≥ 50% success rate)
-          const successRate = patches.length > 0
-            ? patchResult.appliedPatchCount / patches.length
-            : 0;
-          if (patchResult.applied && successRate >= 0.5) {
+          if (patchResult.applied && patchResult.appliedPatchCount / patches.length >= 0.5) {
             return makeResult(patchResult.revisedContent, true);
           }
-          // Low success rate or no patches applied — fall through to REVISED_CONTENT
         }
-      }
-      const revisedContent = extract("REVISED_CONTENT");
-      if (revisedContent) {
-        return makeResult(revisedContent, true);
       }
       // Both empty — no fix
       return makeResult(originalChapter, false);

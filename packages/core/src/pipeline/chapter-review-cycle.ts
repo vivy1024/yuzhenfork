@@ -93,6 +93,8 @@ export async function runChapterReviewCycle(params: {
     found: ReadonlyArray<{ severity: string }>;
     issues: ReadonlyArray<AuditIssue>;
   };
+  /** Re-run deterministic post-write checks (chapter-ref, paragraph shape, etc.) on any content. */
+  readonly runPostWriteChecks?: (content: string) => ReadonlyArray<AuditIssue>;
   readonly logWarn: (message: { zh: string; en: string }) => void;
   readonly logStage: (message: { zh: string; en: string }) => void;
 }): Promise<ChapterReviewCycleResult> {
@@ -101,10 +103,8 @@ export async function runChapterReviewCycle(params: {
   let finalContent = params.initialOutput.content;
   let finalWordCount = params.initialOutput.wordCount;
 
-  // Convert postWriteErrors into AuditIssues to feed into the first assessment.
-  // These are deterministic structural violations (chapter-ref, paragraph shape, etc.)
-  // that the LLM auditor might not catch on its own.
-  const postWriteExtraIssues: ReadonlyArray<AuditIssue> = params.initialOutput.postWriteErrors.map((violation) => ({
+  // Convert initial postWriteErrors into AuditIssues as fallback when runPostWriteChecks isn't provided.
+  const initialPostWriteIssues: ReadonlyArray<AuditIssue> = params.initialOutput.postWriteErrors.map((violation) => ({
     severity: "critical" as const,
     category: violation.rule,
     description: violation.description,
@@ -147,7 +147,7 @@ export async function runChapterReviewCycle(params: {
   // ---------------------------------------------------------------------------
   const assess = async (
     content: string,
-    options?: { temperature?: number; extraIssues?: ReadonlyArray<AuditIssue> },
+    options?: { temperature?: number },
   ): Promise<{ auditResult: AuditResult; score: number; lengthInRange: boolean }> => {
     const llmAudit = await params.auditor.auditChapter(
       params.bookDir,
@@ -165,19 +165,25 @@ export async function runChapterReviewCycle(params: {
     const wordCount = countChapterLength(content, params.lengthSpec.countingMode);
     const lengthInRange = !isOutsideSoftRange(wordCount, params.lengthSpec);
 
+    // Deterministic post-write checks: run every round, not just the first.
+    // If runPostWriteChecks is provided, use it; otherwise fall back to initial postWriteErrors.
+    const postWriteIssues = params.runPostWriteChecks
+      ? params.runPostWriteChecks(content)
+      : initialPostWriteIssues;
+
     const allIssues: AuditIssue[] = [
       ...llmAudit.issues,
       ...aiTellsResult.issues,
       ...sensitiveResult.issues,
-      ...(options?.extraIssues ?? []),
+      ...postWriteIssues,
     ];
 
     // Length is NOT added to reviser issues — normalize handles it as a dedicated step.
     // lengthInRange is only used in isPassed() as a hard gate.
 
-    const hasExtraCritical = (options?.extraIssues ?? []).some((i) => i.severity === "critical");
+    const hasPostWriteCritical = postWriteIssues.some((i) => i.severity === "critical");
     const auditResult: AuditResult = {
-      passed: (hasBlockedWords || hasExtraCritical) ? false : llmAudit.passed,
+      passed: (hasBlockedWords || hasPostWriteCritical) ? false : llmAudit.passed,
       issues: allIssues,
       summary: llmAudit.summary,
       overallScore: llmAudit.overallScore,
@@ -195,9 +201,7 @@ export async function runChapterReviewCycle(params: {
   // Scoring loop: assess → revise → assess, max 3 iterations, pick best
   // ---------------------------------------------------------------------------
   params.logStage({ zh: "审计草稿", en: "auditing draft" });
-  const initial = await assess(finalContent, {
-    extraIssues: postWriteExtraIssues.length > 0 ? postWriteExtraIssues : undefined,
-  });
+  const initial = await assess(finalContent);
 
   const snapshots: ReviewSnapshot[] = [{
     content: finalContent,
