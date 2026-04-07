@@ -159,7 +159,9 @@ export class ReviserAgent extends BaseAgent {
           ? `\n\nProtagonist lock: ${bookRules.protagonist.name} — ${bookRules.protagonist.personalityLock.join(", ")}. Revisions must not violate the protagonist profile.`
           : `\n\n主角人设锁定：${bookRules.protagonist.name}，${bookRules.protagonist.personalityLock.join("、")}。修改不得违反人设。`)
       : "";
-    const lengthGuardrail = options?.lengthSpec
+    // Length guardrail only used by legacy modes (manual CLI revise).
+    // Auto mode delegates length to normalize, not reviser.
+    const lengthGuardrail = mode !== "auto" && options?.lengthSpec
       ? (isEnglish
           ? "\n8. Keep the chapter word count within the target range; only allow minor deviation when fixing critical issues truly requires it"
           : "\n8. 保持章节字数在目标区间内；只有在修复关键问题确实需要时才允许轻微偏离")
@@ -229,7 +231,8 @@ export class ReviserAgent extends BaseAgent {
     const reducedControlBlock = options?.chapterIntent && options.contextPackage && options.ruleStack
       ? this.buildReducedControlBlock(options.chapterIntent, options.contextPackage, options.ruleStack)
       : "";
-    const lengthGuidanceBlock = options?.lengthSpec
+    // Length guardrail only in legacy modes — auto mode delegates length to normalize.
+    const lengthGuidanceBlock = mode !== "auto" && options?.lengthSpec
       ? `\n## 字数护栏\n目标字数：${options.lengthSpec.target}\n允许区间：${options.lengthSpec.softMin}-${options.lengthSpec.softMax}\n极限区间：${options.lengthSpec.hardMin}-${options.lengthSpec.hardMax}\n如果修正后超出允许区间，请优先压缩冗余解释、重复动作和弱信息句，不得新增支线或删掉核心事实。\n`
       : "";
     const styleGuideBlock = reducedControlBlock.length === 0
