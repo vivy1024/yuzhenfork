@@ -85,6 +85,35 @@ describe("interact command", () => {
     expect(parsed.session.automationMode).toBe("auto");
   });
 
+  it("accepts --message as an explicit OpenClaw-friendly input channel", async () => {
+    const runInteraction = vi.fn(async () => ({
+      request: { intent: "continue_book" },
+      responseText: "Continuing via --message.",
+      session: {
+        activeBookId: "harbor",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      },
+    }));
+
+    const program = createProgram({
+      runInteraction,
+      readInteractionInput: async () => "",
+    });
+
+    await program.parseAsync(["interact", "--book", "harbor", "--message", "continue current book"], {
+      from: "user",
+    });
+
+    expect(runInteraction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: "continue current book",
+        activeBookId: "harbor",
+      }),
+    );
+  });
+
   it("reads the message from stdin when no args are provided", async () => {
     const runInteraction = vi.fn(async () => ({
       request: { intent: "explain_status" },

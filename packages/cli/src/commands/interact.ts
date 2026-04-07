@@ -29,8 +29,14 @@ export interface InteractCommandHooks {
 
 async function readInteractionInput(
   args: ReadonlyArray<string>,
+  explicitMessage: string | undefined,
   readInput?: () => Promise<string>,
 ): Promise<string> {
+  const explicit = explicitMessage?.trim();
+  if (explicit) {
+    return explicit;
+  }
+
   const inline = args.join(" ").trim();
   if (inline) {
     return inline;
@@ -61,10 +67,11 @@ export function createInteractCommand(hooks: InteractCommandHooks = {}): Command
   return new Command("interact")
     .description("Run a shared natural-language interaction against the current project")
     .argument("[message...]", "Natural-language message")
+    .option("--message <text>", "Explicit natural-language message")
     .option("--book <bookId>", "Bind a specific active book for this interaction")
     .option("--json", "Emit structured JSON for external agents")
     .action(async (messageArgs: ReadonlyArray<string>, opts) => {
-      const input = await readInteractionInput(messageArgs, hooks.readInput);
+      const input = await readInteractionInput(messageArgs, opts.message, hooks.readInput);
       const projectRoot = process.cwd();
       const tools = hooks.createTools
         ? await hooks.createTools(projectRoot)
