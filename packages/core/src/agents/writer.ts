@@ -34,6 +34,11 @@ import type { RuntimeStateSnapshot } from "../state/state-reducer.js";
 import { parsePendingHooksMarkdown } from "../utils/memory-retrieval.js";
 import { analyzeHookHealth } from "../utils/hook-health.js";
 import { buildEnglishVarianceBrief } from "../utils/long-span-fatigue.js";
+import {
+  buildNarrativeIntentBrief,
+  renderNarrativeSelectedContext,
+  sanitizeNarrativeEvidenceBlock,
+} from "../utils/narrative-control.js";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -814,13 +819,11 @@ ${lengthRequirementBlock}
     readonly varianceBrief?: string;
     readonly selectedEvidenceBlock?: string;
   }): string {
-    const contextSections = params.contextPackage.selectedContext
-      .map((entry) => [
-        `### ${entry.source}`,
-        `- reason: ${entry.reason}`,
-        entry.excerpt ? `- excerpt: ${entry.excerpt}` : "",
-      ].filter(Boolean).join("\n"))
-      .join("\n\n");
+    const language = params.language ?? "zh";
+    const contextSections = renderNarrativeSelectedContext(
+      params.contextPackage.selectedContext,
+      language,
+    );
 
     const overrideLines = params.ruleStack.activeOverrides.length > 0
       ? params.ruleStack.activeOverrides
@@ -840,25 +843,19 @@ ${lengthRequirementBlock}
       ? `\n${params.varianceBrief}\n`
       : "";
     const selectedEvidenceBlock = params.selectedEvidenceBlock
-      ? `\n${params.selectedEvidenceBlock}\n`
+      ? `\n${sanitizeNarrativeEvidenceBlock(params.selectedEvidenceBlock, language)}\n`
       : "";
-    const explicitHookAgenda = this.extractMarkdownSection(params.chapterIntent, "## Hook Agenda");
-    const hookAgendaBlock = explicitHookAgenda
-      ? params.language === "en"
-        ? `\n## Explicit Hook Agenda\n${explicitHookAgenda}\n`
-        : `\n## 显式 Hook Agenda\n${explicitHookAgenda}\n`
-      : "";
+    const narrativeIntent = buildNarrativeIntentBrief(params.chapterIntent, language);
 
     if (params.language === "en") {
       return `Write chapter ${params.chapterNumber}.
 
 ## Chapter Intent
-${params.chapterIntent}
+${narrativeIntent || "(none)"}
 
 ## Selected Context
 ${contextSections || "(none)"}
 ${selectedEvidenceBlock}
-${hookAgendaBlock}
 
 ## Rule Stack
 - Hard: ${params.ruleStack.sections.hard.join(", ") || "(none)"}
@@ -880,12 +877,11 @@ ${lengthRequirementBlock}
     return `请续写第${params.chapterNumber}章。
 
 ## 本章意图
-${params.chapterIntent}
+${narrativeIntent || "(无)"}
 
 ## 已选上下文
 ${contextSections || "(无)"}
 ${selectedEvidenceBlock}
-${hookAgendaBlock}
 
 ## 规则栈
 - 硬护栏：${params.ruleStack.sections.hard.join("、") || "(无)"}
@@ -924,47 +920,24 @@ ${lengthRequirementBlock}
     return joined || undefined;
   }
 
-  private extractMarkdownSection(content: string, heading: string): string | undefined {
-    const lines = content.split("\n");
-    let buffer: string[] | null = null;
-
-    for (const line of lines) {
-      if (line.trim() === heading) {
-        buffer = [];
-        continue;
-      }
-
-      if (buffer && line.startsWith("## ") && line.trim() !== heading) {
-        break;
-      }
-
-      if (buffer) {
-        buffer.push(line);
-      }
-    }
-
-    const section = buffer?.join("\n").trim();
-    return section && section.length > 0 ? section : undefined;
-  }
-
   private buildSettlerGovernedControlBlock(
     chapterIntent: string,
     contextPackage: ContextPackage,
     ruleStack: RuleStack,
     language: "zh" | "en",
   ): string {
-    const selectedContext = contextPackage.selectedContext
-      .map((entry) => `- ${entry.source}: ${entry.reason}${entry.excerpt ? ` | ${entry.excerpt}` : ""}`)
-      .join("\n");
+    const selectedContext = renderNarrativeSelectedContext(contextPackage.selectedContext, language)
+      .replace(/^### /gm, "- ");
     const overrides = ruleStack.activeOverrides.length > 0
       ? ruleStack.activeOverrides
         .map((override) => `- ${override.from} -> ${override.to}: ${override.reason} (${override.target})`)
         .join("\n")
       : "- none";
+    const narrativeIntent = buildNarrativeIntentBrief(chapterIntent, language);
 
     if (language === "en") {
       return `\n## Chapter Control Inputs
-${chapterIntent}
+${narrativeIntent || "(none)"}
 
 ### Selected Context
 ${selectedContext || "- none"}
@@ -979,7 +952,7 @@ ${overrides}\n`;
     }
 
     return `\n## 本章控制输入
-${chapterIntent}
+${narrativeIntent || "(无)"}
 
 ### 已选上下文
 ${selectedContext || "- none"}

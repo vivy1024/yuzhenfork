@@ -1077,7 +1077,7 @@ describe("WriterAgent", () => {
     }
   });
 
-  it("renders an explicit hook agenda block and removes placeholder hook ids from the governed write contract", async () => {
+  it("sanitizes governed control inputs so raw hook ids and control headings do not enter the creative prompt", async () => {
     const root = await mkdtemp(join(tmpdir(), "inkos-writer-hook-agenda-test-"));
     const bookDir = join(root, "book");
     const storyDir = join(bookDir, "story");
@@ -1174,6 +1174,10 @@ describe("WriterAgent", () => {
           "## Goal",
           "Push Mara back toward the archive ledger.",
           "",
+          "## Must Avoid",
+          "- 不要写成前几章回顾",
+          "- 本章要做的是推进 ledger-fragment，但不要把 H001/H002 写进正文",
+          "",
           "## Hook Agenda",
           "### Must Advance",
           "- mentor-oath",
@@ -1215,11 +1219,16 @@ describe("WriterAgent", () => {
 
       expect(systemPrompt).not.toContain("Hook-A / Hook-B");
       expect(systemPrompt).toContain("真实 hook_id");
-      expect(creativePrompt).toContain("## Explicit Hook Agenda");
-      expect(creativePrompt).toContain("mentor-oath");
-      expect(creativePrompt).toContain("ledger-fragment");
-      expect(creativePrompt).toContain("stale-ledger");
-      expect(creativePrompt).toContain("relationship");
+      expect(creativePrompt).not.toContain("## Explicit Hook Agenda");
+      expect(creativePrompt).not.toContain("## Hook Agenda");
+      expect(creativePrompt).not.toContain("mentor-oath");
+      expect(creativePrompt).not.toContain("ledger-fragment");
+      expect(creativePrompt).not.toContain("stale-ledger");
+      expect(creativePrompt).not.toContain("H001");
+      expect(creativePrompt).not.toContain("H002");
+      expect(creativePrompt).not.toContain("前几章");
+      expect(creativePrompt).not.toContain("本章要做的");
+      expect(creativePrompt).toContain("Push Mara back toward the archive ledger.");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

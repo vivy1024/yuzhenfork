@@ -299,6 +299,246 @@ describe("ReviserAgent", () => {
     }
   });
 
+  it("ignores REVISED_CONTENT for auto mode when issues are local-only and PATCHES are available", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inkos-reviser-auto-local-only-test-"));
+    const bookDir = join(root, "book");
+    await mkdir(join(bookDir, "story"), { recursive: true });
+
+    const agent = new ReviserAgent({
+      client: {
+        provider: "openai",
+        apiFormat: "chat",
+        stream: false,
+        defaults: {
+          temperature: 0.7,
+          maxTokens: 4096,
+          thinkingBudget: 0, maxTokensCap: null,
+          extra: {},
+        },
+      },
+      model: "test-model",
+      projectRoot: root,
+    });
+
+    vi.spyOn(ReviserAgent.prototype as never, "chat" as never).mockResolvedValue({
+      content: [
+        "=== FIXED_ISSUES ===",
+        "- removed the AI tell",
+        "",
+        "=== PATCHES ===",
+        "--- PATCH 1 ---",
+        "TARGET_TEXT:",
+        "他仿佛听见门外有响动。",
+        "REPLACEMENT_TEXT:",
+        "他听见门外像有一点轻响。",
+        "--- END PATCH ---",
+        "",
+        "=== REVISED_CONTENT ===",
+        "整章重写后的版本，不应该被局部问题采用。",
+        "",
+        "=== UPDATED_STATE ===",
+        "状态卡",
+        "",
+        "=== UPDATED_HOOKS ===",
+        "伏笔池",
+      ].join("\n"),
+      usage: ZERO_USAGE,
+    });
+
+    try {
+      const result = await agent.reviseChapter(
+        bookDir,
+        "他仿佛听见门外有响动。\n\n他没有回头。",
+        1,
+        [{
+          severity: "warning",
+          category: "套话密度",
+          description: "仿佛用得太直接",
+          suggestion: "改成更具体的感官描写",
+        }],
+        "auto",
+        "xuanhuan",
+      );
+
+      expect(result.revisedContent).toContain("他听见门外像有一点轻响。");
+      expect(result.revisedContent).not.toContain("整章重写后的版本");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps REVISED_CONTENT available for auto mode when issues are whole-chapter", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inkos-reviser-auto-whole-chapter-test-"));
+    const bookDir = join(root, "book");
+    await mkdir(join(bookDir, "story"), { recursive: true });
+
+    const agent = new ReviserAgent({
+      client: {
+        provider: "openai",
+        apiFormat: "chat",
+        stream: false,
+        defaults: {
+          temperature: 0.7,
+          maxTokens: 4096,
+          thinkingBudget: 0, maxTokensCap: null,
+          extra: {},
+        },
+      },
+      model: "test-model",
+      projectRoot: root,
+    });
+
+    vi.spyOn(ReviserAgent.prototype as never, "chat" as never).mockResolvedValue({
+      content: [
+        "=== FIXED_ISSUES ===",
+        "- restructured chapter pacing",
+        "",
+        "=== PATCHES ===",
+        "--- PATCH 1 ---",
+        "TARGET_TEXT:",
+        "第一段。",
+        "REPLACEMENT_TEXT:",
+        "第一段（局部修补）。",
+        "--- END PATCH ---",
+        "",
+        "=== REVISED_CONTENT ===",
+        "整章重写后的版本，处理了整体节奏与结构。",
+        "",
+        "=== UPDATED_STATE ===",
+        "状态卡",
+        "",
+        "=== UPDATED_HOOKS ===",
+        "伏笔池",
+      ].join("\n"),
+      usage: ZERO_USAGE,
+    });
+
+    try {
+      const result = await agent.reviseChapter(
+        bookDir,
+        "第一段。\n\n第二段。\n\n第三段。",
+        1,
+        [{
+          severity: "critical",
+          category: "Outline Drift Check",
+          description: "整章结构已经偏离",
+          suggestion: "重建当前章节奏与组织",
+        }],
+        "auto",
+        "xuanhuan",
+      );
+
+      expect(result.revisedContent).toContain("整章重写后的版本");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("sanitizes reduced governed control input so raw hook ids and source labels do not enter reviser prompts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "inkos-reviser-governed-sanitize-test-"));
+    const bookDir = join(root, "book");
+    await mkdir(join(bookDir, "story"), { recursive: true });
+
+    const agent = new ReviserAgent({
+      client: {
+        provider: "openai",
+        apiFormat: "chat",
+        stream: false,
+        defaults: {
+          temperature: 0.7,
+          maxTokens: 4096,
+          thinkingBudget: 0, maxTokensCap: null,
+          extra: {},
+        },
+      },
+      model: "test-model",
+      projectRoot: root,
+    });
+
+    const chatSpy = vi.spyOn(ReviserAgent.prototype as never, "chat" as never).mockResolvedValue({
+      content: [
+        "=== FIXED_ISSUES ===",
+        "- fixed",
+        "",
+        "=== PATCHES ===",
+        "--- PATCH 1 ---",
+        "TARGET_TEXT:",
+        "原始正文。",
+        "REPLACEMENT_TEXT:",
+        "修订后的正文。",
+        "--- END PATCH ---",
+        "",
+        "=== UPDATED_STATE ===",
+        "状态卡",
+        "",
+        "=== UPDATED_HOOKS ===",
+        "伏笔池",
+      ].join("\n"),
+      usage: ZERO_USAGE,
+    });
+
+    try {
+      await agent.reviseChapter(
+        bookDir,
+        "原始正文。",
+        1,
+        [CRITICAL_ISSUE],
+        "auto",
+        "xuanhuan",
+        {
+          chapterIntent: [
+            "# Chapter Intent",
+            "",
+            "## Goal",
+            "Bring the focus back to the mentor oath conflict.",
+            "",
+            "## Must Avoid",
+            "- 前几章回顾式总结",
+            "- 本章要做的是把 H001/H002 推下去",
+            "",
+            "## Hook Agenda",
+            "### Resolve",
+            "- H001",
+            "",
+            "### Advance",
+            "- H002",
+          ].join("\n"),
+          contextPackage: {
+            chapter: 1,
+            selectedContext: [
+              {
+                source: "runtime/hook_debt#H001",
+                reason: "Narrative debt brief with original seed text for this hook agenda target.",
+                excerpt: "H001 | original seed (ch1): the oath debt first surfaced",
+              },
+            ],
+          },
+          ruleStack: {
+            layers: [{ id: "L4", name: "current_task", precedence: 70, scope: "local" }],
+            sections: {
+              hard: ["current_state"],
+              soft: ["current_focus"],
+              diagnostic: ["continuity_audit"],
+            },
+            overrideEdges: [],
+            activeOverrides: [],
+          },
+        },
+      );
+
+      const userPrompt = (chatSpy.mock.calls[0]?.[0] as ReadonlyArray<{ content: string }> | undefined)?.[1]?.content ?? "";
+      expect(userPrompt).not.toContain("runtime/hook_debt#H001");
+      expect(userPrompt).not.toContain("## Hook Agenda");
+      expect(userPrompt).not.toContain("H001");
+      expect(userPrompt).not.toContain("H002");
+      expect(userPrompt).not.toContain("前几章");
+      expect(userPrompt).not.toContain("本章要做的");
+      expect(userPrompt).toContain("Bring the focus back to the mentor oath conflict.");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("uses selected summary and hook evidence instead of full long-history markdown in governed mode", async () => {
     const root = await mkdtemp(join(tmpdir(), "inkos-reviser-governed-test-"));
     const bookDir = join(root, "book");
@@ -452,10 +692,12 @@ describe("ReviserAgent", () => {
         | undefined;
       const userPrompt = messages?.[1]?.content ?? "";
 
-      expect(userPrompt).toContain("story/chapter_summaries.md#99");
-      expect(userPrompt).toContain("story/pending_hooks.md#mentor-oath");
-      expect(userPrompt).toContain("story/story_bible.md");
-      expect(userPrompt).toContain("story/volume_outline.md");
+      expect(userPrompt).not.toContain("story/chapter_summaries.md#99");
+      expect(userPrompt).not.toContain("story/pending_hooks.md#mentor-oath");
+      expect(userPrompt).not.toContain("story/story_bible.md");
+      expect(userPrompt).not.toContain("story/volume_outline.md");
+      expect(userPrompt).toContain("The jade seal cannot be destroyed.");
+      expect(userPrompt).toContain("Track the mentor oath fallout.");
       expect(userPrompt).not.toContain("| 1 | Guild Trail |");
       expect(userPrompt).not.toContain("guild-route | 1 | mystery");
       expect(userPrompt).not.toContain("Guildmaster Ren secretly forged the harbor roster in chapter 140.");

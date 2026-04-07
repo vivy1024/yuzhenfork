@@ -14,6 +14,11 @@ import {
   mergeTableMarkdownByKey,
 } from "../utils/governed-working-set.js";
 import { applySpotFixPatches, parseSpotFixPatches } from "../utils/spot-fix-patches.js";
+import {
+  buildNarrativeIntentBrief,
+  renderNarrativeSelectedContext,
+  sanitizeNarrativeEvidenceBlock,
+} from "../utils/narrative-control.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
@@ -34,6 +39,8 @@ export interface ReviseOutput {
     readonly totalTokens: number;
   };
 }
+
+type AutoOutputMode = "patch-only" | "allow-full";
 
 function buildTieredIssueList(
   issues: ReadonlyArray<AuditIssue>,
@@ -247,7 +254,7 @@ ${issueList}
 ## 当前状态卡
 ${currentState}
 ${ledgerBlock}
-${hookDebtBlock}${hooksBlock}${volumeSummariesBlock}${reducedControlBlock || outlineBlock}${bibleBlock}${matrixBlock}${summariesBlock}${canonBlock}${fanficCanonBlock}${styleGuideBlock}${lengthGuidanceBlock}
+${sanitizeNarrativeEvidenceBlock(hookDebtBlock, resolvedLanguage) ?? ""}${sanitizeNarrativeEvidenceBlock(hooksBlock, resolvedLanguage) ?? ""}${sanitizeNarrativeEvidenceBlock(volumeSummariesBlock, resolvedLanguage) ?? ""}${reducedControlBlock || outlineBlock}${bibleBlock}${matrixBlock}${sanitizeNarrativeEvidenceBlock(summariesBlock, resolvedLanguage) ?? ""}${canonBlock}${fanficCanonBlock}${styleGuideBlock}${lengthGuidanceBlock}
 
 ## 待修正章节
 ${chapterContent}`;
@@ -260,7 +267,13 @@ ${chapterContent}`;
       { temperature: 0.3, maxTokens: 16384 },
     );
 
-    const output = this.parseOutput(response.content, gp, mode, chapterContent);
+    const output = this.parseOutput(
+      response.content,
+      gp,
+      mode,
+      chapterContent,
+      mode === "auto" ? resolveAutoOutputMode(issues) : "allow-full",
+    );
     const mergedOutput = governedMode
       ? {
           ...output,
@@ -278,6 +291,7 @@ ${chapterContent}`;
     gp: GenreProfile,
     mode: ReviseMode,
     originalChapter: string,
+    autoOutputMode: AutoOutputMode = "allow-full",
   ): ReviseOutput {
     const extract = (tag: string): string => {
       const regex = new RegExp(
@@ -304,9 +318,22 @@ ${chapterContent}`;
       updatedHooks: extract("UPDATED_HOOKS") || "(伏笔池未更新)",
     });
 
-    // Auto mode: REVISED_CONTENT takes priority (whole-chapter fix),
-    // PATCHES only used when REVISED_CONTENT is absent (local-only fix).
+    // Auto mode: only allow REVISED_CONTENT for whole-chapter issue sets.
     if (mode === "auto") {
+      if (autoOutputMode === "patch-only") {
+        const patchesRaw = extract("PATCHES");
+        if (patchesRaw) {
+          const patches = parseSpotFixPatches(patchesRaw);
+          if (patches.length > 0) {
+            const patchResult = applySpotFixPatches(originalChapter, patches);
+            if (patchResult.applied && patchResult.appliedPatchCount / patches.length >= 0.5) {
+              return makeResult(patchResult.revisedContent, true);
+            }
+          }
+        }
+        return makeResult(originalChapter, false);
+      }
+
       const revisedContent = extract("REVISED_CONTENT");
       if (revisedContent) {
         return makeResult(revisedContent, true);
@@ -513,17 +540,17 @@ ${outputFormat}`;
     contextPackage: ContextPackage,
     ruleStack: RuleStack,
   ): string {
-    const selectedContext = contextPackage.selectedContext
-      .map((entry) => `- ${entry.source}: ${entry.reason}${entry.excerpt ? ` | ${entry.excerpt}` : ""}`)
-      .join("\n");
+    const selectedContext = renderNarrativeSelectedContext(contextPackage.selectedContext, "zh")
+      .replace(/^### /gm, "- ");
     const overrides = ruleStack.activeOverrides.length > 0
       ? ruleStack.activeOverrides
         .map((override) => `- ${override.from} -> ${override.to}: ${override.reason} (${override.target})`)
         .join("\n")
       : "- none";
+    const narrativeIntent = buildNarrativeIntentBrief(chapterIntent, "zh");
 
     return `\n## 本章控制输入（由 Planner/Composer 编译）
-${chapterIntent}
+${narrativeIntent || "(无)"}
 
 ### 已选上下文
 ${selectedContext || "- none"}
@@ -536,4 +563,29 @@ ${selectedContext || "- none"}
 ### 当前覆盖
 ${overrides}\n`;
   }
+}
+
+function resolveAutoOutputMode(issues: ReadonlyArray<AuditIssue>): AutoOutputMode {
+  if (issues.length === 0) {
+    return "allow-full";
+  }
+
+  const localOnlyPatterns: ReadonlyArray<RegExp> = [
+    /Paragraph uniformity|段落等长/i,
+    /Hedge density|套话密度/i,
+    /Formulaic transitions|公式化转折/i,
+    /List-like structure|列表式结构/i,
+    /Cross-chapter repetition|跨章重复/i,
+    /AI-tell word density/i,
+    /Fatigue word|高疲劳词/i,
+    /Information Boundary Check|信息越界/i,
+    /Knowledge Base Pollution|知识库污染/i,
+  ];
+
+  const isLocalOnly = issues.every((issue) => {
+    const text = `${issue.category} ${issue.description}`;
+    return localOnlyPatterns.some((pattern) => pattern.test(text));
+  });
+
+  return isLocalOnly ? "patch-only" : "allow-full";
 }
