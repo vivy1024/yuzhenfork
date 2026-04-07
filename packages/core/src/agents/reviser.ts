@@ -355,16 +355,21 @@ ${chapterContent}`;
     return en
       ? `${langPrefix}You are a professional ${gp.name} web-fiction revision editor. Fix the chapter according to the review notes.${protagonistBlock}
 
-Revision principles:
-1. For local issues (wording, small continuity errors, AI-tell phrases), output PATCHES — surgical replacements that leave the rest of the chapter untouched
-2. For structural issues (pacing collapse, major timeline errors, severe length deviation), output REVISED_CONTENT — a full rewrite of the chapter
-3. Prefer PATCHES whenever possible. Only use REVISED_CONTENT when local patches cannot fix the problem
-4. Fix root causes — do not apply superficial polish${numericalRule}
-5. Hook status must stay in sync with the hooks board. If hook debt briefs are provided, preserve hook payoff scenes
-6. Do not alter the plot direction or core conflicts
-7. Preserve the original language style, rhythm, and pacing — do not compress transitional scenes or remove breathing room${lengthGuardrail}
+PATCHES and REVISED_CONTENT serve different problems — choose by problem type, not preference:
 
-Each PATCH's TARGET_TEXT should quote the passage you want to change — it can be a sentence, a paragraph, or multiple paragraphs, whatever the problem requires. Do not artificially constrain patch scope.
+PATCHES — for local text issues (wording, dialogue, AI-tell phrases, small continuity errors).
+  Each PATCH quotes the passage to change (a sentence, a paragraph, or multiple paragraphs) and provides a replacement. Untouched text stays exactly as-is.
+
+REVISED_CONTENT — for whole-chapter issues (length compression, structural rewrite, pacing restructure, major plot realignment).
+  Outputs the full revised chapter. When Critical issues include length or structural problems, you must use REVISED_CONTENT — patches cannot compress or restructure a chapter.
+
+If Critical issues include both local and whole-chapter problems, use REVISED_CONTENT (it addresses everything in one pass).
+
+Revision principles:
+1. Fix root causes — do not apply superficial polish${numericalRule}
+2. Hook status must stay in sync with the hooks board. If hook debt briefs are provided, preserve hook payoff scenes
+3. Do not alter the plot direction or core conflicts
+4. Preserve the original language style, rhythm, and pacing — do not compress transitional scenes or remove breathing room${lengthGuardrail}
 
 Output format:
 
@@ -390,24 +395,29 @@ ${ledgerSection}
 (Full updated hooks board)`
       : `${langPrefix}你是一位专业的${gp.name}网络小说修稿编辑。你的任务是根据审稿意见对章节进行修正。${protagonistBlock}
 
-修稿原则：
-1. 局部问题（措辞、小的连续性错误、AI痕迹用词），输出 PATCHES——定点替换，不碰无关段落
-2. 结构性问题（节奏坍塌、严重时间线错误、字数严重偏离），输出 REVISED_CONTENT——整章重写
-3. 优先使用 PATCHES。只有局部修复确实无法解决问题时才用 REVISED_CONTENT
-4. 修根因，不做表面润色${numericalRule}
-5. 伏笔状态必须与伏笔池同步。如果提供了 Hook Debt 简报，必须保留伏笔兑现段落
-6. 不改变剧情走向和核心冲突
-7. 保持原文的语言风格、节奏和呼吸——不要压缩过渡段、不要删掉减速段${lengthGuardrail}
+PATCHES 和 REVISED_CONTENT 分别处理不同类型的问题——按问题类型选择，不是按偏好：
 
-每个 PATCH 的 TARGET_TEXT 引用你要修改的段落——可以是一句话、一段、或多段，由问题范围决定。不要人为限制修改范围。
+PATCHES——处理局部文字问题（措辞、对话、AI痕迹、小的连续性错误）。
+  每个 PATCH 引用要修改的原文段落（一句、一段或多段皆可），给出替换文本。未涉及的内容保持原样。
+
+REVISED_CONTENT——处理全章级问题（字数压缩、结构重组、节奏重排、重大剧情偏离）。
+  输出修正后的完整正文。当 Critical 问题包含字数或结构性问题时，必须使用 REVISED_CONTENT——PATCHES 无法压缩或重构整章。
+
+如果 Critical 同时包含局部问题和全章问题，使用 REVISED_CONTENT（一次性解决所有问题）。
+
+修稿原则：
+1. 修根因，不做表面润色${numericalRule}
+2. 伏笔状态必须与伏笔池同步。如果提供了 Hook Debt 简报，必须保留伏笔兑现段落
+3. 不改变剧情走向和核心冲突
+4. 保持原文的语言风格、节奏和呼吸——不要压缩过渡段、不要删掉减速段${lengthGuardrail}
 
 输出格式：
 
 === FIXED_ISSUES ===
-(逐条说明修正了什么，一行一条；如果无法安全局部修复，也在这里说明)
+(逐条说明修正了什么)
 
 === PATCHES ===
-(输出局部补丁。如果使用 REVISED_CONTENT 则完全省略此区块)
+(局部补丁——仅用于局部文字问题。有全章级问题时省略此区块)
 --- PATCH 1 ---
 TARGET_TEXT:
 (从原文中精确引用要修改的段落)
@@ -416,7 +426,7 @@ REPLACEMENT_TEXT:
 --- END PATCH ---
 
 === REVISED_CONTENT ===
-(修正后的完整正文——仅在 PATCHES 无法解决问题时使用。如果使用 PATCHES 则完全省略此区块)
+(修正后的完整正文——用于字数/结构/节奏等全章级问题。仅局部问题时省略此区块)
 
 === UPDATED_STATE ===
 (更新后的完整状态卡)
