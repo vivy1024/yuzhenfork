@@ -112,10 +112,31 @@ export async function runChapterReviewCycle(params: {
   }));
 
   // ---------------------------------------------------------------------------
-  // Initial length normalization (once, before entering the loop)
+  // Length normalization: dedicated step, runs until in softRange (max 2 passes)
+  // Length is NOT mixed into the reviser's issues — normalize handles it.
   // ---------------------------------------------------------------------------
-  const normalizedBeforeAudit = await params.normalizeDraftLengthIfNeeded(finalContent);
-  totalUsage = params.addUsage(totalUsage, normalizedBeforeAudit.tokenUsage);
+  const normalizeUntilInRange = async (content: string): Promise<{
+    content: string;
+    wordCount: number;
+    applied: boolean;
+  }> => {
+    let current = content;
+    let applied = false;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const wc = countChapterLength(current, params.lengthSpec.countingMode);
+      if (!isOutsideSoftRange(wc, params.lengthSpec)) {
+        return { content: current, wordCount: wc, applied };
+      }
+      const result = await params.normalizeDraftLengthIfNeeded(current);
+      totalUsage = params.addUsage(totalUsage, result.tokenUsage);
+      current = result.content;
+      applied = applied || result.applied;
+    }
+    const finalWc = countChapterLength(current, params.lengthSpec.countingMode);
+    return { content: current, wordCount: finalWc, applied };
+  };
+
+  const normalizedBeforeAudit = await normalizeUntilInRange(finalContent);
   finalContent = normalizedBeforeAudit.content;
   finalWordCount = normalizedBeforeAudit.wordCount;
   normalizeApplied = normalizeApplied || normalizedBeforeAudit.applied;
@@ -151,18 +172,8 @@ export async function runChapterReviewCycle(params: {
       ...(options?.extraIssues ?? []),
     ];
 
-    // Add length issue if out of range
-    if (!lengthInRange) {
-      const direction = wordCount < params.lengthSpec.softMin ? "short" : "long";
-      allIssues.push({
-        severity: "critical",
-        category: "length",
-        description: `Chapter word count ${wordCount} is outside target range ${params.lengthSpec.softMin}-${params.lengthSpec.softMax} (too ${direction}). Must be brought within range.`,
-        suggestion: direction === "long"
-          ? "Compress the chapter: trim redundant explanations, repeated actions, and weak-information sentences."
-          : "Expand key scenes with more sensory detail or dialogue to reach the target range.",
-      });
-    }
+    // Length is NOT added to reviser issues — normalize handles it as a dedicated step.
+    // lengthInRange is only used in isPassed() as a hard gate.
 
     const hasExtraCritical = (options?.extraIssues ?? []).some((i) => i.severity === "critical");
     const auditResult: AuditResult = {
@@ -226,13 +237,18 @@ export async function runChapterReviewCycle(params: {
       }
 
       params.assertChapterContentNotEmpty(reviseOutput.revisedContent, `repair iteration ${iteration + 1}`);
-      const revisedWordCount = countChapterLength(reviseOutput.revisedContent, params.lengthSpec.countingMode);
 
-      // Re-assess the revised content
-      const nextAssessment = await assess(reviseOutput.revisedContent, { temperature: 0 });
+      // Re-normalize after revision (REVISED_CONTENT can blow up length)
+      const postReviseNorm = await normalizeUntilInRange(reviseOutput.revisedContent);
+      normalizeApplied = normalizeApplied || postReviseNorm.applied;
+      const revisedContent = postReviseNorm.content;
+      const revisedWordCount = postReviseNorm.wordCount;
+
+      // Re-assess the revised + normalized content
+      const nextAssessment = await assess(revisedContent, { temperature: 0 });
 
       snapshots.push({
-        content: reviseOutput.revisedContent,
+        content: revisedContent,
         wordCount: revisedWordCount,
         auditResult: nextAssessment.auditResult,
         score: nextAssessment.score,
@@ -244,7 +260,7 @@ export async function runChapterReviewCycle(params: {
           zh: `修复后达到通过线（${nextAssessment.score} 分），退出循环`,
           en: `repair reached pass threshold (${nextAssessment.score}), exiting loop`,
         });
-        finalContent = reviseOutput.revisedContent;
+        finalContent = revisedContent;
         finalWordCount = revisedWordCount;
         postReviseCount = revisedWordCount;
         currentAudit = nextAssessment;
@@ -253,7 +269,7 @@ export async function runChapterReviewCycle(params: {
 
       // Check net improvement
       if (nextAssessment.score >= currentAudit.score + NET_IMPROVEMENT_EPSILON) {
-        finalContent = reviseOutput.revisedContent;
+        finalContent = revisedContent;
         finalWordCount = revisedWordCount;
         postReviseCount = revisedWordCount;
         currentAudit = nextAssessment;

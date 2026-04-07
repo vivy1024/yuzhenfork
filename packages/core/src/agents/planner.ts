@@ -666,26 +666,27 @@ export class PlannerAgent extends BaseAgent {
       intent.moodDirective ? `- mood: ${intent.moodDirective}` : undefined,
       intent.titleDirective ? `- title: ${intent.titleDirective}` : undefined,
     ].filter(Boolean).join("\n") || "- none";
+    const isEn = language === "en";
     const hookAgenda = [
-      "### Must Advance",
-      intent.hookAgenda.mustAdvance.length > 0
-        ? intent.hookAgenda.mustAdvance.map((item) => `- ${item}`).join("\n")
-        : "- none",
-      "",
-      "### Eligible Resolve",
+      isEn ? "### Resolve — must deliver a concrete payoff this chapter" : "### 兑现（本章必须落地具体回收）",
       intent.hookAgenda.eligibleResolve.length > 0
         ? intent.hookAgenda.eligibleResolve.map((item) => `- ${item}`).join("\n")
-        : "- none",
+        : isEn ? "- none this round" : "- 本轮无",
       "",
-      "### Stale Debt",
+      isEn ? "### Advance — must show visible progress this chapter" : "### 推进（本章必须有可见进展）",
+      intent.hookAgenda.mustAdvance.length > 0
+        ? intent.hookAgenda.mustAdvance.map((item) => `- ${item}`).join("\n")
+        : isEn ? "- none this round" : "- 本轮无",
+      "",
+      isEn ? "### Stale Debt — overdue hooks, prioritize clearing" : "### 逾期债务（积压伏笔，优先清理）",
       intent.hookAgenda.staleDebt.length > 0
         ? intent.hookAgenda.staleDebt.map((item) => `- ${item}`).join("\n")
-        : "- none",
+        : isEn ? "- none" : "- 无",
       "",
-      "### Avoid New Hook Families",
+      isEn ? "### Do Not Open — avoid new hooks in these families" : "### 禁开新坑（以下类型不得新增伏笔）",
       intent.hookAgenda.avoidNewHookFamilies.length > 0
         ? intent.hookAgenda.avoidNewHookFamilies.map((item) => `- ${item}`).join("\n")
-        : "- none",
+        : isEn ? "- none" : "- 无",
       "",
       this.renderHookBudget(activeHookCount, language),
     ].join("\n");

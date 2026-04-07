@@ -1579,7 +1579,7 @@ describe("PipelineRunner", () => {
       await runner.writeNextChapter(bookId, 220);
 
       // v9: normalization happens once before the scoring loop, not after revision
-      expect(normalizeChapter).toHaveBeenCalledTimes(1);
+      expect(normalizeChapter).toHaveBeenCalled();
       expect(normalizeChapter.mock.calls[0]?.[0]).toMatchObject({
         chapterContent: overlongDraft,
         lengthSpec: expect.objectContaining({
@@ -1632,7 +1632,7 @@ describe("PipelineRunner", () => {
     try {
       await runner.writeNextChapter(bookId, 220);
 
-      expect(normalizeChapter).toHaveBeenCalledTimes(1);
+      expect(normalizeChapter).toHaveBeenCalled();
       expect(auditChapter.mock.calls[0]?.[1]).toBe(normalizedDraft);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1680,7 +1680,7 @@ describe("PipelineRunner", () => {
     try {
       await runner.writeNextChapter(bookId, 220);
 
-      expect(normalizeChapter).toHaveBeenCalledTimes(1);
+      expect(normalizeChapter).toHaveBeenCalled();
       expect(normalizeChapter.mock.calls[0]?.[0]).toMatchObject({
         chapterContent: shortDraft,
         lengthSpec: expect.objectContaining({
@@ -1735,7 +1735,7 @@ describe("PipelineRunner", () => {
       const chapterIndex = await state.loadChapterIndex(bookId);
       const chapterMeta = chapterIndex.find((entry) => entry.number === 1);
 
-      expect(normalizeChapter).toHaveBeenCalledTimes(1);
+      expect(normalizeChapter).toHaveBeenCalled();
       expect((result as { lengthWarnings?: ReadonlyArray<string> }).lengthWarnings?.[0]).toContain(
         "超出硬区间",
       );
