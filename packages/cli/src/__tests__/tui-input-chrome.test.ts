@@ -16,6 +16,8 @@ describe("tui input chrome", () => {
     expect(promptPrefix).toContain("│");
     expect(promptPrefix).toContain("❯");
     expect(chrome.outerGapLines).toBeGreaterThan(0);
+    expect(chrome.promptLiftRows).toBeGreaterThan(0);
+    expect(chrome.settleRowsAfterSubmit).toBeGreaterThan(0);
   });
 
   it("clamps the shell width instead of spanning edge-to-edge", () => {

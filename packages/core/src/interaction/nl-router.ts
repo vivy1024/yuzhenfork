@@ -12,6 +12,14 @@ export function routeNaturalLanguageIntent(
   const lower = trimmed.toLowerCase();
   const bookId = context.activeBookId;
 
+  if (/^(hi|hello|hey|你好|嗨|哈喽)$/i.test(trimmed)) {
+    return {
+      intent: "chat",
+      ...(bookId ? { bookId } : {}),
+      instruction: trimmed,
+    };
+  }
+
   if (/^(continue|继续|继续写|写下一章|write next)$/i.test(trimmed)) {
     return {
       intent: "write_next",
@@ -190,8 +198,8 @@ export function routeNaturalLanguageIntent(
   }
 
   return {
-    intent: "explain_status",
+    intent: "chat",
     ...(bookId ? { bookId } : {}),
-    instruction: lower,
+    instruction: trimmed,
   };
 }

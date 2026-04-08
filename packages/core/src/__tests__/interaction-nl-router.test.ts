@@ -58,6 +58,19 @@ describe("interaction natural-language router", () => {
     });
   });
 
+  it("maps greetings to chat instead of status explanation", () => {
+    expect(routeNaturalLanguageIntent("hi", { activeBookId: "harbor" })).toEqual({
+      intent: "chat",
+      bookId: "harbor",
+      instruction: "hi",
+    });
+    expect(routeNaturalLanguageIntent("你好", { activeBookId: "harbor" })).toEqual({
+      intent: "chat",
+      bookId: "harbor",
+      instruction: "你好",
+    });
+  });
+
   it("maps mode switch requests to switch_mode", () => {
     expect(routeNaturalLanguageIntent("切换到全自动", { activeBookId: "harbor" })).toEqual({
       intent: "switch_mode",
@@ -136,6 +149,14 @@ describe("interaction natural-language router", () => {
       bookId: "harbor",
       oldValue: "Lu Chen",
       newValue: "Lin Yan",
+    });
+  });
+
+  it("falls back to chat for unmatched freeform input", () => {
+    expect(routeNaturalLanguageIntent("没有动效没有回答", { activeBookId: "harbor" })).toEqual({
+      intent: "chat",
+      bookId: "harbor",
+      instruction: "没有动效没有回答",
     });
   });
 });

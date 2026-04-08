@@ -20,6 +20,7 @@ describe("interaction models", () => {
 
   it("parses supported interaction intents", () => {
     expect(InteractionIntentTypeSchema.parse("create_book")).toBe("create_book");
+    expect(InteractionIntentTypeSchema.parse("chat")).toBe("chat");
     expect(InteractionIntentTypeSchema.parse("write_next")).toBe("write_next");
     expect(InteractionIntentTypeSchema.parse("rewrite_chapter")).toBe("rewrite_chapter");
     expect(InteractionIntentTypeSchema.parse("explain_failure")).toBe("explain_failure");

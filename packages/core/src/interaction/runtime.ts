@@ -542,6 +542,22 @@ export async function runInteractionRequest(params: {
         responseText: `Resumed ${bookId ?? "current book"}.`,
       };
     }
+    case "chat": {
+      const bookId = request.bookId ?? session.activeBookId;
+      const prompt = request.instruction?.trim().toLowerCase() ?? "";
+      const responseText = /^(hi|hello|hey|你好|嗨|哈喽)$/i.test(prompt)
+        ? (bookId
+            ? `Hi. Active book is ${bookId}. Ask me to continue, revise a chapter, or explain what is blocked.`
+            : "Hi. No active book yet. Open a book, list books, or tell me what you want to write.")
+        : (bookId
+            ? `I’m here. Active book is ${bookId}. You can ask me to continue, revise a chapter, rewrite, change focus, or inspect why the pipeline stopped.`
+            : "I’m here. No active book is bound yet. Open a book, list books, or describe what you want to write.");
+      const completed = markCompleted(session);
+      return {
+        session: addEvent(completed, "task.completed", "completed", responseText),
+        responseText,
+      };
+    }
     case "explain_status":
     case "explain_failure": {
       const bookId = request.bookId ?? session.activeBookId;

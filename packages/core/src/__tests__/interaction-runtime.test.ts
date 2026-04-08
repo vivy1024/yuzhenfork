@@ -192,6 +192,32 @@ describe("interaction runtime", () => {
     );
   });
 
+  it("answers chat-style requests without forcing a status summary", async () => {
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-chat",
+        projectRoot: "/tmp/project",
+        activeBookId: "harbor",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      }),
+      request: {
+        intent: "chat",
+        bookId: "harbor",
+        instruction: "hi",
+      },
+      tools: makeTools(),
+    });
+
+    expect(result.responseText).toContain("harbor");
+    expect(result.responseText).not.toContain("Current status");
+    expect(result.session.events.map((event) => event.kind)).toEqual([
+      "task.started",
+      "task.completed",
+    ]);
+  });
+
   it("routes edit_truth to the truth-file updater", async () => {
     const writeTruthFile = vi.fn(async () => ({ ok: true }));
 

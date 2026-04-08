@@ -16,6 +16,7 @@ export const InteractionIntentTypeSchema = z.enum([
   "rename_entity",
   "update_focus",
   "update_author_intent",
+  "chat",
   "explain_status",
   "explain_failure",
   "export_book",
