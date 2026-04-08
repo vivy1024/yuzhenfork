@@ -28,8 +28,9 @@ import {
   printStyledHelp,
   printStyledStatus,
   printInputSeparator,
-  drawInputArea,
-  buildInputChrome,
+  inputPromptPrefix,
+  drawInputTop,
+  drawInputBottom,
 } from "./effects.js";
 
 /* ── Version ── */
@@ -234,10 +235,11 @@ export async function launchTui(
   };
 
   // 9. REPL loop
+  const prompt = inputPromptPrefix();
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: buildInputChrome().promptPrefix,
+    prompt,
     completer,
   });
 
@@ -249,15 +251,13 @@ export async function launchTui(
   };
 
   const promptInput = () => {
-    const chrome = buildInputChrome();
-    rl.setPrompt(chrome.promptPrefix);
-    drawInputArea();
-    process.stdout.write(`\x1b[${chrome.promptLiftRows}A\r`);
+    drawInputTop();
     rl.prompt();
   };
 
   process.on("SIGINT", () => {
     console.log();
+    drawInputBottom();
     console.log(c("  ◇ goodbye", dim));
     console.log();
     cleanup();
@@ -267,9 +267,8 @@ export async function launchTui(
   promptInput();
 
   for await (const line of rl) {
+    drawInputBottom();
     const input = line.trim();
-    const chrome = buildInputChrome();
-    process.stdout.write(`\x1b[${chrome.settleRowsAfterSubmit}B\r`);
 
     if (!input) {
       promptInput();

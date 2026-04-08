@@ -163,49 +163,25 @@ const ASCII_LOGO = [
 
 /* ── Input area ── */
 
-export interface InputChrome {
-  readonly width: number;
-  readonly topBorder: string;
-  readonly helperLine: string;
-  readonly promptLine: string;
-  readonly bottomBorder: string;
-  readonly promptPrefix: string;
-  readonly outerGapLines: number;
-  readonly promptLiftRows: number;
-  readonly settleRowsAfterSubmit: number;
+/* ── Input chrome ── */
+
+export function inputPromptPrefix(): string {
+  return `  ${c("❯", gray)} `;
 }
 
-export function buildInputChrome(columns = process.stdout.columns ?? 80): InputChrome {
-  const width = Math.max(48, Math.min(columns - 6, 84));
-  const innerWidth = Math.max(24, width - 4);
-  const helperText = stripAnsi(c("Ask InkOS to write, revise, or explain…", dim));
-  const helper = helperText.length > innerWidth
-    ? helperText.slice(0, innerWidth)
-    : helperText.padEnd(innerWidth, " ");
-
-  return {
-    width,
-    topBorder: `  ${c(`╭${"─".repeat(width - 2)}╮`, gray)}`,
-    helperLine: `  ${c("│", gray)} ${c(helper, dim)} ${c("│", gray)}`,
-    promptLine: `  ${c("│", gray)} ${" ".repeat(innerWidth)} ${c("│", gray)}`,
-    bottomBorder: `  ${c(`╰${"─".repeat(width - 2)}╯`, gray)}`,
-    promptPrefix: `  ${c("│", gray)} ${c("❯", gray)} `,
-    outerGapLines: 1,
-    promptLiftRows: 3,
-    settleRowsAfterSubmit: 2,
-  };
-}
-
-export function drawInputArea(): void {
-  const chrome = buildInputChrome();
-  for (let i = 0; i < chrome.outerGapLines; i += 1) {
-    console.log();
-  }
-  console.log(chrome.topBorder);
-  console.log(chrome.helperLine);
-  console.log(chrome.promptLine);
-  console.log(chrome.bottomBorder);
+export function drawInputTop(): void {
+  const w = Math.max(48, Math.min((process.stdout.columns ?? 80) - 6, 84));
   console.log();
+  console.log(`  ${c(`╭${"─".repeat(w - 2)}╮`, gray)}`);
+  const hint = "Ask InkOS to write, revise, or explain…";
+  const inner = w - 4;
+  const padded = hint.length > inner ? hint.slice(0, inner) : hint.padEnd(inner);
+  console.log(`  ${c("│", gray)} ${c(padded, dim)} ${c("│", gray)}`);
+}
+
+export function drawInputBottom(): void {
+  const w = Math.max(48, Math.min((process.stdout.columns ?? 80) - 6, 84));
+  console.log(`  ${c(`╰${"─".repeat(w - 2)}╯`, gray)}`);
 }
 
 export function printInputSeparator(): void {
