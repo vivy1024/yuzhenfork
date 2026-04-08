@@ -6,7 +6,9 @@ import type {
   PipelineRunner,
   StateManager,
   ReviseMode,
+  LLMClient,
 } from "../index.js";
+import { chatCompletion } from "../index.js";
 import { executeEditTransaction } from "./edit-controller.js";
 import type { InteractionRuntimeTools } from "./runtime.js";
 
@@ -15,6 +17,8 @@ type StateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir" | "load
 type InstrumentablePipelineLike = PipelineLike & {
   readonly config?: {
     logger?: Logger;
+    client?: LLMClient;
+    model?: string;
   };
 };
 
@@ -197,6 +201,40 @@ export function createInteractionToolsFromDeps(
 
   return {
     listBooks: () => state.listBooks(),
+    chat: async (input, options) => {
+      const bookLabel = options.bookId ?? "none";
+      const response = instrumentedPipeline.config?.client && instrumentedPipeline.config?.model
+        ? await chatCompletion(
+          instrumentedPipeline.config.client,
+          instrumentedPipeline.config.model,
+          [
+            {
+              role: "system",
+              content: [
+                "You are InkOS inside the terminal workbench.",
+                "Respond conversationally and briefly.",
+                "If there is no active book, help the user decide what to write next.",
+                "If there is an active book, keep the answer grounded in that book context.",
+              ].join(" "),
+            },
+            {
+              role: "user",
+              content: `activeBook=${bookLabel}\nautomationMode=${options.automationMode}\nmessage=${input}`,
+            },
+          ],
+          { temperature: 0.4, maxTokens: 240 },
+        )
+        : undefined;
+
+      return {
+        __interaction: {
+          responseText: response?.content?.trim()
+            || (options.bookId
+              ? `I’m here. Active book is ${options.bookId}.`
+              : "I’m here. No active book yet."),
+        },
+      };
+    },
     writeNextChapter: (bookId) => withPipelineInteractionTelemetry(
       instrumentedPipeline,
       bookId,

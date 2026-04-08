@@ -193,6 +193,12 @@ describe("interaction runtime", () => {
   });
 
   it("answers chat-style requests without forcing a status summary", async () => {
+    const chat = vi.fn(async () => ({
+      __interaction: {
+        responseText: "你好，我在。当前没有活动书，要不要先说说你想写什么？",
+      },
+    }));
+
     const result = await runInteractionRequest({
       session: InteractionSessionSchema.parse({
         sessionId: "session-chat",
@@ -207,10 +213,16 @@ describe("interaction runtime", () => {
         bookId: "harbor",
         instruction: "hi",
       },
-      tools: makeTools(),
+      tools: makeTools({
+        chat,
+      }),
     });
 
-    expect(result.responseText).toContain("harbor");
+    expect(chat).toHaveBeenCalledWith("hi", {
+      bookId: "harbor",
+      automationMode: "semi",
+    });
+    expect(result.responseText).toContain("你好");
     expect(result.responseText).not.toContain("Current status");
     expect(result.session.events.map((event) => event.kind)).toEqual([
       "task.started",
