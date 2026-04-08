@@ -1,10 +1,11 @@
-/* ── InkOS TUI — Claude Code-style persistent REPL ── */
+/* ── InkOS TUI — persistent REPL with themed animations ── */
 
 import { basename } from "node:path";
 import readline from "node:readline/promises";
 import {
   appendInteractionMessage,
   processProjectInteractionInput,
+  routeNaturalLanguageIntent,
   type InteractionRuntimeTools,
 } from "@actalk/inkos-core";
 import {
@@ -16,25 +17,17 @@ import { createInteractionTools } from "./tools.js";
 import { formatTuiResult } from "./output.js";
 import { ensureProject, interactiveLlmSetup } from "./setup.js";
 import {
-  c,
-  bold,
-  dim,
-  cyan,
-  green,
-  yellow,
-  gray,
-  magenta,
-  red,
-  blue,
-  brightCyan,
-  brightWhite,
-  reset,
-  box,
-  hr,
-  clearLine,
-  hideCursor,
-  showCursor,
+  c, bold, dim, cyan, green, yellow, gray, red, brightCyan, brightWhite,
+  showCursor, reset, box,
 } from "./ansi.js";
+import {
+  ThemedSpinner,
+  animateStartup,
+  formatResultCard,
+  intentToTheme,
+  printStyledHelp,
+  printStyledStatus,
+} from "./effects.js";
 
 /* ── Version ── */
 
@@ -51,94 +44,37 @@ async function readVersion(): Promise<string> {
   }
 }
 
-/* ── Welcome screen ── */
-
-function printWelcome(version: string, projectName: string, bookTitle?: string): void {
-  console.log();
-  console.log(
-    box([
-      `  ${c("InkOS", bold, brightCyan)}${c(` v${version}`, dim)}`,
-      `  ${c("Autonomous Novel Writing AI Agent", dim)}`,
-    ]),
-  );
-  console.log();
-
-  const info = [
-    `  ${c("Project", gray)}  ${c(projectName, brightWhite)}`,
-    `  ${c("Book", gray)}     ${bookTitle ? c(bookTitle, brightWhite) : c("none — run /books or create one", dim)}`,
-  ];
-  console.log(info.join("\n"));
-  console.log();
-  console.log(c("  Type a command or describe what you want to do.", dim));
-  console.log(c("  /help for commands, /quit to exit.", dim));
-  console.log();
-}
-
-/* ── Help ── */
-
-function printHelp(): void {
-  const commands = [
-    ["/write", "Write the next chapter (full pipeline)"],
-    ["/books", "List all books"],
-    ["/open <book>", "Select active book"],
-    ["/mode <auto|semi|manual>", "Switch automation mode"],
-    ["/focus <text>", "Update current focus for next chapters"],
-    ["/rewrite <n>", "Rewrite chapter N"],
-    ["/status", "Show current status"],
-    ["/help", "Show this help"],
-    ["/quit", "Exit InkOS TUI"],
-  ];
-
-  console.log();
-  console.log(c("  Commands", bold, cyan));
-  console.log();
-  for (const [cmd, desc] of commands) {
-    console.log(`  ${c(cmd!, green)}  ${c(desc!, dim)}`);
-  }
-  console.log();
-  console.log(c("  You can also type in natural language:", dim));
-  console.log(c('  "继续写" / "写下一章" / "暂停" / "把林烬改成张三"', dim));
-  console.log();
-}
-
-/* ── Spinner ── */
-
-class Spinner {
-  private interval: ReturnType<typeof setInterval> | undefined;
-  private frame = 0;
-  private readonly frames = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
-
-  start(message: string): void {
-    this.frame = 0;
-    process.stdout.write(hideCursor);
-    this.interval = setInterval(() => {
-      const f = this.frames[this.frame % this.frames.length];
-      process.stdout.write(`${clearLine}  ${c(f!, cyan)} ${c(message, dim)}`);
-      this.frame++;
-    }, 80);
-  }
-
-  stop(message?: string): void {
-    if (this.interval) {
-      clearInterval(this.interval);
-      this.interval = undefined;
-    }
-    process.stdout.write(`${clearLine}${showCursor}`);
-    if (message) {
-      console.log(`  ${c("✓", green)} ${c(message, dim)}`);
-    }
-  }
-}
-
-/* ── Process input ── */
+/* ── Process input with themed spinner ── */
 
 async function processInput(
   projectRoot: string,
   input: string,
   tools: InteractionRuntimeTools,
-  spinner: Spinner,
-): Promise<string | undefined> {
-  spinner.start("Processing...");
+): Promise<{ summary: string; intent: string } | undefined> {
+  // Detect intent for themed spinner
+  const session = await loadProjectSession(projectRoot);
+  const activeBookId = await resolveSessionActiveBook(projectRoot, session);
+  const routed = routeNaturalLanguageIntent(input, { activeBookId });
+  const themeName = intentToTheme(routed.intent);
+
+  const spinner = new ThemedSpinner(themeName);
+  const intentLabels: Record<string, string> = {
+    write_next: "writing chapter",
+    revise_chapter: "revising chapter",
+    rewrite_chapter: "rewriting chapter",
+    update_focus: "updating focus",
+    explain_status: "checking status",
+    explain_failure: "investigating",
+    pause_book: "pausing book",
+    list_books: "listing books",
+    select_book: "selecting book",
+    switch_mode: "switching mode",
+    rename_entity: "renaming entity",
+    patch_chapter_text: "patching text",
+    edit_truth: "editing truth file",
+  };
+  spinner.start(intentLabels[routed.intent] ?? "processing");
+
   try {
     const result = await processProjectInteractionInput({
       projectRoot,
@@ -158,36 +94,12 @@ async function processInput(
       timestamp: Date.now(),
     });
     await persistProjectSession(projectRoot, nextSession);
-    spinner.stop();
-    return summary;
+    spinner.succeed(c(summary, dim));
+    return { summary, intent: result.request.intent };
   } catch (err) {
-    spinner.stop();
     const msg = err instanceof Error ? err.message : String(err);
-    return `Error: ${msg}`;
-  }
-}
-
-/* ── Status command ── */
-
-async function printStatus(projectRoot: string): Promise<void> {
-  try {
-    const session = await loadProjectSession(projectRoot);
-    const bookId = await resolveSessionActiveBook(projectRoot, session);
-    console.log();
-    console.log(`  ${c("Mode", gray)}     ${c(session.automationMode, yellow)}`);
-    console.log(`  ${c("Book", gray)}     ${bookId ? c(bookId, brightWhite) : c("none", dim)}`);
-    console.log(`  ${c("Status", gray)}   ${c(session.currentExecution?.status ?? "idle", green)}`);
-    if (session.events.length > 0) {
-      console.log(`  ${c("Events", gray)}   ${c(String(session.events.length), brightWhite)}`);
-      const recent = session.events.slice(-3);
-      for (const ev of recent) {
-        console.log(`           ${c(`${ev.kind}: ${ev.detail ?? ev.status}`, dim)}`);
-      }
-    }
-    console.log();
-  } catch {
-    console.log(c("  Could not load session.", dim));
-    console.log();
+    spinner.fail(c(msg, red));
+    return undefined;
   }
 }
 
@@ -272,8 +184,8 @@ export async function launchTui(
   const activeBookId = await resolveSessionActiveBook(projectRoot, session);
   const version = await readVersion();
 
-  // 4. Welcome
-  printWelcome(version, basename(projectRoot), activeBookId);
+  // 4. Animated welcome
+  await animateStartup(version, basename(projectRoot), activeBookId);
 
   // 5. Bail if not interactive
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -286,7 +198,7 @@ export async function launchTui(
     tools = toolsOverride ?? (await createInteractionTools(projectRoot));
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.log(c(`  Failed to initialize: ${msg}`, red));
+    console.log(c(`  ${c("✗", red, bold)} Failed to initialize: ${msg}`, red));
     console.log(c("  Check your .env or run: inkos config set-global", dim));
     console.log();
     return;
@@ -296,9 +208,8 @@ export async function launchTui(
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: `${c("❯", cyan)} `,
+    prompt: `  ${c("❯", brightCyan)} `,
   });
-  const spinner = new Spinner();
 
   const cleanup = () => {
     process.stdout.write(showCursor);
@@ -306,9 +217,9 @@ export async function launchTui(
   };
 
   process.on("SIGINT", () => {
-    spinner.stop();
     console.log();
-    console.log(c("  Bye!", dim));
+    console.log(c("  ◇ goodbye", dim));
+    console.log();
     cleanup();
     process.exit(0);
   });
@@ -325,18 +236,30 @@ export async function launchTui(
 
     // Built-in TUI commands
     if (/^\/quit$/i.test(input) || /^\/exit$/i.test(input) || /^(quit|exit|bye)$/i.test(input)) {
-      console.log(c("  Bye!", dim));
+      console.log(c("  ◇ goodbye", dim));
+      console.log();
       break;
     }
 
     if (/^\/help$/i.test(input) || /^(help|帮助)$/i.test(input)) {
-      printHelp();
+      printStyledHelp();
       rl.prompt();
       continue;
     }
 
     if (/^\/status$/i.test(input) || /^(status|状态)$/i.test(input)) {
-      await printStatus(projectRoot);
+      try {
+        const s = await loadProjectSession(projectRoot);
+        const bId = await resolveSessionActiveBook(projectRoot, s);
+        printStyledStatus({
+          mode: s.automationMode,
+          bookId: bId,
+          status: s.currentExecution?.status ?? "idle",
+          events: s.events,
+        });
+      } catch {
+        console.log(c("  Could not load session.", dim));
+      }
       rl.prompt();
       continue;
     }
@@ -347,16 +270,9 @@ export async function launchTui(
       continue;
     }
 
-    // Delegate to interaction layer
-    const result = await processInput(projectRoot, input, tools, spinner);
-    if (result) {
-      console.log();
-      // Indent each line of result
-      for (const resultLine of result.split("\n")) {
-        console.log(`  ${resultLine}`);
-      }
-      console.log();
-    }
+    // Delegate to interaction layer with themed animation
+    await processInput(projectRoot, input, tools);
+    console.log();
 
     rl.prompt();
   }
