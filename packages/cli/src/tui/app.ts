@@ -28,6 +28,8 @@ import {
   printStyledHelp,
   printStyledStatus,
   printInputSeparator,
+  drawInputBoxTop,
+  drawInputBoxBottom,
 } from "./effects.js";
 
 /* ── Version ── */
@@ -209,7 +211,7 @@ export async function launchTui(
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: `  ${c("❯", brightCyan)} `,
+    prompt: `  ${c("│", gray)} ${c("❯", brightCyan)} `,
   });
 
   const cleanup = () => {
@@ -217,21 +219,32 @@ export async function launchTui(
     rl.close();
   };
 
+  const promptInput = () => {
+    drawInputBoxTop();
+    rl.prompt();
+  };
+
+  const closeInputBox = () => {
+    drawInputBoxBottom();
+  };
+
   process.on("SIGINT", () => {
     console.log();
+    closeInputBox();
     console.log(c("  ◇ goodbye", dim));
     console.log();
     cleanup();
     process.exit(0);
   });
 
-  rl.prompt();
+  promptInput();
 
   for await (const line of rl) {
+    closeInputBox();
     const input = line.trim();
 
     if (!input) {
-      rl.prompt();
+      promptInput();
       continue;
     }
 
@@ -243,14 +256,14 @@ export async function launchTui(
     }
 
     if (/^\/help$/i.test(input) || /^(help|帮助)$/i.test(input)) {
-      printStyledHelp();
-      printInputSeparator();
       console.log();
-      rl.prompt();
+      printStyledHelp();
+      promptInput();
       continue;
     }
 
     if (/^\/status$/i.test(input) || /^(status|状态)$/i.test(input)) {
+      console.log();
       try {
         const s = await loadProjectSession(projectRoot);
         const bId = await resolveSessionActiveBook(projectRoot, s);
@@ -263,25 +276,22 @@ export async function launchTui(
       } catch {
         console.log(c("  Could not load session.", dim));
       }
-      printInputSeparator();
-      console.log();
-      rl.prompt();
+      promptInput();
       continue;
     }
 
     if (/^\/clear$/i.test(input)) {
       console.clear();
-      rl.prompt();
+      promptInput();
       continue;
     }
 
     // Delegate to interaction layer with themed animation
+    console.log();
     await processInput(projectRoot, input, tools);
     console.log();
-    printInputSeparator();
-    console.log();
 
-    rl.prompt();
+    promptInput();
   }
 
   cleanup();

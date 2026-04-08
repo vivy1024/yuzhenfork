@@ -161,7 +161,20 @@ const ASCII_LOGO = [
   " ╚═╝╚═╝  ╚═══╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝",
 ];
 
-/* ── Input separator ── */
+/* ── Input box ── */
+
+export function drawInputBoxTop(): void {
+  const w = Math.min(process.stdout.columns ?? 60, 60);
+  const label = c(" inkos ", dim);
+  const labelLen = 7; // visible length of " inkos "
+  const lineLen = w - 4 - 2 - labelLen; // ╭─ + label + ─...─
+  process.stdout.write(`  ${c("╭─", gray)}${label}${c("─".repeat(Math.max(0, lineLen)), gray)}\n`);
+}
+
+export function drawInputBoxBottom(): void {
+  const w = Math.min(process.stdout.columns ?? 60, 60);
+  process.stdout.write(`  ${c("╰" + "─".repeat(w - 5), gray)}\n`);
+}
 
 export function printInputSeparator(): void {
   const w = Math.min(process.stdout.columns ?? 60, 60);
@@ -219,8 +232,6 @@ export async function animateStartup(version: string, projectName: string, bookT
 
   console.log();
   console.log(c("  /help for commands. Type anything to begin.", dim));
-  console.log();
-  printInputSeparator();
   console.log();
 }
 
