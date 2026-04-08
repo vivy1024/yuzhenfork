@@ -183,6 +183,40 @@ async function checkEnvForKey(envPath: string): Promise<boolean> {
   }
 }
 
+export interface ModelInfo {
+  readonly provider: string;
+  readonly model: string;
+  readonly baseUrl: string;
+}
+
+export async function detectModelInfo(projectRoot: string): Promise<ModelInfo | undefined> {
+  const paths = [join(projectRoot, ".env"), GLOBAL_ENV_PATH];
+  for (const p of paths) {
+    const info = await parseEnvModel(p);
+    if (info) return info;
+  }
+  return undefined;
+}
+
+async function parseEnvModel(envPath: string): Promise<ModelInfo | undefined> {
+  try {
+    const content = await readFile(envPath, "utf-8");
+    const get = (key: string) => {
+      const m = content.match(new RegExp(`^${key}=(.+)$`, "m"));
+      return m?.[1]?.trim() ?? "";
+    };
+    const key = get("INKOS_LLM_API_KEY");
+    if (!key || key.includes("your-api-key")) return undefined;
+    return {
+      provider: get("INKOS_LLM_PROVIDER") || "openai",
+      model: get("INKOS_LLM_MODEL") || "unknown",
+      baseUrl: get("INKOS_LLM_BASE_URL") || "",
+    };
+  } catch {
+    return undefined;
+  }
+}
+
 async function fileExists(path: string): Promise<boolean> {
   try {
     await access(path);

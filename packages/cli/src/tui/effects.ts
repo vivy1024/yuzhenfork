@@ -167,9 +167,12 @@ export interface InputChrome {
   readonly width: number;
   readonly topBorder: string;
   readonly helperLine: string;
+  readonly promptLine: string;
   readonly bottomBorder: string;
   readonly promptPrefix: string;
   readonly outerGapLines: number;
+  readonly promptLiftRows: number;
+  readonly settleRowsAfterSubmit: number;
 }
 
 export function buildInputChrome(columns = process.stdout.columns ?? 80): InputChrome {
@@ -184,9 +187,12 @@ export function buildInputChrome(columns = process.stdout.columns ?? 80): InputC
     width,
     topBorder: `  ${c(`╭${"─".repeat(width - 2)}╮`, gray)}`,
     helperLine: `  ${c("│", gray)} ${c(helper, dim)} ${c("│", gray)}`,
+    promptLine: `  ${c("│", gray)} ${" ".repeat(innerWidth)} ${c("│", gray)}`,
     bottomBorder: `  ${c(`╰${"─".repeat(width - 2)}╯`, gray)}`,
     promptPrefix: `  ${c("│", gray)} ${c("❯", gray)} `,
     outerGapLines: 1,
+    promptLiftRows: 3,
+    settleRowsAfterSubmit: 2,
   };
 }
 
@@ -197,6 +203,9 @@ export function drawInputArea(): void {
   }
   console.log(chrome.topBorder);
   console.log(chrome.helperLine);
+  console.log(chrome.promptLine);
+  console.log(chrome.bottomBorder);
+  console.log();
 }
 
 export function printInputSeparator(): void {
@@ -206,7 +215,12 @@ export function printInputSeparator(): void {
 
 /* ── Startup animation ── */
 
-export async function animateStartup(version: string, projectName: string, bookTitle?: string): Promise<void> {
+export interface StartupModelInfo {
+  readonly provider: string;
+  readonly model: string;
+}
+
+export async function animateStartup(version: string, projectName: string, bookTitle?: string, modelInfo?: StartupModelInfo): Promise<void> {
   const isTTY = process.stdout.isTTY;
 
   if (isTTY) {
@@ -237,24 +251,28 @@ export async function animateStartup(version: string, projectName: string, bookT
 
   // Project info
   console.log();
+  const bookDisplay = bookTitle
+    ? c(bookTitle, brightWhite)
+    : c("no book yet", dim);
+  const modelDisplay = modelInfo
+    ? `${c(modelInfo.model, brightWhite)} ${c(`(${modelInfo.provider})`, dim)}`
+    : c("not configured — type /config to set up", yellow);
+
   if (isTTY) {
     await typewrite(`  ${c("◇", cyan)} ${c("Project", gray)}  ${c(projectName, brightWhite)}`, 8);
-    await sleep(80);
-    const bookDisplay = bookTitle
-      ? c(bookTitle, brightWhite)
-      : c("no book yet", dim);
+    await sleep(60);
     await typewrite(`  ${c("◇", cyan)} ${c("Book", gray)}     ${bookDisplay}`, 8);
-    await sleep(80);
+    await sleep(60);
+    await typewrite(`  ${c("◇", cyan)} ${c("Model", gray)}    ${modelDisplay}`, 8);
+    await sleep(60);
   } else {
     console.log(`  ${c("◇", cyan)} ${c("Project", gray)}  ${c(projectName, brightWhite)}`);
-    const bookDisplay = bookTitle
-      ? c(bookTitle, brightWhite)
-      : c("no book yet", dim);
     console.log(`  ${c("◇", cyan)} ${c("Book", gray)}     ${bookDisplay}`);
+    console.log(`  ${c("◇", cyan)} ${c("Model", gray)}    ${modelDisplay}`);
   }
 
   console.log();
-  console.log(c("  /help for commands. Type anything to begin.", dim));
+  console.log(c("  /help for commands · Tab to autocomplete", dim));
   console.log();
 }
 

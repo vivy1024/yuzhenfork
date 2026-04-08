@@ -15,7 +15,7 @@ import {
 } from "./session-store.js";
 import { createInteractionTools } from "./tools.js";
 import { formatTuiResult } from "./output.js";
-import { ensureProject, interactiveLlmSetup } from "./setup.js";
+import { ensureProject, interactiveLlmSetup, detectModelInfo } from "./setup.js";
 import {
   c, bold, dim, cyan, green, yellow, gray, red, brightCyan, brightWhite,
   showCursor, reset, box,
@@ -187,8 +187,9 @@ export async function launchTui(
   const activeBookId = await resolveSessionActiveBook(projectRoot, session);
   const version = await readVersion();
 
-  // 4. Animated welcome
-  await animateStartup(version, basename(projectRoot), activeBookId);
+  // 4. Detect model + animated welcome
+  const modelInfo = await detectModelInfo(projectRoot);
+  await animateStartup(version, basename(projectRoot), activeBookId, modelInfo ?? undefined);
 
   // 5. Bail if not interactive
   if (!process.stdin.isTTY || !process.stdout.isTTY) {
@@ -219,11 +220,25 @@ export async function launchTui(
     return (origStderrWrite as Function)(chunk, ...args);
   };
 
-  // 8. REPL loop
+  // 8. Slash command completer
+  const SLASH_COMMANDS = [
+    "/write", "/rewrite", "/books", "/open", "/status",
+    "/mode", "/focus", "/config", "/clear", "/help", "/quit",
+  ];
+  const completer = (line: string): [string[], string] => {
+    if (line.startsWith("/")) {
+      const hits = SLASH_COMMANDS.filter((cmd) => cmd.startsWith(line));
+      return [hits.length > 0 ? hits : SLASH_COMMANDS, line];
+    }
+    return [[], line];
+  };
+
+  // 9. REPL loop
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
     prompt: buildInputChrome().promptPrefix,
+    completer,
   });
 
   const cleanup = () => {
@@ -237,6 +252,7 @@ export async function launchTui(
     const chrome = buildInputChrome();
     rl.setPrompt(chrome.promptPrefix);
     drawInputArea();
+    process.stdout.write(`\x1b[${chrome.promptLiftRows}A\r`);
     rl.prompt();
   };
 
@@ -253,14 +269,13 @@ export async function launchTui(
   for await (const line of rl) {
     const input = line.trim();
     const chrome = buildInputChrome();
+    process.stdout.write(`\x1b[${chrome.settleRowsAfterSubmit}B\r`);
 
     if (!input) {
-      console.log(chrome.bottomBorder);
       promptInput();
       continue;
     }
 
-    console.log(chrome.bottomBorder);
     console.log();
 
     // Built-in TUI commands
@@ -289,6 +304,17 @@ export async function launchTui(
       } catch {
         console.log(c("  Could not load session.", dim));
       }
+      promptInput();
+      continue;
+    }
+
+    if (/^\/config$/i.test(input)) {
+      await interactiveLlmSetup(projectRoot);
+      const newModel = await detectModelInfo(projectRoot);
+      if (newModel) {
+        console.log(`  ${c("◇", cyan)} ${c("Model", gray)}    ${c(newModel.model, brightWhite)} ${c(`(${newModel.provider})`, dim)}`);
+      }
+      console.log();
       promptInput();
       continue;
     }
