@@ -163,9 +163,11 @@ const ASCII_LOGO = [
 
 /* ── Input area ── */
 
-export function drawInputLine(): void {
+export function drawInputArea(): void {
   const w = process.stdout.columns ?? 80;
-  console.log(c("  " + "─".repeat(w - 4), gray));
+  console.log();
+  console.log();
+  console.log(c("─".repeat(w), gray));
 }
 
 export function printInputSeparator(): void {

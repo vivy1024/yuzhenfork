@@ -28,7 +28,7 @@ import {
   printStyledHelp,
   printStyledStatus,
   printInputSeparator,
-  drawInputLine,
+  drawInputArea,
 } from "./effects.js";
 
 /* ── Version ── */
@@ -220,7 +220,7 @@ export async function launchTui(
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: `  ${c("❯", gray)} `,
+    prompt: `${gray}  ❯ ${reset}`,
   });
 
   const cleanup = () => {
@@ -230,7 +230,7 @@ export async function launchTui(
   };
 
   const promptInput = () => {
-    drawInputLine();
+    drawInputArea();
     console.log();
     rl.prompt();
   };
