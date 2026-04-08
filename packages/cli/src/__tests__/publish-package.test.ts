@@ -17,10 +17,12 @@ const sourceStudioPackageJsonPromise = readFile(resolve(studioDir, "package.json
 );
 
 async function packPackage(packageDir: string, packDir: string) {
-  execFileSync("npm", ["pack", "--pack-destination", packDir], {
+  const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
+  execFileSync(npmCmd, ["pack", "--pack-destination", packDir], {
     cwd: packageDir,
     env: process.env,
     encoding: "utf-8",
+    shell: process.platform === "win32",
   });
 
   const tgzFiles = (await readdir(packDir)).filter((name) => name.endsWith(".tgz"));
