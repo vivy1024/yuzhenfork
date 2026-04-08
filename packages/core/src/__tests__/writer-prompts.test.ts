@@ -31,7 +31,7 @@ const GENRE: GenreProfile = {
 };
 
 describe("buildWriterSystemPrompt", () => {
-  it("demotes always-on methodology blocks in governed mode", () => {
+  it("includes writing methodology blocks in governed mode", () => {
     const prompt = buildWriterSystemPrompt(
       BOOK,
       GENRE,
@@ -49,9 +49,9 @@ describe("buildWriterSystemPrompt", () => {
 
     expect(prompt).toContain("## 输入治理契约");
     expect(prompt).toContain("卷纲是默认规划");
-    expect(prompt).not.toContain("## 六步走人物心理分析");
-    expect(prompt).not.toContain("## 读者心理学框架");
-    expect(prompt).not.toContain("## 黄金三章规则");
+    // Writing methodology is now always injected regardless of mode
+    expect(prompt).toContain("六步走人物心理分析");
+    expect(prompt).toContain("黄金三章");
   });
 
   it("uses target-range wording when a length spec is provided", () => {
