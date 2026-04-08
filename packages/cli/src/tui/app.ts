@@ -207,6 +207,8 @@ export async function launchTui(
   }
 
   // 7. Suppress noisy Node warnings (e.g. SQLite experimental)
+  const origEmitWarning = process.emitWarning;
+  process.emitWarning = (() => {}) as typeof process.emitWarning;
   const origStderrWrite = process.stderr.write.bind(process.stderr);
   process.stderr.write = (chunk: string | Uint8Array, ...args: unknown[]) => {
     const s = typeof chunk === "string" ? chunk : chunk.toString();
@@ -220,10 +222,11 @@ export async function launchTui(
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
-    prompt: `${gray}  ❯ `,
+    prompt: `  ${c("❯", gray)} `,
   });
 
   const cleanup = () => {
+    process.emitWarning = origEmitWarning;
     process.stderr.write = origStderrWrite;
     process.stdout.write(showCursor);
     rl.close();
@@ -246,7 +249,6 @@ export async function launchTui(
   promptInput();
 
   for await (const line of rl) {
-    process.stdout.write(reset);
     const input = line.trim();
 
     if (!input) {
