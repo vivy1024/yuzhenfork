@@ -166,22 +166,12 @@ const ASCII_LOGO = [
 /* ── Input chrome ── */
 
 export function inputPromptPrefix(): string {
-  return `  ${c("❯", gray)} `;
+  return `  ${c("›", cyan)} `;
 }
 
-export function drawInputTop(): void {
-  const w = Math.max(48, Math.min((process.stdout.columns ?? 80) - 6, 84));
+export function drawInputHint(): void {
   console.log();
-  console.log(`  ${c(`╭${"─".repeat(w - 2)}╮`, gray)}`);
-  const hint = "Ask InkOS to write, revise, or explain…";
-  const inner = w - 4;
-  const padded = hint.length > inner ? hint.slice(0, inner) : hint.padEnd(inner);
-  console.log(`  ${c("│", gray)} ${c(padded, dim)} ${c("│", gray)}`);
-}
-
-export function drawInputBottom(): void {
-  const w = Math.max(48, Math.min((process.stdout.columns ?? 80) - 6, 84));
-  console.log(`  ${c(`╰${"─".repeat(w - 2)}╯`, gray)}`);
+  console.log();
 }
 
 export function printInputSeparator(): void {

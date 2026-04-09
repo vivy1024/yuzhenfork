@@ -29,8 +29,7 @@ import {
   printStyledStatus,
   printInputSeparator,
   inputPromptPrefix,
-  drawInputTop,
-  drawInputBottom,
+  drawInputHint,
 } from "./effects.js";
 
 /* ── Version ── */
@@ -250,19 +249,13 @@ export async function launchTui(
     rl.close();
   };
 
-  const bottomPad = 4;
   const promptInput = () => {
-    drawInputTop();
+    drawInputHint();
     rl.prompt();
-    // Add padding below prompt so it's not flush with terminal bottom,
-    // then move cursor back up to the prompt line.
-    process.stdout.write("\n".repeat(bottomPad));
-    process.stdout.write(`\x1b[${bottomPad}A`);
   };
 
   process.on("SIGINT", () => {
     console.log();
-    drawInputBottom();
     console.log(c("  ◇ goodbye", dim));
     console.log();
     cleanup();
@@ -272,9 +265,6 @@ export async function launchTui(
   promptInput();
 
   for await (const line of rl) {
-    // Move past the bottom padding, then draw box bottom
-    process.stdout.write(`\x1b[${bottomPad}B`);
-    drawInputBottom();
     const input = line.trim();
 
     if (!input) {
