@@ -582,6 +582,33 @@ describe("createStudioServer daemon lifecycle", () => {
     expect(resyncChapterArtifactsMock).toHaveBeenCalledWith("demo-book", 3);
   });
 
+  it("routes export-save through the shared structured interaction runtime", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/books/demo-book/export-save", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ format: "md", approvedOnly: true }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(processProjectInteractionRequestMock).toHaveBeenCalledWith(expect.objectContaining({
+      projectRoot: root,
+      activeBookId: "demo-book",
+      request: expect.objectContaining({
+        intent: "export_book",
+        bookId: "demo-book",
+        format: "md",
+        approvedOnly: true,
+      }),
+    }));
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      chapters: 2,
+    });
+  });
+
   it("routes /api/agent through the shared interaction control layer", async () => {
     processProjectInteractionInputMock.mockResolvedValue({
       request: { intent: "write_next", bookId: "demo-book" },

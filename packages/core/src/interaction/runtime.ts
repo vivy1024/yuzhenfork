@@ -14,6 +14,19 @@ type ReviseMode = "local-fix" | "rewrite";
 
 export interface InteractionRuntimeTools {
   readonly listBooks: () => Promise<ReadonlyArray<string>>;
+  readonly createBook?: (input: {
+    readonly title: string;
+    readonly genre?: string;
+    readonly platform?: string;
+    readonly language?: "zh" | "en";
+    readonly chapterWordCount?: number;
+    readonly targetChapters?: number;
+  }) => Promise<unknown>;
+  readonly exportBook?: (bookId: string, options: {
+    readonly format?: "txt" | "md" | "epub";
+    readonly approvedOnly?: boolean;
+    readonly outputPath?: string;
+  }) => Promise<unknown>;
   readonly chat?: (
     input: string,
     options: {
@@ -42,6 +55,7 @@ export interface InteractionRuntimeTools {
 export interface InteractionRuntimeResult {
   readonly session: InteractionSession;
   readonly responseText?: string;
+  readonly details?: Readonly<Record<string, unknown>>;
 }
 
 interface InteractionToolMetadata {
@@ -50,6 +64,7 @@ interface InteractionToolMetadata {
   readonly currentExecution?: ExecutionState;
   readonly pendingDecision?: PendingDecision;
   readonly responseText?: string;
+  readonly details?: Readonly<Record<string, unknown>>;
 }
 
 function extractToolMetadata(value: unknown): InteractionToolMetadata {
@@ -88,6 +103,19 @@ function buildTaskStartedState(
         bookId: request.bookId ?? session.activeBookId,
         chapterNumber: session.activeChapterNumber,
         stageLabel: "preparing chapter inputs",
+      };
+    case "create_book":
+      return {
+        status: "planning",
+        bookId: request.bookId ?? session.activeBookId,
+        stageLabel: "creating book foundation",
+      };
+    case "export_book":
+      return {
+        status: "persisting",
+        bookId: request.bookId ?? session.activeBookId,
+        chapterNumber: session.activeChapterNumber,
+        stageLabel: "exporting book artifacts",
       };
     case "revise_chapter":
     case "rewrite_chapter":
@@ -240,6 +268,41 @@ export async function runInteractionRequest(params: {
   });
 
   switch (request.intent) {
+    case "create_book": {
+      if (!params.tools.createBook) {
+        throw new Error("Book creation is not implemented in the interaction runtime yet.");
+      }
+      if (!request.title) {
+        throw new Error("Book creation requires a title.");
+      }
+      const toolResult = await params.tools.createBook({
+        title: request.title,
+        genre: request.genre,
+        platform: request.platform,
+        language: request.language,
+        chapterWordCount: request.chapterWordCount,
+        targetChapters: request.targetChapters,
+      });
+      const metadata = extractToolMetadata(toolResult);
+      const createdBookId = typeof toolResult === "object" && toolResult !== null && "bookId" in toolResult
+        && typeof (toolResult as { bookId?: unknown }).bookId === "string"
+        ? (toolResult as { bookId: string }).bookId
+        : undefined;
+      if (!createdBookId) {
+        throw new Error("Create-book tool did not return a book id.");
+      }
+      session = bindActiveBook(session, createdBookId);
+      session = appendToolEvents(session, metadata.events);
+      const completed = {
+        ...markCompleted(session),
+        currentExecution: metadata.currentExecution ?? markCompleted(session).currentExecution,
+      };
+      return {
+        session: addEvent(completed, "task.completed", "completed", `Created ${createdBookId}.`),
+        responseText: metadata.responseText ?? `Created ${createdBookId}.`,
+        details: metadata.details,
+      };
+    }
     case "write_next":
     case "continue_book": {
       const bookId = request.bookId ?? session.activeBookId;
@@ -509,6 +572,32 @@ export async function runInteractionRequest(params: {
             ? `Updated ${request.fileName} for ${bookId}; waiting for your next decision.`
             : `Updated ${request.fileName} for ${bookId}.`
         ),
+      };
+    }
+    case "export_book": {
+      const bookId = request.bookId ?? session.activeBookId;
+      if (!params.tools.exportBook) {
+        throw new Error("Book export is not implemented in the interaction runtime yet.");
+      }
+      if (!bookId) {
+        throw new Error("No active book is bound to the interaction session.");
+      }
+      const toolResult = await params.tools.exportBook(bookId, {
+        format: request.format,
+        approvedOnly: request.approvedOnly,
+        outputPath: request.outputPath,
+      });
+      const metadata = extractToolMetadata(toolResult);
+      session = bindActiveBook(session, bookId, metadata.activeChapterNumber);
+      session = appendToolEvents(session, metadata.events);
+      const completed = {
+        ...markCompleted(session),
+        currentExecution: metadata.currentExecution ?? markCompleted(session).currentExecution,
+      };
+      return {
+        session: addEvent(completed, "task.completed", "completed", `Exported ${bookId}.`),
+        responseText: metadata.responseText ?? `Exported ${bookId}.`,
+        details: metadata.details,
       };
     }
     case "switch_mode":

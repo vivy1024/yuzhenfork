@@ -5,6 +5,8 @@ import { runInteractionRequest } from "../interaction/runtime.js";
 function makeTools(overrides: Partial<Parameters<typeof runInteractionRequest>[0]["tools"]> = {}) {
   return {
     listBooks: vi.fn(async () => ["harbor"]),
+    createBook: vi.fn(),
+    exportBook: vi.fn(),
     writeNextChapter: vi.fn(),
     reviseDraft: vi.fn(),
     patchChapterText: vi.fn(),
@@ -17,6 +19,85 @@ function makeTools(overrides: Partial<Parameters<typeof runInteractionRequest>[0
 }
 
 describe("interaction runtime", () => {
+  it("routes create_book through the shared create tool and binds the created book", async () => {
+    const createBook = vi.fn(async () => ({
+      bookId: "night-harbor",
+      title: "Night Harbor",
+      __interaction: {
+        responseText: "Created Night Harbor.",
+      },
+    }));
+
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-create",
+        projectRoot: "/tmp/project",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      }),
+      request: {
+        intent: "create_book",
+        title: "Night Harbor",
+        genre: "urban",
+        platform: "tomato",
+        targetChapters: 120,
+        chapterWordCount: 2800,
+      },
+      tools: makeTools({
+        createBook,
+      }),
+    });
+
+    expect(createBook).toHaveBeenCalledWith({
+      title: "Night Harbor",
+      genre: "urban",
+      platform: "tomato",
+      targetChapters: 120,
+      chapterWordCount: 2800,
+    });
+    expect(result.session.activeBookId).toBe("night-harbor");
+    expect(result.responseText).toContain("Created Night Harbor.");
+  });
+
+  it("routes export_book through the shared export tool", async () => {
+    const exportBook = vi.fn(async () => ({
+      outputPath: "/tmp/project/exports/harbor.md",
+      chaptersExported: 9,
+      __interaction: {
+        responseText: "Exported harbor to /tmp/project/exports/harbor.md",
+      },
+    }));
+
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-export",
+        projectRoot: "/tmp/project",
+        activeBookId: "harbor",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      }),
+      request: {
+        intent: "export_book",
+        bookId: "harbor",
+        format: "md",
+        approvedOnly: true,
+        outputPath: "/tmp/project/exports/harbor.md",
+      },
+      tools: makeTools({
+        exportBook,
+      }),
+    });
+
+    expect(exportBook).toHaveBeenCalledWith("harbor", {
+      format: "md",
+      approvedOnly: true,
+      outputPath: "/tmp/project/exports/harbor.md",
+    });
+    expect(result.responseText).toContain("Exported harbor");
+  });
+
   it("keeps write_next completed in auto mode", async () => {
     const writeNextChapter = vi.fn(async () => ({
       chapterNumber: 7,

@@ -58,6 +58,24 @@ describe("interaction natural-language router", () => {
     });
   });
 
+  it("maps export-style natural language requests to export_book", () => {
+    expect(routeNaturalLanguageIntent("导出全书", { activeBookId: "harbor" })).toEqual({
+      intent: "export_book",
+      bookId: "harbor",
+      format: "txt",
+    });
+    expect(routeNaturalLanguageIntent("导出全书为 epub", { activeBookId: "harbor" })).toEqual({
+      intent: "export_book",
+      bookId: "harbor",
+      format: "epub",
+    });
+    expect(routeNaturalLanguageIntent("export book as epub", { activeBookId: "harbor" })).toEqual({
+      intent: "export_book",
+      bookId: "harbor",
+      format: "epub",
+    });
+  });
+
   it("maps greetings to chat instead of status explanation", () => {
     expect(routeNaturalLanguageIntent("hi", { activeBookId: "harbor" })).toEqual({
       intent: "chat",
@@ -89,6 +107,10 @@ describe("interaction natural-language router", () => {
   it("maps slash commands for direct control", () => {
     expect(routeNaturalLanguageIntent("/books", { activeBookId: "harbor" })).toEqual({
       intent: "list_books",
+    });
+    expect(routeNaturalLanguageIntent("/new Night Harbor", { activeBookId: "harbor" })).toEqual({
+      intent: "create_book",
+      title: "Night Harbor",
     });
     expect(routeNaturalLanguageIntent("/open beta", { activeBookId: "harbor" })).toEqual({
       intent: "select_book",
@@ -130,6 +152,16 @@ describe("interaction natural-language router", () => {
       chapterNumber: 3,
       targetText: "旧名字",
       replacementText: "新名字",
+    });
+    expect(routeNaturalLanguageIntent("/export", { activeBookId: "harbor" })).toEqual({
+      intent: "export_book",
+      bookId: "harbor",
+      format: "txt",
+    });
+    expect(routeNaturalLanguageIntent("/export md", { activeBookId: "harbor" })).toEqual({
+      intent: "export_book",
+      bookId: "harbor",
+      format: "md",
     });
   });
 

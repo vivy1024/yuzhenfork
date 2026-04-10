@@ -40,6 +40,14 @@ export function routeNaturalLanguageIntent(
     };
   }
 
+  const newCommand = trimmed.match(/^\/new\s+(.+)$/i);
+  if (newCommand) {
+    return {
+      intent: "create_book",
+      title: newCommand[1]!.trim(),
+    };
+  }
+
   const openCommand = trimmed.match(/^\/open\s+(.+)$/i);
   if (openCommand) {
     return {
@@ -133,6 +141,15 @@ export function routeNaturalLanguageIntent(
     };
   }
 
+  const slashExport = trimmed.match(/^\/export(?:\s+(txt|md|epub))?$/i);
+  if (slashExport) {
+    return {
+      intent: "export_book",
+      ...(bookId ? { bookId } : {}),
+      format: (slashExport[1]?.toLowerCase() as "txt" | "md" | "epub" | undefined) ?? "txt",
+    };
+  }
+
   const rewriteMatch = trimmed.match(/(?:rewrite chapter|重写第)\s*(\d+)\s*(?:章)?/i);
   if (rewriteMatch) {
     return {
@@ -194,6 +211,15 @@ export function routeNaturalLanguageIntent(
       intent: "explain_failure",
       ...(bookId ? { bookId } : {}),
       instruction: trimmed,
+    };
+  }
+
+  if (/^(导出全书(?:为\s*(epub|md|txt))?|export book(?: as)?\s*(epub|md|txt)?)$/i.test(trimmed)) {
+    const matchedFormat = trimmed.match(/(epub|md|txt)/i)?.[1]?.toLowerCase() as "txt" | "md" | "epub" | undefined;
+    return {
+      intent: "export_book",
+      ...(bookId ? { bookId } : {}),
+      format: matchedFormat ?? "txt",
     };
   }
 

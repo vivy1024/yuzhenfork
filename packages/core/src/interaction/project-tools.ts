@@ -1,5 +1,5 @@
-import { writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import type {
   InteractionEvent,
   Logger,
@@ -7,13 +7,17 @@ import type {
   StateManager,
   ReviseMode,
   LLMClient,
+  BookConfig,
+  Platform,
 } from "../index.js";
 import { chatCompletion } from "../index.js";
 import { executeEditTransaction } from "./edit-controller.js";
 import type { InteractionRuntimeTools } from "./runtime.js";
 
-type PipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft">;
-type StateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir" | "loadChapterIndex" | "saveChapterIndex" | "listBooks">;
+type PipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft"> & {
+  readonly initBook?: PipelineRunner["initBook"];
+};
+type StateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir" | "loadBookConfig" | "loadChapterIndex" | "saveChapterIndex" | "listBooks">;
 type InstrumentablePipelineLike = PipelineLike & {
   readonly config?: {
     logger?: Logger;
@@ -21,6 +25,121 @@ type InstrumentablePipelineLike = PipelineLike & {
     model?: string;
   };
 };
+
+function normalizePlatform(platform?: string): Platform {
+  switch (platform) {
+    case "tomato":
+    case "feilu":
+    case "qidian":
+      return platform;
+    default:
+      return "other";
+  }
+}
+
+function deriveBookId(title: string): string {
+  return title
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 30);
+}
+
+function buildBookConfig(input: {
+  readonly title: string;
+  readonly genre?: string;
+  readonly platform?: string;
+  readonly language?: "zh" | "en";
+  readonly chapterWordCount?: number;
+  readonly targetChapters?: number;
+}): BookConfig {
+  const now = new Date().toISOString();
+  return {
+    id: deriveBookId(input.title),
+    title: input.title,
+    platform: normalizePlatform(input.platform),
+    genre: input.genre ?? "other",
+    status: "outlining",
+    targetChapters: input.targetChapters ?? 200,
+    chapterWordCount: input.chapterWordCount ?? 3000,
+    ...(input.language ? { language: input.language } : {}),
+    createdAt: now,
+    updatedAt: now,
+  };
+}
+
+async function exportBookToPath(state: StateLike, bookId: string, options: {
+  readonly format?: "txt" | "md" | "epub";
+  readonly approvedOnly?: boolean;
+  readonly outputPath?: string;
+}) {
+  const format = options.format ?? "txt";
+  const index = await state.loadChapterIndex(bookId);
+  const book = await state.loadBookConfig(bookId);
+  const chapters = options.approvedOnly
+    ? index.filter((chapter) => chapter.status === "approved")
+    : index;
+
+  if (chapters.length === 0) {
+    throw new Error("No chapters to export.");
+  }
+
+  const bookDir = state.bookDir(bookId);
+  const chaptersDir = join(bookDir, "chapters");
+  const projectRoot = dirname(dirname(bookDir));
+  const outputPath = options.outputPath ?? join(projectRoot, `${bookId}_export.${format}`);
+
+  if (format === "epub") {
+    const sections: string[] = [
+      "<!DOCTYPE html>",
+      `<html><head><meta charset="utf-8"><title>${book.title}</title><style>body{font-family:serif;max-width:40em;margin:auto;padding:2em;line-height:1.8}h2{margin-top:3em}</style></head><body>`,
+      `<h1>${book.title}</h1>`,
+    ];
+
+    for (const chapter of chapters) {
+      const padded = String(chapter.number).padStart(4, "0");
+      const files = await readdir(chaptersDir);
+      const match = files.find((file) => file.startsWith(padded) && file.endsWith(".md"));
+      if (!match) {
+        continue;
+      }
+      const markdown = await readFile(join(chaptersDir, match), "utf-8");
+      const title = markdown.match(/^#\s+(.+)/m)?.[1] ?? match.replace(/\.md$/, "");
+      const htmlBody = markdown
+        .split("\n")
+        .filter((line) => !line.startsWith("#"))
+        .map((line) => line.trim() ? `<p>${line}</p>` : "")
+        .join("\n");
+      sections.push(`<h2>${title}</h2>`);
+      sections.push(htmlBody);
+    }
+    sections.push("</body></html>");
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, sections.join("\n"), "utf-8");
+  } else {
+    const parts: string[] = [];
+    parts.push(format === "md" ? `# ${book.title}\n\n---\n` : `${book.title}\n\n`);
+    for (const chapter of chapters) {
+      const padded = String(chapter.number).padStart(4, "0");
+      const files = await readdir(chaptersDir);
+      const match = files.find((file) => file.startsWith(padded) && file.endsWith(".md"));
+      if (!match) {
+        continue;
+      }
+      parts.push(await readFile(join(chaptersDir, match), "utf-8"));
+      parts.push("\n\n");
+    }
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, parts.join(format === "md" ? "\n---\n\n" : "\n"), "utf-8");
+  }
+
+  return {
+    outputPath,
+    chaptersExported: chapters.length,
+    totalWords: chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0),
+    format,
+  };
+}
 
 function mapStageMessageToStatus(message: string): InteractionEvent["status"] | undefined {
   const lower = message.trim().toLowerCase();
@@ -201,6 +320,39 @@ export function createInteractionToolsFromDeps(
 
   return {
     listBooks: () => state.listBooks(),
+    createBook: async (input) => {
+      const book = buildBookConfig(input);
+      if (!pipeline.initBook) {
+        throw new Error("Pipeline does not support shared book creation.");
+      }
+      await pipeline.initBook(book);
+      return {
+        bookId: book.id,
+        title: book.title,
+        __interaction: {
+          responseText: `Created ${book.title} (${book.id}).`,
+          details: {
+            bookId: book.id,
+            title: book.title,
+          },
+        },
+      };
+    },
+    exportBook: async (bookId, options) => {
+      const result = await exportBookToPath(state, bookId, options);
+      return {
+        ...result,
+        __interaction: {
+          responseText: `Exported ${bookId} to ${result.outputPath} (${result.chaptersExported} chapters).`,
+          details: {
+            outputPath: result.outputPath,
+            chaptersExported: result.chaptersExported,
+            totalWords: result.totalWords,
+            format: result.format,
+          },
+        },
+      };
+    },
     chat: async (input, options) => {
       const bookLabel = options.bookId ?? "none";
       const response = instrumentedPipeline.config?.client && instrumentedPipeline.config?.model

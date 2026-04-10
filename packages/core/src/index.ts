@@ -113,7 +113,10 @@ export {
   routeNaturalLanguageIntent,
   type NaturalLanguageRoutingContext,
 } from "./interaction/nl-router.js";
-export { processProjectInteractionInput } from "./interaction/project-control.js";
+export {
+  processProjectInteractionInput,
+  processProjectInteractionRequest,
+} from "./interaction/project-control.js";
 export { createInteractionToolsFromDeps } from "./interaction/project-tools.js";
 export {
   normalizeTruthFileName,
