@@ -57,6 +57,41 @@ export const HookAgendaSchema = z.object({
 
 export type HookAgenda = z.infer<typeof HookAgendaSchema>;
 
+export const ChapterBeatPhaseSchema = z.enum([
+  "opening",
+  "development",
+  "reversal",
+  "payoff",
+  "hook",
+]);
+export type ChapterBeatPhase = z.infer<typeof ChapterBeatPhaseSchema>;
+
+export const ChapterBeatSchema = z.object({
+  phase: ChapterBeatPhaseSchema,
+  instruction: z.string().min(1),
+});
+export type ChapterBeat = z.infer<typeof ChapterBeatSchema>;
+
+export const ChapterHookMoveSchema = z.object({
+  hookId: z.string().min(1),
+  movement: HookMovementSchema,
+  targetEffect: z.string().min(1),
+});
+export type ChapterHookMove = z.infer<typeof ChapterHookMoveSchema>;
+
+export const ChapterBriefSchema = z.object({
+  chapter: z.number().int().min(1),
+  goal: z.string().min(1),
+  chapterType: z.string().min(1),
+  isGoldenOpening: z.boolean().default(false),
+  beatOutline: z.array(ChapterBeatSchema).min(1),
+  hookPlan: z.array(ChapterHookMoveSchema).default([]),
+  dormantReason: z.string().optional(),
+  propsAndSetting: z.array(z.string().min(1)).default([]),
+});
+
+export type ChapterBrief = z.infer<typeof ChapterBriefSchema>;
+
 export const ChapterIntentSchema = z.object({
   chapter: z.number().int().min(1),
   goal: z.string().min(1),

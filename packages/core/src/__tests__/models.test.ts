@@ -13,6 +13,7 @@ import {
   InputGovernanceModeSchema,
 } from "../models/project.js";
 import {
+  ChapterBriefSchema,
   ChapterIntentSchema,
   ContextPackageSchema,
   RuleStackSchema,
@@ -588,6 +589,58 @@ describe("ChapterIntentSchema", () => {
         goal: "Bad chapter",
       }),
     ).toThrow();
+  });
+});
+
+describe("ChapterBriefSchema", () => {
+  it("accepts a structured chapter brief without mustKeep", () => {
+    const result = ChapterBriefSchema.parse({
+      chapter: 12,
+      goal: "Force the heroine to choose between the ledger and the mentor debt.",
+      chapterType: "confrontation",
+      isGoldenOpening: true,
+      beatOutline: [
+        { phase: "opening", instruction: "Open inside the warehouse argument, not with recap." },
+        { phase: "development", instruction: "Expose the ledger discrepancy through action, not explanation." },
+        { phase: "hook", instruction: "End on the unsigned transfer sheet changing hands." },
+      ],
+      hookPlan: [
+        {
+          hookId: "H019",
+          movement: "advance",
+          targetEffect: "Move the mentor-debt line from abstract guilt to immediate cost.",
+        },
+      ],
+      dormantReason: "Hold the black-ring line for the next pressure spike.",
+      propsAndSetting: ["warehouse transfer sheet", "wet loading dock", "A Sheng"],
+    });
+
+    expect(result.chapterType).toBe("confrontation");
+    expect(result.isGoldenOpening).toBe(true);
+    expect(result.beatOutline).toHaveLength(3);
+    expect(result.hookPlan).toEqual([
+      expect.objectContaining({
+        hookId: "H019",
+        movement: "advance",
+      }),
+    ]);
+    expect(result.propsAndSetting).toContain("wet loading dock");
+  });
+
+  it("defaults optional brief arrays to empty", () => {
+    const result = ChapterBriefSchema.parse({
+      chapter: 3,
+      goal: "Lock the protagonist into the first irreversible choice.",
+      chapterType: "opening",
+      beatOutline: [
+        { phase: "opening", instruction: "Open on the conflict." },
+      ],
+    });
+
+    expect(result.isGoldenOpening).toBe(false);
+    expect(result.hookPlan).toEqual([]);
+    expect(result.propsAndSetting).toEqual([]);
+    expect(result.dormantReason).toBeUndefined();
   });
 });
 

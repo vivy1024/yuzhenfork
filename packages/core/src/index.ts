@@ -38,6 +38,10 @@ export {
 } from "./models/runtime-state.js";
 export {
   type ChapterConflict,
+  type ChapterBeatPhase,
+  type ChapterBeat,
+  type ChapterHookMove,
+  type ChapterBrief,
   type HookMovement,
   type HookPressureLevel,
   type HookPressure,
@@ -52,6 +56,10 @@ export {
   type RuleStack,
   type ChapterTrace,
   ChapterConflictSchema,
+  ChapterBeatPhaseSchema,
+  ChapterBeatSchema,
+  ChapterHookMoveSchema,
+  ChapterBriefSchema,
   HookMovementSchema,
   HookPressureLevelSchema,
   HookPressureSchema,
@@ -68,6 +76,15 @@ export {
 } from "./models/input-governance.js";
 export { PlannerAgent, type PlanChapterInput, type PlanChapterOutput } from "./agents/planner.js";
 export { ComposerAgent, type ComposeChapterInput, type ComposeChapterOutput } from "./agents/composer.js";
+export {
+  buildPlannerSystemPrompt,
+  buildPlannerUserPrompt,
+  type PlannerPromptInput,
+} from "./agents/planner-prompts.js";
+export {
+  gatherPlanningMaterials,
+  type PlanningMaterials,
+} from "./utils/planning-materials.js";
 
 // LLM
 export { createLLMClient, chatCompletion, chatWithTools, createStreamMonitor, PartialResponseError, type LLMClient, type LLMResponse, type LLMMessage, type ToolDefinition, type ToolCall, type AgentMessage, type ChatWithToolsResult, type StreamProgress, type OnStreamProgress } from "./llm/provider.js";

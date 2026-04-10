@@ -8,10 +8,10 @@ import {
   parseChapterSummariesMarkdown,
   renderHookSnapshot,
   renderSummarySnapshot,
-  retrieveMemorySelection,
 } from "../utils/memory-retrieval.js";
 import { analyzeChapterCadence } from "../utils/chapter-cadence.js";
 import { buildPlannerHookAgenda } from "../utils/hook-agenda.js";
+import { gatherPlanningMaterials } from "../utils/planning-materials.js";
 
 export interface PlanChapterInput {
   readonly book: BookConfig;
@@ -37,50 +37,37 @@ export class PlannerAgent extends BaseAgent {
     const runtimeDir = join(storyDir, "runtime");
     await mkdir(runtimeDir, { recursive: true });
 
-    const sourcePaths = {
-      authorIntent: join(storyDir, "author_intent.md"),
-      currentFocus: join(storyDir, "current_focus.md"),
-      storyBible: join(storyDir, "story_bible.md"),
-      volumeOutline: join(storyDir, "volume_outline.md"),
-      chapterSummaries: join(storyDir, "chapter_summaries.md"),
-      bookRules: join(storyDir, "book_rules.md"),
-      currentState: join(storyDir, "current_state.md"),
-    } as const;
-
-    const [
-      authorIntent,
-      currentFocus,
-      storyBible,
-      volumeOutline,
-      chapterSummaries,
-      bookRulesRaw,
-      currentState,
-    ] = await Promise.all([
-      this.readFileOrDefault(sourcePaths.authorIntent),
-      this.readFileOrDefault(sourcePaths.currentFocus),
-      this.readFileOrDefault(sourcePaths.storyBible),
-      this.readFileOrDefault(sourcePaths.volumeOutline),
-      this.readFileOrDefault(sourcePaths.chapterSummaries),
-      this.readFileOrDefault(sourcePaths.bookRules),
-      this.readFileOrDefault(sourcePaths.currentState),
-    ]);
+    const volumeOutline = await this.readFileOrDefault(join(storyDir, "volume_outline.md"));
 
     const outlineNode = this.findOutlineNode(volumeOutline, input.chapterNumber);
     const matchedOutlineAnchor = this.hasMatchedOutlineAnchor(volumeOutline, input.chapterNumber);
-    const goal = this.deriveGoal(input.externalContext, currentFocus, authorIntent, outlineNode, input.chapterNumber);
-    const parsedRules = parseBookRules(bookRulesRaw);
-    const mustKeep = this.collectMustKeep(currentState, storyBible);
-    const mustAvoid = this.collectMustAvoid(currentFocus, parsedRules.rules.prohibitions);
-    const styleEmphasis = this.collectStyleEmphasis(authorIntent, currentFocus);
-    const conflicts = this.collectConflicts(input.externalContext, currentFocus, outlineNode, volumeOutline);
+    const seedMaterials = await gatherPlanningMaterials({
+      bookDir: input.bookDir,
+      chapterNumber: input.chapterNumber,
+      goal: this.deriveGoal(input.externalContext, "", "", outlineNode, input.chapterNumber),
+      outlineNode,
+    });
+    const goal = this.deriveGoal(
+      input.externalContext,
+      seedMaterials.currentFocus,
+      seedMaterials.authorIntent,
+      outlineNode,
+      input.chapterNumber,
+    );
+    const parsedRules = parseBookRules(seedMaterials.bookRulesRaw);
+    const mustKeep = this.collectMustKeep(seedMaterials.currentState, seedMaterials.storyBible);
+    const mustAvoid = this.collectMustAvoid(seedMaterials.currentFocus, parsedRules.rules.prohibitions);
+    const styleEmphasis = this.collectStyleEmphasis(seedMaterials.authorIntent, seedMaterials.currentFocus);
+    const conflicts = this.collectConflicts(input.externalContext, seedMaterials.currentFocus, outlineNode, volumeOutline);
     const planningAnchor = conflicts.length > 0 ? undefined : outlineNode;
-    const memorySelection = await retrieveMemorySelection({
+    const materials = await gatherPlanningMaterials({
       bookDir: input.bookDir,
       chapterNumber: input.chapterNumber,
       goal,
       outlineNode: planningAnchor,
       mustKeep,
     });
+    const memorySelection = materials.memorySelection;
     const activeHookCount = memorySelection.activeHooks.filter(
       (hook) => hook.status !== "resolved" && hook.status !== "deferred",
     ).length;
@@ -91,13 +78,13 @@ export class PlannerAgent extends BaseAgent {
       language: input.book.language ?? "zh",
     });
     const directives = this.buildStructuredDirectives({
-      chapterNumber: input.chapterNumber,
-      language: input.book.language,
-      volumeOutline,
-      outlineNode,
-      matchedOutlineAnchor,
-      chapterSummaries,
-    });
+          chapterNumber: input.chapterNumber,
+          language: input.book.language,
+          volumeOutline,
+          outlineNode,
+          matchedOutlineAnchor,
+          chapterSummaries: materials.chapterSummariesRaw,
+        });
 
     // ── Skill injection: translate writing methodology into concrete rules ──
     this.injectStructuralSkills({
@@ -110,7 +97,7 @@ export class PlannerAgent extends BaseAgent {
       hookAgenda,
       cadence: analyzeChapterCadence({
         language: this.isChineseLanguage(input.book.language) ? "zh" : "en",
-        rows: parseChapterSummariesMarkdown(chapterSummaries)
+        rows: parseChapterSummariesMarkdown(materials.chapterSummariesRaw)
           .filter((s) => s.chapter < input.chapterNumber)
           .sort((a, b) => a.chapter - b.chapter)
           .slice(-4)
@@ -144,9 +131,7 @@ export class PlannerAgent extends BaseAgent {
       intent,
       intentMarkdown,
       plannerInputs: [
-        ...Object.values(sourcePaths),
-        join(storyDir, "pending_hooks.md"),
-        ...(memorySelection.dbPath ? [memorySelection.dbPath] : []),
+        ...materials.plannerInputs,
       ],
       runtimePath,
     };
