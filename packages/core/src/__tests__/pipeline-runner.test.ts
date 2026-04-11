@@ -8,7 +8,7 @@ import * as llmProvider from "../llm/provider.js";
 import { StateManager } from "../state/manager.js";
 import { ArchitectAgent } from "../agents/architect.js";
 import { PlannerAgent } from "../agents/planner.js";
-import { ComposerAgent } from "../agents/composer.js";
+import * as ComposerModule from "../agents/composer.js";
 import { WriterAgent, type WriteChapterOutput } from "../agents/writer.js";
 import { LengthNormalizerAgent } from "../agents/length-normalizer.js";
 import { ContinuityAuditor, type AuditIssue, type AuditResult } from "../agents/continuity.js";
@@ -525,8 +525,25 @@ describe("PipelineRunner", () => {
       writeFile(join(state.bookDir(bookId), "story", "pending_hooks.md"), "# Pending Hooks\n\n- Why the mentor vanished after the trial.\n", "utf-8"),
     ]);
 
-    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter");
-    const composeChapter = vi.spyOn(ComposerAgent.prototype, "composeChapter");
+    const originalPlanChapter = PlannerAgent.prototype.planChapter;
+    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter").mockImplementation(async function (this: PlannerAgent, input) {
+      const result = await originalPlanChapter.call(this, input);
+      return {
+        ...result,
+        brief: {
+          chapter: input.chapterNumber,
+          goal: result.intent.goal,
+          chapterType: "confrontation",
+          isGoldenOpening: true,
+          beatOutline: [
+            { phase: "opening", instruction: "Open on the conflict." },
+          ],
+          hookPlan: [],
+          propsAndSetting: ["broken oath token"],
+        },
+      };
+    });
+    const composeChapter = vi.spyOn(ComposerModule, "composeGovernedChapter");
     const writeChapter = vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(
       createWriterOutput({
         chapterNumber: 1,
@@ -544,6 +561,9 @@ describe("PipelineRunner", () => {
       const writeInput = writeChapter.mock.calls[0]?.[0];
       expect(writeInput?.externalContext).toBeUndefined();
       expect(writeInput?.chapterIntent).toContain("# Chapter Intent");
+      expect(writeInput?.chapterBrief).toEqual(expect.objectContaining({
+        chapter: 1,
+      }));
       expect(writeInput?.contextPackage?.selectedContext.length).toBeGreaterThan(0);
       expect(writeInput?.ruleStack?.activeOverrides).toHaveLength(1);
 
@@ -603,7 +623,24 @@ describe("PipelineRunner", () => {
       ),
     ]);
 
-    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter");
+    const originalPlanChapter = PlannerAgent.prototype.planChapter;
+    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter").mockImplementation(async function (this: PlannerAgent, input) {
+      const result = await originalPlanChapter.call(this, input);
+      return {
+        ...result,
+        brief: {
+          chapter: input.chapterNumber,
+          goal: result.intent.goal,
+          chapterType: "confrontation",
+          isGoldenOpening: true,
+          beatOutline: [
+            { phase: "opening", instruction: "Open on the conflict." },
+          ],
+          hookPlan: [],
+          propsAndSetting: ["broken oath token"],
+        },
+      };
+    });
     const writeChapter = vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(
       createWriterOutput({
         chapterNumber: 1,
@@ -1121,8 +1158,25 @@ describe("PipelineRunner", () => {
       writeFile(join(state.bookDir(bookId), "story", "pending_hooks.md"), "# Pending Hooks\n\n- Why the mentor vanished after the trial.\n", "utf-8"),
     ]);
 
-    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter");
-    const composeChapter = vi.spyOn(ComposerAgent.prototype, "composeChapter");
+    const originalPlanChapter = PlannerAgent.prototype.planChapter;
+    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter").mockImplementation(async function (this: PlannerAgent, input) {
+      const result = await originalPlanChapter.call(this, input);
+      return {
+        ...result,
+        brief: {
+          chapter: input.chapterNumber,
+          goal: result.intent.goal,
+          chapterType: "confrontation",
+          isGoldenOpening: true,
+          beatOutline: [
+            { phase: "opening", instruction: "Open on the conflict." },
+          ],
+          hookPlan: [],
+          propsAndSetting: ["broken oath token"],
+        },
+      };
+    });
+    const composeChapter = vi.spyOn(ComposerModule, "composeGovernedChapter");
     const writeChapter = vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(
       createWriterOutput({
         chapterNumber: 1,
@@ -1145,6 +1199,9 @@ describe("PipelineRunner", () => {
       expect(composeChapter).toHaveBeenCalledTimes(1);
       const writeInput = writeChapter.mock.calls[0]?.[0];
       expect(writeInput?.chapterIntent).toContain("# Chapter Intent");
+      expect(writeInput?.chapterBrief).toEqual(expect.objectContaining({
+        chapter: 1,
+      }));
       expect(writeInput?.contextPackage?.selectedContext.length).toBeGreaterThan(0);
     } finally {
       await rm(root, { recursive: true, force: true });
@@ -1825,7 +1882,7 @@ describe("PipelineRunner", () => {
     });
 
     const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter");
-    const composeChapter = vi.spyOn(ComposerAgent.prototype, "composeChapter");
+    const composeChapter = vi.spyOn(ComposerModule, "composeGovernedChapter");
     const writeChapter = vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(
       createWriterOutput({
         chapterNumber: 1,

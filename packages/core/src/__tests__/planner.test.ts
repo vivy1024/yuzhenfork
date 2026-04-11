@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -1478,5 +1478,74 @@ describe("PlannerAgent", () => {
       chapterNumber: 5,
     });
     expect(result5.intent.outlineNode).toContain("正面交锋");
+  });
+
+  it("uses the LLM chapter brief when planner output is valid", async () => {
+    const planner = new PlannerAgent({
+      client: {} as ConstructorParameters<typeof PlannerAgent>[0]["client"],
+      model: "test-model",
+      projectRoot: root,
+      bookId: book.id,
+    });
+
+    vi.spyOn(planner as unknown as { chat: (...args: unknown[]) => Promise<{ content: string }> }, "chat")
+      .mockResolvedValue({
+        content: JSON.stringify({
+          chapter: 3,
+          goal: "Force the warehouse confrontation before the guild escapes.",
+          chapterType: "confrontation",
+          isGoldenOpening: true,
+          beatOutline: [
+            { phase: "opening", instruction: "Open inside the warehouse argument." },
+            { phase: "development", instruction: "Push the unsigned transfer sheet into the scene." },
+            { phase: "hook", instruction: "End with the escape route changing hands." },
+          ],
+          hookPlan: [
+            {
+              hookId: "H019",
+              movement: "advance",
+              targetEffect: "Turn the mentor debt into an immediate cost.",
+            },
+          ],
+          dormantReason: "Hold the canal line until the next chapter.",
+          propsAndSetting: ["warehouse transfer sheet", "wet dock", "A Sheng"],
+        }),
+      });
+
+    const result = await planner.planChapter({
+      book,
+      bookDir,
+      chapterNumber: 3,
+    });
+
+    expect(result.brief?.chapterType).toBe("confrontation");
+    expect(result.intent.goal).toContain("warehouse confrontation");
+    expect(result.intent.arcDirective).toContain("opening: Open inside the warehouse argument.");
+    expect(result.intent.sceneDirective).toContain("warehouse transfer sheet");
+    await expect(readFile(result.runtimePath, "utf-8")).resolves.toContain("## Chapter Brief");
+  });
+
+  it("falls back to the legacy planner when the LLM chapter brief is invalid", async () => {
+    const planner = new PlannerAgent({
+      client: {} as ConstructorParameters<typeof PlannerAgent>[0]["client"],
+      model: "test-model",
+      projectRoot: root,
+      bookId: book.id,
+    });
+
+    vi.spyOn(planner as unknown as { chat: (...args: unknown[]) => Promise<{ content: string }> }, "chat")
+      .mockResolvedValue({
+        content: "{\"bad\":true}",
+      });
+
+    const result = await planner.planChapter({
+      book,
+      bookDir,
+      chapterNumber: 3,
+    });
+
+    expect(result.brief).toBeUndefined();
+    expect(result.intent.goal).toContain("merchant guild's escape route");
+    await expect(readFile(result.runtimePath, "utf-8")).resolves.not.toContain("## Chapter Brief");
   });
 });

@@ -15,7 +15,7 @@ import {
   type PostWriteViolation,
 } from "./post-write-validator.js";
 import { analyzeAITells } from "./ai-tells.js";
-import type { ChapterTrace, ContextPackage, RuleStack } from "../models/input-governance.js";
+import type { ChapterBrief, ChapterTrace, ContextPackage, RuleStack } from "../models/input-governance.js";
 import type { LengthSpec } from "../models/length-governance.js";
 import type { RuntimeStateDelta } from "../models/runtime-state.js";
 import { buildLengthSpec, countChapterLength } from "../utils/length-metrics.js";
@@ -48,6 +48,7 @@ export interface WriteChapterInput {
   readonly chapterNumber: number;
   readonly externalContext?: string;
   readonly chapterIntent?: string;
+  readonly chapterBrief?: ChapterBrief;
   readonly contextPackage?: ContextPackage;
   readonly ruleStack?: RuleStack;
   readonly trace?: ChapterTrace;
@@ -194,6 +195,7 @@ export class WriterAgent extends BaseAgent {
       ? this.buildGovernedUserPrompt({
           chapterNumber,
           chapterIntent: input.chapterIntent,
+          chapterBrief: input.chapterBrief,
           contextPackage: input.contextPackage,
           ruleStack: input.ruleStack,
           trace: input.trace,
@@ -811,6 +813,7 @@ ${lengthRequirementBlock}
   private buildGovernedUserPrompt(params: {
     readonly chapterNumber: number;
     readonly chapterIntent: string;
+    readonly chapterBrief?: ChapterBrief;
     readonly contextPackage: ContextPackage;
     readonly ruleStack: RuleStack;
     readonly trace?: ChapterTrace;
@@ -846,12 +849,28 @@ ${lengthRequirementBlock}
       ? `\n${sanitizeNarrativeEvidenceBlock(params.selectedEvidenceBlock, language)}\n`
       : "";
     const narrativeIntent = buildNarrativeIntentBrief(params.chapterIntent, language);
+    const briefBlock = params.chapterBrief
+      ? [
+          language === "en" ? "## Chapter Brief" : "## 章节简报",
+          `- chapterType: ${params.chapterBrief.chapterType}`,
+          `- isGoldenOpening: ${params.chapterBrief.isGoldenOpening ? "true" : "false"}`,
+          ...(params.chapterBrief.beatOutline.length > 0
+            ? params.chapterBrief.beatOutline.map((beat) => `- ${beat.phase}: ${beat.instruction}`)
+            : []),
+          ...(params.chapterBrief.propsAndSetting.length > 0
+            ? [`- propsAndSetting: ${params.chapterBrief.propsAndSetting.join(", ")}`]
+            : []),
+          "",
+        ].join("\n")
+      : "";
 
     if (params.language === "en") {
       return `Write chapter ${params.chapterNumber}.
 
 ## Chapter Intent
 ${narrativeIntent || "(none)"}
+
+${briefBlock}
 
 ## Selected Context
 ${contextSections || "(none)"}
@@ -878,6 +897,8 @@ ${lengthRequirementBlock}
 
 ## 本章意图
 ${narrativeIntent || "(无)"}
+
+${briefBlock}
 
 ## 已选上下文
 ${contextSections || "(无)"}

@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join, relative } from "node:path";
 import type { PlanChapterOutput } from "../agents/planner.js";
-import { ChapterIntentSchema } from "../models/input-governance.js";
+import { ChapterBriefSchema, ChapterIntentSchema } from "../models/input-governance.js";
 
 export async function loadPersistedPlan(
   bookDir: string,
@@ -46,6 +46,7 @@ export async function loadPersistedPlan(
         styleEmphasis: readIntentList(sections, "Style Emphasis"),
         conflicts,
       }),
+      brief: parsePersistedChapterBrief(sections, chapterNumber),
       intentMarkdown,
       plannerInputs: [runtimePath],
       runtimePath,
@@ -88,6 +89,89 @@ function readIntentList(sections: Map<string, string[]>, name: string): string[]
     .map((line) => line.trim())
     .filter((line) => line.startsWith("-") && line !== "- none")
     .map((line) => line.replace(/^-\s*/, ""));
+}
+
+function parsePersistedChapterBrief(
+  sections: Map<string, string[]>,
+  chapterNumber: number,
+) {
+  const lines = sections.get("Chapter Brief") ?? [];
+  if (lines.length === 0) {
+    return undefined;
+  }
+
+  const scalarMap = new Map<string, string>();
+  const beatOutline: Array<{ phase: "opening" | "development" | "reversal" | "payoff" | "hook"; instruction: string }> = [];
+  const hookPlan: Array<{ hookId: string; movement: "quiet-hold" | "refresh" | "advance" | "partial-payoff" | "full-payoff"; targetEffect: string }> = [];
+  const propsAndSetting: string[] = [];
+
+  let currentSubsection: string | null = null;
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (line.startsWith("### ")) {
+      currentSubsection = line.slice(4).trim();
+      continue;
+    }
+
+    if (currentSubsection === null && line.startsWith("- ")) {
+      const separator = line.indexOf(":");
+      if (separator > 2) {
+        scalarMap.set(line.slice(2, separator).trim(), line.slice(separator + 1).trim());
+      }
+      continue;
+    }
+
+    if (currentSubsection === "Beat Outline" && line.startsWith("- ")) {
+      const separator = line.indexOf(":");
+      if (separator > 2) {
+        const phase = line.slice(2, separator).trim();
+        const instruction = line.slice(separator + 1).trim();
+        if (phase && instruction) {
+          beatOutline.push({
+            phase: phase as "opening" | "development" | "reversal" | "payoff" | "hook",
+            instruction,
+          });
+        }
+      }
+      continue;
+    }
+
+    if (currentSubsection === "Hook Plan" && line.startsWith("- ") && line !== "- none") {
+      const [left, right] = line.slice(2).split("->").map((part) => part.trim());
+      if (left && right) {
+        const [hookId, movement] = left.split(":").map((part) => part.trim());
+        if (hookId && movement) {
+          hookPlan.push({
+            hookId,
+            movement: movement as "quiet-hold" | "refresh" | "advance" | "partial-payoff" | "full-payoff",
+            targetEffect: right,
+          });
+        }
+      }
+      continue;
+    }
+
+    if (currentSubsection === "Props And Setting" && line.startsWith("- ") && line !== "- none") {
+      propsAndSetting.push(line.replace(/^-\s*/, ""));
+    }
+  }
+
+  if (beatOutline.length === 0) {
+    return undefined;
+  }
+
+  return ChapterBriefSchema.parse({
+    chapter: chapterNumber,
+    goal: readIntentScalar(sections, "Goal") ?? scalarMap.get("goal"),
+    chapterType: scalarMap.get("chapterType") ?? "unspecified",
+    isGoldenOpening: scalarMap.get("isGoldenOpening") === "true",
+    beatOutline,
+    hookPlan,
+    propsAndSetting,
+    dormantReason: scalarMap.get("dormantReason"),
+  });
 }
 
 function isInvalidPersistedIntentScalar(value: string): boolean {

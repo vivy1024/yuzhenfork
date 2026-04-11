@@ -75,7 +75,12 @@ export {
   ChapterTraceSchema,
 } from "./models/input-governance.js";
 export { PlannerAgent, type PlanChapterInput, type PlanChapterOutput } from "./agents/planner.js";
-export { ComposerAgent, type ComposeChapterInput, type ComposeChapterOutput } from "./agents/composer.js";
+export {
+  ComposerAgent,
+  composeGovernedChapter,
+  type ComposeChapterInput,
+  type ComposeChapterOutput,
+} from "./agents/composer.js";
 export {
   buildPlannerSystemPrompt,
   buildPlannerUserPrompt,

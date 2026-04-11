@@ -80,6 +80,18 @@ describe("ComposerAgent", () => {
           avoidNewHookFamilies: [],
         },
       },
+      brief: {
+        chapter: 4,
+        goal: "Bring the focus back to the mentor conflict.",
+        chapterType: "confrontation",
+        isGoldenOpening: false,
+        beatOutline: [
+          { phase: "opening", instruction: "Open inside the mentor argument." },
+          { phase: "development", instruction: "Bring the oath token back into the scene." },
+        ],
+        hookPlan: [],
+        propsAndSetting: ["broken oath token"],
+      },
       intentMarkdown: "# Chapter Intent\n",
       plannerInputs: [
         join(storyDir, "author_intent.md"),
@@ -112,7 +124,8 @@ describe("ComposerAgent", () => {
     });
 
     const selectedSources = result.contextPackage.selectedContext.map((entry) => entry.source);
-    expect(selectedSources.slice(0, 4)).toEqual([
+    expect(selectedSources.slice(0, 5)).toEqual([
+      "runtime/chapter_brief",
       "story/current_focus.md",
       "story/current_state.md",
       "story/story_bible.md",
@@ -567,5 +580,80 @@ describe("ComposerAgent", () => {
     expect(hookDebtEntry?.excerpt).toContain("读者承诺");
     expect(hookDebtEntry?.excerpt).toContain("River Camp");
     expect(hookDebtEntry?.excerpt).toContain("Trial Echo");
+  });
+
+  it("includes brief-selected hook ids in hook debt retrieval even before hookAgenda is updated", async () => {
+    await Promise.all([
+      writeFile(
+        join(storyDir, "pending_hooks.md"),
+        [
+          "# Pending Hooks",
+          "",
+          "| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 备注 |",
+          "| --- | --- | --- | --- | --- | --- | --- | --- |",
+          "| black-ring | 6 | mystery | open | 7 | 揭开黑戒来源 | 中程 | 这一根还没进旧 hookAgenda |",
+          "",
+        ].join("\n"),
+        "utf-8",
+      ),
+      writeFile(
+        join(storyDir, "chapter_summaries.md"),
+        [
+          "# Chapter Summaries",
+          "",
+          "| 6 | Black Ring | Lin Yue | Black ring first surfaces | Pressure rises | black-ring seeded | uneasy | mystery |",
+          "| 7 | Wet Dock | Lin Yue | Ring clue points to the dock | Stakes rise | black-ring advanced | tense | pursuit |",
+          "",
+        ].join("\n"),
+        "utf-8",
+      ),
+    ]);
+
+    const composer = new ComposerAgent({
+      client: {} as ConstructorParameters<typeof ComposerAgent>[0]["client"],
+      model: "test-model",
+      projectRoot: root,
+      bookId: book.id,
+    });
+
+    const result = await composer.composeChapter({
+      book,
+      bookDir,
+      chapterNumber: 8,
+      plan: {
+        ...plan,
+        intent: {
+          ...plan.intent,
+          chapter: 8,
+          goal: "Follow the black ring pressure.",
+          hookAgenda: {
+            pressureMap: [],
+            mustAdvance: [],
+            eligibleResolve: [],
+            staleDebt: [],
+            avoidNewHookFamilies: [],
+          },
+        },
+        brief: {
+          chapter: 8,
+          goal: "Follow the black ring pressure.",
+          chapterType: "pursuit",
+          isGoldenOpening: false,
+          beatOutline: [
+            { phase: "opening", instruction: "Open with the ring clue already in motion." },
+          ],
+          hookPlan: [
+            {
+              hookId: "black-ring",
+              movement: "advance",
+              targetEffect: "Push the ring clue onto the dock in a way the reader can feel.",
+            },
+          ],
+          propsAndSetting: ["wet dock", "black ring"],
+        },
+      },
+    });
+
+    expect(result.contextPackage.selectedContext.map((entry) => entry.source)).toContain("runtime/hook_debt#black-ring");
   });
 });

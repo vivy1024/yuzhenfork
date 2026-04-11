@@ -8,7 +8,7 @@ import type { GenreProfile } from "../models/genre-profile.js";
 import { ArchitectAgent, type ArchitectOutput } from "../agents/architect.js";
 import { FoundationReviewerAgent } from "../agents/foundation-reviewer.js";
 import { PlannerAgent, type PlanChapterOutput } from "../agents/planner.js";
-import { ComposerAgent } from "../agents/composer.js";
+import { composeGovernedChapter, type ComposeChapterOutput } from "../agents/composer.js";
 import { WriterAgent, type WriteChapterInput, type WriteChapterOutput } from "../agents/writer.js";
 import { LengthNormalizerAgent } from "../agents/length-normalizer.js";
 import { ChapterAnalyzerAgent } from "../agents/chapter-analyzer.js";
@@ -2066,7 +2066,7 @@ ${matrix}`,
     bookDir: string,
     chapterNumber: number,
     externalContext?: string,
-  ): Promise<Pick<WriteChapterInput, "externalContext" | "chapterIntent" | "contextPackage" | "ruleStack" | "trace">> {
+  ): Promise<Pick<WriteChapterInput, "externalContext" | "chapterIntent" | "chapterBrief" | "contextPackage" | "ruleStack" | "trace">> {
     if ((this.config.inputGovernanceMode ?? "v2") === "legacy") {
       return { externalContext };
     }
@@ -2081,6 +2081,7 @@ ${matrix}`,
 
     return {
       chapterIntent: plan.intentMarkdown,
+      chapterBrief: plan.brief,
       contextPackage: composed.contextPackage,
       ruleStack: composed.ruleStack,
       trace: composed.trace,
@@ -2721,12 +2722,10 @@ ${matrix}`,
     },
   ): Promise<{
     plan: PlanChapterOutput;
-    composed: Awaited<ReturnType<ComposerAgent["composeChapter"]>>;
+    composed: ComposeChapterOutput;
   }> {
     const plan = await this.resolveGovernedPlan(book, bookDir, chapterNumber, externalContext, options);
-
-    const composer = new ComposerAgent(this.agentCtxFor("composer", book.id));
-    const composed = await composer.composeChapter({
+    const composed = await composeGovernedChapter({
       book,
       bookDir,
       chapterNumber,

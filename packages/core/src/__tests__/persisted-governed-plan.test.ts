@@ -22,6 +22,23 @@ describe("persisted governed plan helpers", () => {
         "## Outline Node",
         "Track the mentor oath fallout.",
         "",
+        "## Chapter Brief",
+        "- chapterType: confrontation",
+        "- isGoldenOpening: true",
+        "- dormantReason: Hold the guild-route line for the next chapter.",
+        "",
+        "### Beat Outline",
+        "- opening: Open inside the oath confrontation.",
+        "- development: Push the token back into the argument.",
+        "- hook: End when the witness changes sides.",
+        "",
+        "### Hook Plan",
+        "- mentor-oath: advance -> Turn the oath debt into an immediate cost.",
+        "",
+        "### Props And Setting",
+        "- broken oath token",
+        "- rain-slick shrine steps",
+        "",
         "## Must Keep",
         "- Lin Yue keeps the oath token hidden.",
         "- Mentor debt stays unresolved.",
@@ -53,6 +70,25 @@ describe("persisted governed plan helpers", () => {
       ]);
       expect(plan?.intent.mustAvoid).toEqual(["Open a new guild-route mystery."]);
       expect(plan?.intent.styleEmphasis).toEqual(["restrained prose"]);
+      expect(plan?.brief).toEqual(expect.objectContaining({
+        chapterType: "confrontation",
+        isGoldenOpening: true,
+        dormantReason: "Hold the guild-route line for the next chapter.",
+      }));
+      expect(plan?.brief?.beatOutline).toEqual(expect.arrayContaining([
+        expect.objectContaining({ phase: "opening" }),
+        expect.objectContaining({ phase: "hook" }),
+      ]));
+      expect(plan?.brief?.hookPlan).toEqual([
+        expect.objectContaining({
+          hookId: "mentor-oath",
+          movement: "advance",
+        }),
+      ]);
+      expect(plan?.brief?.propsAndSetting).toEqual([
+        "broken oath token",
+        "rain-slick shrine steps",
+      ]);
       expect(plan?.intent.conflicts).toEqual([
         { type: "duty", resolution: "repay the oath without exposing the token" },
         { type: "trust", resolution: "keep the mentor debt personal" },

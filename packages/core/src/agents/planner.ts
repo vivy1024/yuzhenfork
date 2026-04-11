@@ -3,7 +3,13 @@ import { join } from "node:path";
 import { BaseAgent } from "./base.js";
 import type { BookConfig } from "../models/book.js";
 import { parseBookRules } from "../models/book-rules.js";
-import { ChapterIntentSchema, type ChapterConflict, type ChapterIntent } from "../models/input-governance.js";
+import {
+  ChapterBriefSchema,
+  ChapterIntentSchema,
+  type ChapterBrief,
+  type ChapterConflict,
+  type ChapterIntent,
+} from "../models/input-governance.js";
 import {
   parseChapterSummariesMarkdown,
   renderHookSnapshot,
@@ -14,7 +20,12 @@ import { buildPlannerHookAgenda } from "../utils/hook-agenda.js";
 import {
   gatherPlanningMaterials,
   loadPlanningSeedMaterials,
+  type PlanningMaterials,
 } from "../utils/planning-materials.js";
+import {
+  buildPlannerSystemPrompt,
+  buildPlannerUserPrompt,
+} from "./planner-prompts.js";
 
 export interface PlanChapterInput {
   readonly book: BookConfig;
@@ -25,6 +36,7 @@ export interface PlanChapterInput {
 
 export interface PlanChapterOutput {
   readonly intent: ChapterIntent;
+  readonly brief?: ChapterBrief;
   readonly intentMarkdown: string;
   readonly plannerInputs: ReadonlyArray<string>;
   readonly runtimePath: string;
@@ -86,33 +98,49 @@ export class PlannerAgent extends BaseAgent {
       chapterSummaries: materials.chapterSummariesRaw,
     });
 
-    // TODO(v10): delete this skill-to-mustKeep bridge once the LLM planner lands.
-    this.injectStructuralSkills({
-      chapterNumber: input.chapterNumber,
-      language: input.book.language ?? "zh",
-      platform: input.book.platform,
-      mustKeep,
-      mustAvoid,
-      styleEmphasis,
-      hookAgenda,
-      cadence: analyzeChapterCadence({
-        language: this.isChineseLanguage(input.book.language) ? "zh" : "en",
-        rows: parseChapterSummariesMarkdown(materials.chapterSummariesRaw)
-          .filter((s) => s.chapter < input.chapterNumber)
-          .sort((a, b) => a.chapter - b.chapter)
-          .slice(-4)
-          .map((s) => ({ chapter: s.chapter, title: s.title, mood: s.mood, chapterType: s.chapterType })),
-      }),
+    const brief = await this.tryPlanChapterBrief({
+      input,
+      outlineNode: planningAnchor,
+      materials,
     });
+
+    if (!brief) {
+      // TODO(v10): delete this skill-to-mustKeep bridge once the LLM planner lands.
+      this.injectStructuralSkills({
+        chapterNumber: input.chapterNumber,
+        language: input.book.language ?? "zh",
+        platform: input.book.platform,
+        mustKeep,
+        mustAvoid,
+        styleEmphasis,
+        hookAgenda,
+        cadence: analyzeChapterCadence({
+          language: this.isChineseLanguage(input.book.language) ? "zh" : "en",
+          rows: parseChapterSummariesMarkdown(materials.chapterSummariesRaw)
+            .filter((s) => s.chapter < input.chapterNumber)
+            .sort((a, b) => a.chapter - b.chapter)
+            .slice(-4)
+            .map((s) => ({ chapter: s.chapter, title: s.title, mood: s.mood, chapterType: s.chapterType })),
+        }),
+      });
+    }
 
     const intent = ChapterIntentSchema.parse({
       chapter: input.chapterNumber,
-      goal,
+      goal: brief?.goal ?? goal,
       outlineNode,
       ...directives,
       mustKeep,
       mustAvoid,
-      styleEmphasis,
+      styleEmphasis: brief
+        ? this.mergeBriefStyleEmphasis(styleEmphasis, brief)
+        : styleEmphasis,
+      sceneDirective: brief
+        ? this.buildSceneDirectiveFromBrief(brief)
+        : directives.sceneDirective,
+      arcDirective: brief
+        ? this.buildArcDirectiveFromBrief(brief)
+        : directives.arcDirective,
       conflicts,
       hookAgenda,
     });
@@ -120,6 +148,7 @@ export class PlannerAgent extends BaseAgent {
     const runtimePath = join(runtimeDir, `chapter-${String(input.chapterNumber).padStart(4, "0")}.intent.md`);
     const intentMarkdown = this.renderIntentMarkdown(
       intent,
+      brief ?? undefined,
       input.book.language ?? "zh",
       renderHookSnapshot(memorySelection.hooks, input.book.language ?? "zh"),
       renderSummarySnapshot(memorySelection.summaries, input.book.language ?? "zh"),
@@ -129,10 +158,73 @@ export class PlannerAgent extends BaseAgent {
 
     return {
       intent,
+      brief: brief ?? undefined,
       intentMarkdown,
       plannerInputs: materials.plannerInputs,
       runtimePath,
     };
+  }
+
+  private async tryPlanChapterBrief(params: {
+    readonly input: PlanChapterInput;
+    readonly outlineNode: string | undefined;
+    readonly materials: PlanningMaterials;
+  }): Promise<ChapterBrief | null> {
+    try {
+      const language = this.isChineseLanguage(params.input.book.language) ? "zh" : "en";
+      const response = await this.chat([
+        {
+          role: "system",
+          content: buildPlannerSystemPrompt(language),
+        },
+        {
+          role: "user",
+          content: buildPlannerUserPrompt({
+            chapterNumber: params.input.chapterNumber,
+            targetChapters: params.input.book.targetChapters,
+            genreName: params.input.book.genre,
+            language,
+            materials: {
+              ...params.materials,
+              outlineNode: params.outlineNode,
+            },
+          }),
+        },
+      ], {
+        temperature: 0.2,
+        maxTokens: 1600,
+      });
+
+      const parsed = this.tryParseChapterBrief(response.content);
+      if (!parsed) {
+        throw new Error("Planner brief output was not valid JSON.");
+      }
+      return parsed;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      this.log?.warn(`[planner] Falling back to legacy planner: ${detail}`);
+      return null;
+    }
+  }
+
+  private tryParseChapterBrief(text: string): ChapterBrief | null {
+    const direct = this.tryParseExactChapterBrief(text);
+    if (direct) {
+      return direct;
+    }
+    const candidate = extractBalancedJsonObject(text);
+    if (!candidate) {
+      return null;
+    }
+    return this.tryParseExactChapterBrief(candidate);
+  }
+
+  private tryParseExactChapterBrief(text: string): ChapterBrief | null {
+    try {
+      return ChapterBriefSchema.parse(JSON.parse(text));
+    } catch {
+      return null;
+    }
   }
 
   private buildStructuredDirectives(input: {
@@ -722,6 +814,7 @@ export class PlannerAgent extends BaseAgent {
 
   private renderIntentMarkdown(
     intent: ChapterIntent,
+    brief: ChapterBrief | undefined,
     language: "zh" | "en",
     pendingHooks: string,
     chapterSummaries: string,
@@ -782,6 +875,26 @@ export class PlannerAgent extends BaseAgent {
       "## Outline Node",
       intent.outlineNode ?? "(not found)",
       "",
+      ...(brief ? [
+        "## Chapter Brief",
+        `- chapterType: ${brief.chapterType}`,
+        `- isGoldenOpening: ${brief.isGoldenOpening ? "true" : "false"}`,
+        `- dormantReason: ${brief.dormantReason ?? "(none)"}`,
+        "",
+        "### Beat Outline",
+        ...brief.beatOutline.map((beat) => `- ${beat.phase}: ${beat.instruction}`),
+        "",
+        "### Hook Plan",
+        ...(brief.hookPlan.length > 0
+          ? brief.hookPlan.map((item) => `- ${item.hookId}: ${item.movement} -> ${item.targetEffect}`)
+          : ["- none"]),
+        "",
+        "### Props And Setting",
+        ...(brief.propsAndSetting.length > 0
+          ? brief.propsAndSetting.map((item) => `- ${item}`)
+          : ["- none"]),
+        "",
+      ] : []),
       "## Must Keep",
       mustKeep,
       "",
@@ -807,6 +920,26 @@ export class PlannerAgent extends BaseAgent {
       chapterSummaries,
       "",
     ].join("\n");
+  }
+
+  private buildSceneDirectiveFromBrief(brief: ChapterBrief): string {
+    const props = brief.propsAndSetting.length > 0
+      ? ` Use these on-page anchors: ${brief.propsAndSetting.join(", ")}.`
+      : "";
+    return `Run this as a ${brief.chapterType} chapter.${props}`.trim();
+  }
+
+  private buildArcDirectiveFromBrief(brief: ChapterBrief): string {
+    return brief.beatOutline
+      .map((beat) => `${beat.phase}: ${beat.instruction}`)
+      .join(" | ");
+  }
+
+  private mergeBriefStyleEmphasis(styleEmphasis: ReadonlyArray<string>, brief: ChapterBrief): string[] {
+    const derived = brief.isGoldenOpening
+      ? ["Honor golden-opening pacing without leaking chapter-planning meta language."]
+      : [];
+    return this.unique([...styleEmphasis, ...derived]);
   }
 
   private unique(values: ReadonlyArray<string>): string[] {
@@ -896,4 +1029,56 @@ export class PlannerAgent extends BaseAgent {
         : "有伏笔即将兑现——在兑现前把压制拉到最大。释放时必须超过读者预期，只满足70%等于失败。");
     }
   }
+}
+
+function extractBalancedJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start < 0) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]!;
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, index + 1);
+      }
+      if (depth < 0) {
+        return null;
+      }
+    }
+  }
+
+  return null;
 }
