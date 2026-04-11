@@ -8,6 +8,10 @@ export interface PlannerPromptInput {
   readonly materials: PlanningMaterials;
 }
 
+// TODO(v10): wire this prompt builder into the live planner path once the
+// LLM planner + legacy fallback lands. Right now it is a verified contract,
+// not an active execution path.
+
 export function buildPlannerSystemPrompt(language: "zh" | "en"): string {
   if (language === "en") {
     return [
@@ -82,6 +86,9 @@ export function buildPlannerUserPrompt(input: PlannerPromptInput): string {
     "",
     "## Previous Ending Hook",
     materials.previousEndingHook ?? "(none)",
+    "",
+    "## Previous Ending Excerpt",
+    materials.previousEndingExcerpt ?? "(none)",
     "",
     "## Recent Chronicle",
     renderRecentSummaries(materials),

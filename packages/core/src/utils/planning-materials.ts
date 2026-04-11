@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type { StoredHook, StoredSummary } from "../state/memory-db.js";
 import {
@@ -7,7 +7,7 @@ import {
   type MemorySelection,
 } from "./memory-retrieval.js";
 
-export interface PlanningMaterials {
+export interface PlanningSeedMaterials {
   readonly storyDir: string;
   readonly authorIntent: string;
   readonly currentFocus: string;
@@ -18,8 +18,12 @@ export interface PlanningMaterials {
   readonly chapterSummariesRaw: string;
   readonly outlineNode?: string;
   readonly recentSummaries: ReadonlyArray<StoredSummary>;
-  readonly activeHooks: ReadonlyArray<StoredHook>;
   readonly previousEndingHook?: string;
+  readonly previousEndingExcerpt?: string;
+}
+
+export interface PlanningMaterials extends PlanningSeedMaterials {
+  readonly activeHooks: ReadonlyArray<StoredHook>;
   readonly memorySelection: MemorySelection;
   readonly plannerInputs: ReadonlyArray<string>;
 }
@@ -32,13 +36,42 @@ async function readFileOrDefault(path: string): Promise<string> {
   }
 }
 
-export async function gatherPlanningMaterials(params: {
+async function readPreviousEndingExcerpt(
+  bookDir: string,
+  chapterNumber: number,
+): Promise<string | undefined> {
+  const previousChapter = chapterNumber - 1;
+  if (previousChapter < 1) {
+    return undefined;
+  }
+
+  const chaptersDir = join(bookDir, "chapters");
+  const padded = String(previousChapter).padStart(4, "0");
+  try {
+    const files = await readdir(chaptersDir);
+    const match = files.find((file) => file.startsWith(padded) && file.endsWith(".md"));
+    if (!match) {
+      return undefined;
+    }
+    const markdown = await readFile(join(chaptersDir, match), "utf-8");
+    const body = markdown
+      .split("\n")
+      .slice(1)
+      .join("\n")
+      .trim();
+    if (!body) {
+      return undefined;
+    }
+    return body.slice(-320).trim();
+  } catch {
+    return undefined;
+  }
+}
+
+export async function loadPlanningSeedMaterials(params: {
   readonly bookDir: string;
   readonly chapterNumber: number;
-  readonly goal: string;
-  readonly outlineNode?: string;
-  readonly mustKeep?: ReadonlyArray<string>;
-}): Promise<PlanningMaterials> {
+}): Promise<PlanningSeedMaterials> {
   const storyDir = join(params.bookDir, "story");
   const sourcePaths = {
     authorIntent: join(storyDir, "author_intent.md"),
@@ -58,6 +91,7 @@ export async function gatherPlanningMaterials(params: {
     chapterSummariesRaw,
     bookRulesRaw,
     currentState,
+    previousEndingExcerpt,
   ] = await Promise.all([
     readFileOrDefault(sourcePaths.authorIntent),
     readFileOrDefault(sourcePaths.currentFocus),
@@ -66,21 +100,12 @@ export async function gatherPlanningMaterials(params: {
     readFileOrDefault(sourcePaths.chapterSummaries),
     readFileOrDefault(sourcePaths.bookRules),
     readFileOrDefault(sourcePaths.currentState),
+    readPreviousEndingExcerpt(params.bookDir, params.chapterNumber),
   ]);
 
   const chapterSummaries = parseChapterSummariesMarkdown(chapterSummariesRaw)
     .filter((summary) => summary.chapter < params.chapterNumber)
     .sort((left, right) => right.chapter - left.chapter);
-  const recentSummaries = chapterSummaries.slice(0, 4).sort((left, right) => left.chapter - right.chapter);
-  const previousEndingHook = chapterSummaries[0]?.hookActivity || undefined;
-
-  const memorySelection = await retrieveMemorySelection({
-    bookDir: params.bookDir,
-    chapterNumber: params.chapterNumber,
-    goal: params.goal,
-    outlineNode: params.outlineNode,
-    mustKeep: params.mustKeep,
-  });
 
   return {
     storyDir,
@@ -91,14 +116,47 @@ export async function gatherPlanningMaterials(params: {
     bookRulesRaw,
     currentState,
     chapterSummariesRaw,
+    recentSummaries: chapterSummaries.slice(0, 4).sort((left, right) => left.chapter - right.chapter),
+    previousEndingHook: chapterSummaries[0]?.hookActivity || undefined,
+    previousEndingExcerpt,
+  };
+}
+
+export async function gatherPlanningMaterials(params: {
+  readonly bookDir: string;
+  readonly chapterNumber: number;
+  readonly goal: string;
+  readonly outlineNode?: string;
+  readonly mustKeep?: ReadonlyArray<string>;
+  readonly seed?: PlanningSeedMaterials;
+}): Promise<PlanningMaterials> {
+  const seed = params.seed ?? await loadPlanningSeedMaterials({
+    bookDir: params.bookDir,
+    chapterNumber: params.chapterNumber,
+  });
+
+  const memorySelection = await retrieveMemorySelection({
+    bookDir: params.bookDir,
+    chapterNumber: params.chapterNumber,
+    goal: params.goal,
     outlineNode: params.outlineNode,
-    recentSummaries,
+    mustKeep: params.mustKeep,
+  });
+
+  return {
+    ...seed,
+    outlineNode: params.outlineNode,
     activeHooks: memorySelection.activeHooks,
-    previousEndingHook,
     memorySelection,
     plannerInputs: [
-      ...Object.values(sourcePaths),
-      join(storyDir, "pending_hooks.md"),
+      join(seed.storyDir, "author_intent.md"),
+      join(seed.storyDir, "current_focus.md"),
+      join(seed.storyDir, "story_bible.md"),
+      join(seed.storyDir, "volume_outline.md"),
+      join(seed.storyDir, "chapter_summaries.md"),
+      join(seed.storyDir, "book_rules.md"),
+      join(seed.storyDir, "current_state.md"),
+      join(seed.storyDir, "pending_hooks.md"),
       ...(memorySelection.dbPath ? [memorySelection.dbPath] : []),
     ],
   };

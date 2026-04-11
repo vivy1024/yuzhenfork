@@ -40,6 +40,7 @@ const MATERIALS: PlanningMaterials = {
     },
   ],
   previousEndingHook: "The unsigned transfer sheet becomes urgent.",
+  previousEndingExcerpt: "Lin Yue folded the transfer sheet and realized the warehouse door had already been opened from inside.",
   memorySelection: {
     summaries: [],
     hooks: [],
@@ -51,7 +52,7 @@ const MATERIALS: PlanningMaterials = {
 };
 
 describe("planner prompt builders", () => {
-  it("forbids meta-language leakage in the system prompt", () => {
+  it("includes an explicit meta-language ban list in the system prompt", () => {
     const prompt = buildPlannerSystemPrompt("zh");
 
     expect(prompt).toContain("ChapterBrief");
@@ -70,6 +71,8 @@ describe("planner prompt builders", () => {
 
     expect(prompt).toContain("## Previous Ending Hook");
     expect(prompt).toContain("unsigned transfer sheet");
+    expect(prompt).toContain("## Previous Ending Excerpt");
+    expect(prompt).toContain("warehouse door");
     expect(prompt).toContain("## Recent Chronicle");
     expect(prompt).toContain("## Active Hooks");
     expect(prompt).not.toContain("mustKeep");

@@ -11,7 +11,10 @@ import {
 } from "../utils/memory-retrieval.js";
 import { analyzeChapterCadence } from "../utils/chapter-cadence.js";
 import { buildPlannerHookAgenda } from "../utils/hook-agenda.js";
-import { gatherPlanningMaterials } from "../utils/planning-materials.js";
+import {
+  gatherPlanningMaterials,
+  loadPlanningSeedMaterials,
+} from "../utils/planning-materials.js";
 
 export interface PlanChapterInput {
   readonly book: BookConfig;
@@ -37,16 +40,12 @@ export class PlannerAgent extends BaseAgent {
     const runtimeDir = join(storyDir, "runtime");
     await mkdir(runtimeDir, { recursive: true });
 
-    const volumeOutline = await this.readFileOrDefault(join(storyDir, "volume_outline.md"));
-
-    const outlineNode = this.findOutlineNode(volumeOutline, input.chapterNumber);
-    const matchedOutlineAnchor = this.hasMatchedOutlineAnchor(volumeOutline, input.chapterNumber);
-    const seedMaterials = await gatherPlanningMaterials({
+    const seedMaterials = await loadPlanningSeedMaterials({
       bookDir: input.bookDir,
       chapterNumber: input.chapterNumber,
-      goal: this.deriveGoal(input.externalContext, "", "", outlineNode, input.chapterNumber),
-      outlineNode,
     });
+    const outlineNode = this.findOutlineNode(seedMaterials.volumeOutline, input.chapterNumber);
+    const matchedOutlineAnchor = this.hasMatchedOutlineAnchor(seedMaterials.volumeOutline, input.chapterNumber);
     const goal = this.deriveGoal(
       input.externalContext,
       seedMaterials.currentFocus,
@@ -58,7 +57,7 @@ export class PlannerAgent extends BaseAgent {
     const mustKeep = this.collectMustKeep(seedMaterials.currentState, seedMaterials.storyBible);
     const mustAvoid = this.collectMustAvoid(seedMaterials.currentFocus, parsedRules.rules.prohibitions);
     const styleEmphasis = this.collectStyleEmphasis(seedMaterials.authorIntent, seedMaterials.currentFocus);
-    const conflicts = this.collectConflicts(input.externalContext, seedMaterials.currentFocus, outlineNode, volumeOutline);
+    const conflicts = this.collectConflicts(input.externalContext, seedMaterials.currentFocus, outlineNode, seedMaterials.volumeOutline);
     const planningAnchor = conflicts.length > 0 ? undefined : outlineNode;
     const materials = await gatherPlanningMaterials({
       bookDir: input.bookDir,
@@ -66,6 +65,7 @@ export class PlannerAgent extends BaseAgent {
       goal,
       outlineNode: planningAnchor,
       mustKeep,
+      seed: seedMaterials,
     });
     const memorySelection = materials.memorySelection;
     const activeHookCount = memorySelection.activeHooks.filter(
@@ -78,15 +78,15 @@ export class PlannerAgent extends BaseAgent {
       language: input.book.language ?? "zh",
     });
     const directives = this.buildStructuredDirectives({
-          chapterNumber: input.chapterNumber,
-          language: input.book.language,
-          volumeOutline,
-          outlineNode,
-          matchedOutlineAnchor,
-          chapterSummaries: materials.chapterSummariesRaw,
-        });
+      chapterNumber: input.chapterNumber,
+      language: input.book.language,
+      volumeOutline: seedMaterials.volumeOutline,
+      outlineNode,
+      matchedOutlineAnchor,
+      chapterSummaries: materials.chapterSummariesRaw,
+    });
 
-    // ── Skill injection: translate writing methodology into concrete rules ──
+    // TODO(v10): delete this skill-to-mustKeep bridge once the LLM planner lands.
     this.injectStructuralSkills({
       chapterNumber: input.chapterNumber,
       language: input.book.language ?? "zh",
@@ -130,9 +130,7 @@ export class PlannerAgent extends BaseAgent {
     return {
       intent,
       intentMarkdown,
-      plannerInputs: [
-        ...materials.plannerInputs,
-      ],
+      plannerInputs: materials.plannerInputs,
       runtimePath,
     };
   }
