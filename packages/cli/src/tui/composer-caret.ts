@@ -15,22 +15,8 @@ export function resolveComposerCaretState(params: {
     };
   }
 
-  if (!params.inputValue) {
-    return {
-      visible: true,
-      shouldAnimate: false,
-    };
-  }
-
-  if (params.blinkTick >= 2) {
-    return {
-      visible: true,
-      shouldAnimate: false,
-    };
-  }
-
   return {
-    visible: params.blinkTick % 2 === 0,
-    shouldAnimate: true,
+    visible: true,
+    shouldAnimate: false,
   };
 }

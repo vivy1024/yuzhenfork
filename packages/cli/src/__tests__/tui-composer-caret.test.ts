@@ -13,29 +13,20 @@ describe("tui composer caret", () => {
     });
   });
 
-  it("blinks briefly after typing and then settles", () => {
+  it("keeps the typed composer caret visible without animation", () => {
     expect(resolveComposerCaretState({
       inputValue: "continue",
       isSubmitting: false,
       blinkTick: 0,
     })).toEqual({
       visible: true,
-      shouldAnimate: true,
+      shouldAnimate: false,
     });
 
     expect(resolveComposerCaretState({
       inputValue: "continue",
       isSubmitting: false,
       blinkTick: 1,
-    })).toEqual({
-      visible: false,
-      shouldAnimate: true,
-    });
-
-    expect(resolveComposerCaretState({
-      inputValue: "continue",
-      isSubmitting: false,
-      blinkTick: 2,
     })).toEqual({
       visible: true,
       shouldAnimate: false,

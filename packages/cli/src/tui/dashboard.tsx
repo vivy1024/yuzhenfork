@@ -165,7 +165,6 @@ export function InkTuiApp(props: InkTuiAppProps): React.JSX.Element {
   const [activityIntent, setActivityIntent] = useState<InteractionIntentType | "unknown">("unknown");
   const [activityFrameIndex, setActivityFrameIndex] = useState(0);
   const [chatDepth, setChatDepth] = useState<ChatDepth>("normal");
-  const [composerCaretTick, setComposerCaretTick] = useState(0);
   const assistantDraftTimestampRef = useRef<number | null>(null);
   const submitLockRef = useRef(false);
   const slashSuggestions = getSlashSuggestions(inputValue, SLASH_COMMANDS);
@@ -175,7 +174,7 @@ export function InkTuiApp(props: InkTuiAppProps): React.JSX.Element {
   const composerCaret = resolveComposerCaretState({
     inputValue,
     isSubmitting,
-    blinkTick: composerCaretTick,
+    blinkTick: 0,
   });
 
   useEffect(() => {
@@ -189,21 +188,6 @@ export function InkTuiApp(props: InkTuiAppProps): React.JSX.Element {
     }, activity.intervalMs);
     return () => clearInterval(timer);
   }, [activity.frames.length, activity.intervalMs, isSubmitting]);
-
-  useEffect(() => {
-    setComposerCaretTick(0);
-  }, [inputValue, isSubmitting]);
-
-  useEffect(() => {
-    if (!composerCaret.shouldAnimate) {
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      setComposerCaretTick((current) => current + 1);
-    }, 900);
-    return () => clearTimeout(timer);
-  }, [composerCaret.shouldAnimate, composerCaretTick]);
 
   if (props.chatStreamBridge) {
     props.chatStreamBridge.getChatRequestOptions = () => ({
