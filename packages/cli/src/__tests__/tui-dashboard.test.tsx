@@ -70,6 +70,26 @@ describe("ink dashboard", () => {
     expect(frame).not.toContain("Composer");
   });
 
+  it("places the initial caret before the placeholder text", async () => {
+    const mod = await import("../tui/dashboard.js");
+
+    const { lastFrame } = render(
+      <mod.InkTuiDashboard
+        locale="en"
+        projectName="inkos-demo"
+        activeBookTitle="Night Harbor Echo"
+        modelLabel="gpt-5.4 (openai)"
+        session={createSession()}
+        inputValue=""
+        isSubmitting={false}
+        showComposerCursor
+      />,
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("› │Ask InkOS");
+  });
+
   it("renders the compact status strip directly above the composer", async () => {
     const mod = await import("../tui/dashboard.js");
 

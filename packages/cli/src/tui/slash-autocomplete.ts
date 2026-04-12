@@ -1,9 +1,18 @@
 export const SLASH_COMMANDS = [
+  "/write",
+  "/books",
+  "/open <book>",
+  "/mode <auto|semi|manual>",
+  "/rewrite <n>",
+  "/focus <text>",
+  "/truth <file> <content>",
+  "/rename <from> => <to>",
+  "/replace <n> <from> => <to>",
+  "/export [txt|md|epub]",
   "/help",
   "/status",
   "/clear",
-  "/config",
-  "/depth",
+  "/depth <light|normal|deep>",
   "/quit",
   "/exit",
 ] as const;
@@ -16,7 +25,7 @@ export function getSlashSuggestions(input: string, commands: readonly string[]):
     return [];
   }
 
-  return commands.filter((command) => command.startsWith(value));
+  return commands.filter((command) => slashCommandStem(command).startsWith(value));
 }
 
 export function getNextSlashSelection(
@@ -40,5 +49,15 @@ export function applySlashSuggestion(
   suggestions: readonly string[],
   selectedIndex: number,
 ): string {
-  return suggestions[selectedIndex] ?? "";
+  const suggestion = suggestions[selectedIndex] ?? "";
+  return slashSuggestionInsertion(suggestion);
+}
+
+function slashCommandStem(command: string): string {
+  return command.match(/^\/\S+/)?.[0] ?? command;
+}
+
+function slashSuggestionInsertion(suggestion: string): string {
+  const stem = slashCommandStem(suggestion);
+  return suggestion === stem ? stem : `${stem} `;
 }

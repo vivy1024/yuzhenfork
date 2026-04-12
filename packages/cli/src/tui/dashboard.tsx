@@ -9,6 +9,7 @@ import {
 } from "@actalk/inkos-core";
 import { Box, Text, useApp, useInput } from "ink";
 import { describeActivityState } from "./activity-state.js";
+import { resolveComposerCaretState } from "./composer-caret.js";
 import { resolveChatDepthProfile, type ChatDepth } from "./chat-depth.js";
 import { appendStreamingAssistantChunk, createOptimisticUserMessageSession } from "./chat-draft.js";
 import { renderComposerDisplay } from "./composer-display.js";
@@ -110,12 +111,19 @@ export function InkTuiDashboard(props: InkTuiDashboardProps): React.JSX.Element 
             <Text color={props.isSubmitting ? WARM_ACCENT : WARM_ACCENT} bold>
               ›{" "}
             </Text>
-            <Text color={composer.isPlaceholder ? WARM_MUTED : WARM_REPLY}>
-              {composer.text}
-            </Text>
+            {composer.textBeforeCursor ? (
+              <Text color={composer.isPlaceholder ? WARM_MUTED : WARM_REPLY}>
+                {composer.textBeforeCursor}
+              </Text>
+            ) : null}
             {composer.cursor ? (
               <Text color={props.isSubmitting ? WARM_ACCENT : WARM_ACCENT}>
                 {composer.cursor}
+              </Text>
+            ) : null}
+            {composer.textAfterCursor ? (
+              <Text color={composer.isPlaceholder ? WARM_MUTED : WARM_REPLY}>
+                {composer.textAfterCursor}
               </Text>
             ) : null}
           </Box>
@@ -157,13 +165,18 @@ export function InkTuiApp(props: InkTuiAppProps): React.JSX.Element {
   const [activityIntent, setActivityIntent] = useState<InteractionIntentType | "unknown">("unknown");
   const [activityFrameIndex, setActivityFrameIndex] = useState(0);
   const [chatDepth, setChatDepth] = useState<ChatDepth>("normal");
-  const [showComposerCursor, setShowComposerCursor] = useState(true);
+  const [composerCaretTick, setComposerCaretTick] = useState(0);
   const assistantDraftTimestampRef = useRef<number | null>(null);
   const submitLockRef = useRef(false);
   const slashSuggestions = getSlashSuggestions(inputValue, SLASH_COMMANDS);
   const inputHistory = buildInputHistory(session.messages);
   const activity = describeActivityState(activityIntent, copy);
   const chatDepthProfile = resolveChatDepthProfile(chatDepth);
+  const composerCaret = resolveComposerCaretState({
+    inputValue,
+    isSubmitting,
+    blinkTick: composerCaretTick,
+  });
 
   useEffect(() => {
     if (!isSubmitting) {
@@ -178,17 +191,19 @@ export function InkTuiApp(props: InkTuiAppProps): React.JSX.Element {
   }, [activity.frames.length, activity.intervalMs, isSubmitting]);
 
   useEffect(() => {
-    if (isSubmitting) {
-      setShowComposerCursor(false);
+    setComposerCaretTick(0);
+  }, [inputValue, isSubmitting]);
+
+  useEffect(() => {
+    if (!composerCaret.shouldAnimate) {
       return;
     }
 
-    setShowComposerCursor(true);
-    const timer = setInterval(() => {
-      setShowComposerCursor((current) => !current);
-    }, 700);
-    return () => clearInterval(timer);
-  }, [isSubmitting]);
+    const timer = setTimeout(() => {
+      setComposerCaretTick((current) => current + 1);
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [composerCaret.shouldAnimate, composerCaretTick]);
 
   if (props.chatStreamBridge) {
     props.chatStreamBridge.getChatRequestOptions = () => ({
@@ -391,7 +406,7 @@ export function InkTuiApp(props: InkTuiAppProps): React.JSX.Element {
       lastError={lastError}
       slashSuggestions={slashSuggestions}
       selectedSlashIndex={selectedSlashIndex}
-      showComposerCursor={showComposerCursor}
+      showComposerCursor={composerCaret.visible}
       onInputChange={(value) => {
         setInputValue(value);
         setSelectedSlashIndex(0);

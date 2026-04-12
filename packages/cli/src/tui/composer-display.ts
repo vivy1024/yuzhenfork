@@ -2,17 +2,24 @@ export function renderComposerDisplay(
   inputValue: string,
   placeholder: string,
   showCursor: boolean,
-): { readonly text: string; readonly cursor: string; readonly isPlaceholder: boolean } {
+): {
+  readonly textBeforeCursor: string;
+  readonly textAfterCursor: string;
+  readonly cursor: string;
+  readonly isPlaceholder: boolean;
+} {
   if (!inputValue) {
     return {
-      text: placeholder,
+      textBeforeCursor: showCursor ? "" : placeholder,
+      textAfterCursor: showCursor ? placeholder : "",
       cursor: showCursor ? "│" : "",
       isPlaceholder: true,
     };
   }
 
   return {
-    text: inputValue,
+    textBeforeCursor: inputValue,
+    textAfterCursor: "",
     cursor: showCursor ? "│" : "",
     isPlaceholder: false,
   };

@@ -83,13 +83,13 @@ const ZH_CN: TuiCopy = {
   composer: {
     placeholder: "告诉 InkOS 要写什么、修改什么，或解释什么…",
     emptyConversation: "先告诉 InkOS 你要做什么。",
-    helper: "回车发送 • /help • /status • /clear • /config • /depth • /quit",
+    helper: "回车发送 • /write • /books • /open • /mode • /depth • /help",
     submitting: "处理中…",
     failed: "上次请求失败",
     ready: "就绪",
   },
   notes: {
-    help: "可用命令：/help、/status、/clear、/config、/depth、/quit。也支持直接输入自然语言。",
+    help: "可用命令：/write、/books、/open、/mode、/rewrite、/focus、/truth、/rename、/replace、/export、/status、/clear、/depth、/quit。也支持直接输入自然语言。",
     status: (stage, mode) => `当前状态：${stage}（${mode}）。`,
     config: "当前 Ink 仪表盘里还不支持交互式 /config。请使用 inkos config set-global。",
     depthSet: (depthLabel) => `思考深度已切换为 ${depthLabel}。`,
@@ -162,13 +162,13 @@ const EN: TuiCopy = {
   composer: {
     placeholder: "Ask InkOS to write, revise, or explain…",
     emptyConversation: "Start by asking InkOS what to do.",
-    helper: "Enter to send • /help • /status • /clear • /config • /depth • /quit",
+    helper: "Enter to send • /write • /books • /open • /mode • /depth • /help",
     submitting: "Submitting…",
     failed: "Last request failed",
     ready: "Ready",
   },
   notes: {
-    help: "Commands: /help, /status, /clear, /config, /depth, /quit. Natural language still works.",
+    help: "Commands: /write, /books, /open, /mode, /rewrite, /focus, /truth, /rename, /replace, /export, /status, /clear, /depth, /quit. Natural language still works.",
     status: (stage, mode) => `Status: ${stage} (${mode}).`,
     config: "Interactive /config is not available inside the Ink dashboard yet. Use inkos config set-global.",
     depthSet: (depthLabel) => `Thinking depth set to ${depthLabel}.`,

@@ -9,8 +9,9 @@ import {
 describe("tui slash autocomplete", () => {
   it("filters slash commands by prefix", () => {
     expect(getSlashSuggestions("/st", SLASH_COMMANDS)).toEqual(["/status"]);
-    expect(getSlashSuggestions("/c", SLASH_COMMANDS)).toEqual(["/clear", "/config"]);
-    expect(getSlashSuggestions("/d", SLASH_COMMANDS)).toEqual(["/depth"]);
+    expect(getSlashSuggestions("/w", SLASH_COMMANDS)).toEqual(["/write"]);
+    expect(getSlashSuggestions("/o", SLASH_COMMANDS)).toEqual(["/open <book>"]);
+    expect(getSlashSuggestions("/d", SLASH_COMMANDS)).toEqual(["/depth <light|normal|deep>"]);
   });
 
   it("does not suggest anything for non-slash input", () => {
@@ -26,6 +27,7 @@ describe("tui slash autocomplete", () => {
 
   it("applies the selected suggestion to the composer input", () => {
     expect(applySlashSuggestion("/st", ["/status"], 0)).toBe("/status");
-    expect(applySlashSuggestion("/c", ["/clear", "/config"], 1)).toBe("/config");
+    expect(applySlashSuggestion("/o", ["/open <book>"], 0)).toBe("/open ");
+    expect(applySlashSuggestion("/d", ["/depth <light|normal|deep>"], 0)).toBe("/depth ");
   });
 });
