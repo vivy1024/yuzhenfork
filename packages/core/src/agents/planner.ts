@@ -167,15 +167,18 @@ export class PlannerAgent extends BaseAgent {
       maxTokens: 4096,
     });
 
-    const parsed = this.tryParseChapterBrief(response.content);
+    this.log?.info(`[planner] Raw brief response length: ${response.content.length} chars`);
+    const parsed = this.tryParseChapterBrief(response.content, params.input.chapterNumber);
     if (!parsed) {
-      throw new Error(`Planner LLM returned invalid ChapterBrief JSON. Raw output: ${response.content.slice(0, 200)}`);
+      this.log?.warn(`[planner] Full raw output:\n${response.content}`);
+      throw new Error(`Planner LLM returned invalid ChapterBrief JSON. Raw output: ${response.content.slice(0, 500)}`);
     }
     return parsed;
   }
 
-  private tryParseChapterBrief(text: string): ChapterBrief | null {
-    const direct = this.tryParseExactChapterBrief(text);
+  private tryParseChapterBrief(text: string, chapterNumber: number): ChapterBrief | null {
+    const inject = (t: string) => this.injectChapterNumber(t, chapterNumber);
+    const direct = this.tryParseExactChapterBrief(inject(text));
     if (direct) {
       return direct;
     }
@@ -183,15 +186,77 @@ export class PlannerAgent extends BaseAgent {
     if (!candidate) {
       return null;
     }
-    return this.tryParseExactChapterBrief(candidate);
+    return this.tryParseExactChapterBrief(inject(candidate));
+  }
+
+  /** Ensure the parsed JSON has a chapter field — LLMs often omit it. */
+  private injectChapterNumber(text: string, chapterNumber: number): string {
+    try {
+      const obj = JSON.parse(text);
+      if (typeof obj === "object" && obj !== null && obj.chapter === undefined) {
+        obj.chapter = chapterNumber;
+        return JSON.stringify(obj);
+      }
+    } catch { /* not valid JSON yet, pass through */ }
+    return text;
   }
 
   private tryParseExactChapterBrief(text: string): ChapterBrief | null {
     try {
-      return ChapterBriefSchema.parse(JSON.parse(text));
-    } catch {
+      const raw = JSON.parse(text);
+      const normalized = this.normalizeBriefJson(raw);
+      return ChapterBriefSchema.parse(normalized);
+    } catch (err) {
+      if (err instanceof Error && err.name === "ZodError") {
+        this.log?.warn(`[planner] Zod validation errors: ${err.message}`);
+      }
       return null;
     }
+  }
+
+  private static readonly VALID_MOVEMENTS = new Set([
+    "quiet-hold", "refresh", "advance", "partial-payoff", "full-payoff",
+  ]);
+
+  /**
+   * Normalize common LLM deviations from the ChapterBrief schema:
+   * - hookPlan[].note → hookPlan[].targetEffect
+   * - hookPlan[].movement unknown values → "advance"
+   * - propsAndSetting as object → flatten to string[]
+   */
+  private normalizeBriefJson(raw: Record<string, unknown>): Record<string, unknown> {
+    // Normalize hookPlan
+    if (Array.isArray(raw.hookPlan)) {
+      raw.hookPlan = raw.hookPlan.map((hook: Record<string, unknown>) => {
+        const normalized = { ...hook };
+        // rename note → targetEffect
+        if (normalized.note && !normalized.targetEffect) {
+          normalized.targetEffect = normalized.note;
+          delete normalized.note;
+        }
+        // clamp unknown movements to "advance"
+        if (typeof normalized.movement === "string" && !PlannerAgent.VALID_MOVEMENTS.has(normalized.movement)) {
+          normalized.movement = "advance";
+        }
+        return normalized;
+      });
+    }
+
+    // Normalize propsAndSetting: flatten object to string[]
+    if (raw.propsAndSetting && !Array.isArray(raw.propsAndSetting)) {
+      const obj = raw.propsAndSetting as Record<string, unknown>;
+      const flattened: string[] = [];
+      for (const values of Object.values(obj)) {
+        if (Array.isArray(values)) {
+          flattened.push(...values.filter((v): v is string => typeof v === "string"));
+        } else if (typeof values === "string") {
+          flattened.push(values);
+        }
+      }
+      raw.propsAndSetting = flattened;
+    }
+
+    return raw;
   }
 
   private buildStructuredDirectives(input: {

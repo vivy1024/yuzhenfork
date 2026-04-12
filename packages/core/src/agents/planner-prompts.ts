@@ -226,24 +226,30 @@ export function buildPlannerUserPrompt(input: PlannerPromptInput): string {
   ].join("\n");
 }
 
-const ZH_OUTPUT_REQUIREMENTS = `按核心原则产出 ChapterBrief JSON。字段指引：
+const ZH_OUTPUT_REQUIREMENTS = `按核心原则产出 ChapterBrief JSON。严格使用以下字段名和类型：
 
-- goal: 本章主角想要的具体动作。不是情绪，不是抽象状态。
-- chapterType: 从下列选一个——冲突 / 推进 / 过渡 / 反转 / 爽点 / 刀子 / 揭露 / 黄金开场
-- beatOutline: 3-5 个 beat。每个 instruction 是一句场景描述，不是标签。
-  phase 从 opening / development / reversal / payoff / hook 选。
-- hookPlan: 只列这章实际会动的 hook，一般 1-2 个为佳。
+- goal (string): 本章主角想要的具体动作。不是情绪，不是抽象状态。
+- chapterType (string): 从下列选一个——冲突 / 推进 / 过渡 / 反转 / 爽点 / 刀子 / 揭露 / 黄金开场
+- beatOutline (array): 3-5 个对象，每个必须有 phase 和 instruction 两个字段。
+  phase 从 "opening" / "development" / "reversal" / "payoff" / "hook" 选。
+  instruction 是一句场景描述，不是标签。
+- hookPlan (array): 只列这章实际会动的 hook，一般 1-2 个。
+  每个对象必须有 hookId (string)、movement (string)、targetEffect (string) 三个字段。
   其他 active hook 省略，用 dormantReason 解释为什么按兵不动。
-- propsAndSetting: 本章实际出现在页面上的人/物/地。不列未出场的。
-- isGoldenOpening: 前 3 章设 true，其他 false。`;
+- propsAndSetting (string[]): 本章出现在页面上的人/物/地，平铺为字符串数组。
+- dormantReason (string, 可选): 其他 hook 按兵不动的原因。
+- isGoldenOpening (boolean): 前 3 章设 true，其他 false。`;
 
-const EN_OUTPUT_REQUIREMENTS = `Produce ChapterBrief JSON following the core principles. Field guide:
+const EN_OUTPUT_REQUIREMENTS = `Produce ChapterBrief JSON following the core principles. Use EXACTLY these field names and types:
 
-- goal: The concrete action the protagonist wants this chapter. Not an emotion, not an abstract state.
-- chapterType: Pick one — conflict / progression / transition / reversal / payoff / knife-twist / reveal / golden-opening
-- beatOutline: 3-5 beats. Each instruction is a scene-level description, not a label.
-  phase from opening / development / reversal / payoff / hook.
-- hookPlan: Only list hooks that actually move this chapter, typically 1-2.
+- goal (string): The concrete action the protagonist wants this chapter. Not an emotion, not an abstract state.
+- chapterType (string): Pick one — conflict / progression / transition / reversal / payoff / knife-twist / reveal / golden-opening
+- beatOutline (array): 3-5 objects, each with phase (string) and instruction (string).
+  phase from "opening" / "development" / "reversal" / "payoff" / "hook".
+  instruction is a scene-level description, not a label.
+- hookPlan (array): Only list hooks that actually move this chapter, typically 1-2.
+  Each object must have hookId (string), movement (string), targetEffect (string).
   Omit other active hooks; explain in dormantReason why they stay dormant.
-- propsAndSetting: People/items/locations that appear on-page this chapter. Don't list absent ones.
-- isGoldenOpening: true for first 5 chapters, false otherwise.`;
+- propsAndSetting (string[]): People/items/locations on-page, as a flat string array.
+- dormantReason (string, optional): Why other hooks stay dormant.
+- isGoldenOpening (boolean): true for first 5 chapters, false otherwise.`;
