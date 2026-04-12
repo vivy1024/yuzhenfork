@@ -1,4 +1,8 @@
 export const SLASH_COMMANDS = [
+  "/new <idea>",
+  "/draft",
+  "/create",
+  "/discard",
   "/write",
   "/books",
   "/open <book>",

@@ -134,6 +134,37 @@ describe("interaction runtime", () => {
     expect(result.responseText).toContain("已丢弃");
   });
 
+  it("renders the current creation draft when show_book_draft is requested", async () => {
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-show-draft",
+        projectRoot: "/tmp/project",
+        automationMode: "semi",
+        creationDraft: {
+          concept: "港风商战悬疑，主角从灰产洗白。",
+          title: "夜港账本",
+          genre: "urban",
+          worldPremise: "近未来港口城，账本牵出多方势力。",
+          protagonist: "林砚，水货账房出身，擅长记账和看人。",
+          conflictCore: "洗白与旧债回潮的对撞。",
+          nextQuestion: "卷一先查账还是先砸场？",
+          missingFields: ["targetChapters"],
+          readyToCreate: false,
+        },
+        messages: [],
+        events: [],
+      }),
+      request: {
+        intent: "show_book_draft",
+      },
+      tools: makeTools(),
+    });
+
+    expect(result.responseText).toContain("夜港账本");
+    expect(result.responseText).toContain("近未来港口城");
+    expect(result.responseText).toContain("卷一先查账还是先砸场");
+  });
+
   it("routes export_book through the shared export tool", async () => {
     const exportBook = vi.fn(async () => ({
       outputPath: "/tmp/project/exports/harbor.md",

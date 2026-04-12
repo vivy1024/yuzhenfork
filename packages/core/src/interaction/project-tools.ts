@@ -16,7 +16,14 @@ import type { InteractionRuntimeTools } from "./runtime.js";
 import type { BookCreationDraft } from "./session.js";
 
 type PipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft"> & {
-  readonly initBook?: PipelineRunner["initBook"];
+  readonly initBook?: (
+    book: BookConfig,
+    options?: {
+      readonly externalContext?: string;
+      readonly authorIntent?: string;
+      readonly currentFocus?: string;
+    },
+  ) => Promise<void>;
 };
 type StateLike = Pick<StateManager, "ensureControlDocuments" | "bookDir" | "loadBookConfig" | "loadChapterIndex" | "saveChapterIndex" | "listBooks">;
 type InstrumentablePipelineLike = PipelineLike & {
@@ -145,6 +152,34 @@ function buildBookConfig(input: {
     createdAt: now,
     updatedAt: now,
   };
+}
+
+function buildCreationExternalContext(input: {
+  readonly blurb?: string;
+  readonly worldPremise?: string;
+  readonly settingNotes?: string;
+  readonly protagonist?: string;
+  readonly supportingCast?: string;
+  readonly conflictCore?: string;
+  readonly volumeOutline?: string;
+  readonly constraints?: string;
+}): string | undefined {
+  const sections = [
+    input.worldPremise ? `## 世界观与核心设定\n${input.worldPremise}` : undefined,
+    input.settingNotes ? `## 补充设定\n${input.settingNotes}` : undefined,
+    input.protagonist ? `## 主角设定\n${input.protagonist}` : undefined,
+    input.supportingCast ? `## 关键角色与势力\n${input.supportingCast}` : undefined,
+    input.conflictCore ? `## 核心冲突\n${input.conflictCore}` : undefined,
+    input.volumeOutline ? `## 卷纲方向\n${input.volumeOutline}` : undefined,
+    input.blurb ? `## 简介卖点\n${input.blurb}` : undefined,
+    input.constraints ? `## 创作约束\n${input.constraints}` : undefined,
+  ].filter((section): section is string => Boolean(section?.trim()));
+
+  if (sections.length === 0) {
+    return undefined;
+  }
+
+  return sections.join("\n\n");
 }
 
 async function exportBookToPath(state: StateLike, bookId: string, options: {
@@ -445,8 +480,9 @@ export function createInteractionToolsFromDeps(
               "Ask at most one sharp next question.",
               "Default to concise Chinese unless the draft language is clearly English.",
               "Return JSON only with keys assistantReply and draft.",
-              "draft must include concept and may include title, genre, platform, language, targetChapters, chapterWordCount, blurb, authorIntent, currentFocus, nextQuestion, missingFields, readyToCreate.",
-              "Be conservative: only mark readyToCreate=true when the draft already has a workable title, genre, targetChapters, and chapterWordCount.",
+              "draft must include concept and may include title, genre, platform, language, targetChapters, chapterWordCount, blurb, worldPremise, settingNotes, protagonist, supportingCast, conflictCore, volumeOutline, constraints, authorIntent, currentFocus, nextQuestion, missingFields, readyToCreate.",
+              "Help the user decide and revise worldview, setting, protagonist, supporting cast, core conflict, blurb, and volume direction.",
+              "Be conservative: only mark readyToCreate=true when the draft already has a workable title, genre, targetChapters, chapterWordCount, and enough setting/conflict detail to generate a foundation.",
             ].join(" "),
           },
           {
@@ -479,7 +515,11 @@ export function createInteractionToolsFromDeps(
       if (!pipeline.initBook) {
         throw new Error("Pipeline does not support shared book creation.");
       }
-      await pipeline.initBook(book);
+      await pipeline.initBook(book, {
+        externalContext: buildCreationExternalContext(input),
+        authorIntent: input.authorIntent,
+        currentFocus: input.currentFocus,
+      });
       return {
         bookId: book.id,
         title: book.title,

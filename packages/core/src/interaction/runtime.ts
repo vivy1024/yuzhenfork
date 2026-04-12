@@ -28,6 +28,16 @@ export interface InteractionRuntimeTools {
     readonly language?: "zh" | "en";
     readonly chapterWordCount?: number;
     readonly targetChapters?: number;
+    readonly blurb?: string;
+    readonly worldPremise?: string;
+    readonly settingNotes?: string;
+    readonly protagonist?: string;
+    readonly supportingCast?: string;
+    readonly conflictCore?: string;
+    readonly volumeOutline?: string;
+    readonly constraints?: string;
+    readonly authorIntent?: string;
+    readonly currentFocus?: string;
   }) => Promise<unknown>;
   readonly exportBook?: (bookId: string, options: {
     readonly format?: "txt" | "md" | "epub";
@@ -116,6 +126,38 @@ function localizeMode(mode: AutomationMode, language: RuntimeLanguage): string {
     semi: "半自动",
     manual: "手动",
   }[mode] ?? mode;
+}
+
+function renderCreationDraft(
+  draft: NonNullable<InteractionSession["creationDraft"]>,
+  language: RuntimeLanguage,
+): string {
+  const lines = language === "en"
+    ? [
+        "# Current Book Draft",
+        draft.title ? `- Title: ${draft.title}` : undefined,
+        draft.genre ? `- Genre: ${draft.genre}` : undefined,
+        draft.platform ? `- Platform: ${draft.platform}` : undefined,
+        draft.worldPremise ? `- World: ${draft.worldPremise}` : undefined,
+        draft.protagonist ? `- Protagonist: ${draft.protagonist}` : undefined,
+        draft.conflictCore ? `- Core Conflict: ${draft.conflictCore}` : undefined,
+        draft.volumeOutline ? `- Volume Direction: ${draft.volumeOutline}` : undefined,
+        draft.blurb ? `- Blurb: ${draft.blurb}` : undefined,
+        draft.nextQuestion ? `- Next: ${draft.nextQuestion}` : undefined,
+      ]
+    : [
+        "# 当前创作草案",
+        draft.title ? `- 书名：${draft.title}` : undefined,
+        draft.genre ? `- 题材：${draft.genre}` : undefined,
+        draft.platform ? `- 平台：${draft.platform}` : undefined,
+        draft.worldPremise ? `- 世界观：${draft.worldPremise}` : undefined,
+        draft.protagonist ? `- 主角：${draft.protagonist}` : undefined,
+        draft.conflictCore ? `- 核心冲突：${draft.conflictCore}` : undefined,
+        draft.volumeOutline ? `- 卷纲方向：${draft.volumeOutline}` : undefined,
+        draft.blurb ? `- 简介：${draft.blurb}` : undefined,
+        draft.nextQuestion ? `- 下一步：${draft.nextQuestion}` : undefined,
+      ];
+  return lines.filter(Boolean).join("\n");
 }
 
 function buildTaskStartedState(
@@ -384,6 +426,21 @@ export async function runInteractionRequest(params: {
         details: metadata.details,
       };
     }
+    case "show_book_draft": {
+      if (!session.creationDraft) {
+        return {
+          session: markCompleted(session),
+          responseText: localize(language, {
+            zh: "当前还没有创作草案。先告诉我你想写什么，再逐步把书收出来。",
+            en: "There is no active book draft yet. Start by telling me what you want to write.",
+          }),
+        };
+      }
+      return {
+        session: markCompleted(session),
+        responseText: renderCreationDraft(session.creationDraft, language),
+      };
+    }
     case "create_book": {
       if (!params.tools.createBook) {
         throw new Error(localize(language, {
@@ -406,6 +463,16 @@ export async function runInteractionRequest(params: {
         language: request.language ?? effectiveDraft?.language,
         chapterWordCount: request.chapterWordCount ?? effectiveDraft?.chapterWordCount,
         targetChapters: request.targetChapters ?? effectiveDraft?.targetChapters,
+        blurb: request.blurb ?? effectiveDraft?.blurb,
+        worldPremise: request.worldPremise ?? effectiveDraft?.worldPremise,
+        settingNotes: request.settingNotes ?? effectiveDraft?.settingNotes,
+        protagonist: request.protagonist ?? effectiveDraft?.protagonist,
+        supportingCast: request.supportingCast ?? effectiveDraft?.supportingCast,
+        conflictCore: request.conflictCore ?? effectiveDraft?.conflictCore,
+        volumeOutline: request.volumeOutline ?? effectiveDraft?.volumeOutline,
+        constraints: request.constraints ?? effectiveDraft?.constraints,
+        authorIntent: request.authorIntent ?? effectiveDraft?.authorIntent,
+        currentFocus: request.currentFocus ?? effectiveDraft?.currentFocus,
       });
       const metadata = extractToolMetadata(toolResult);
       const createdBookId = typeof toolResult === "object" && toolResult !== null && "bookId" in toolResult

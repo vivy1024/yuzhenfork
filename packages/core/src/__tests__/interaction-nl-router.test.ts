@@ -135,6 +135,9 @@ describe("interaction natural-language router", () => {
     expect(routeNaturalLanguageIntent("/create", { hasCreationDraft: true })).toEqual({
       intent: "create_book",
     });
+    expect(routeNaturalLanguageIntent("/draft", { hasCreationDraft: true })).toEqual({
+      intent: "show_book_draft",
+    });
     expect(routeNaturalLanguageIntent("/discard", { hasCreationDraft: true })).toEqual({
       intent: "discard_book_draft",
     });

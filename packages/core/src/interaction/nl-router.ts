@@ -55,6 +55,12 @@ export function routeNaturalLanguageIntent(
     };
   }
 
+  if (/^\/draft$/i.test(trimmed)) {
+    return {
+      intent: "show_book_draft",
+    };
+  }
+
   if (/^\/discard$/i.test(trimmed)) {
     return {
       intent: "discard_book_draft",
