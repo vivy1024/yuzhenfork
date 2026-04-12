@@ -89,6 +89,26 @@ describe("interaction natural-language router", () => {
     });
   });
 
+  it("routes freeform input into book-development when no active book is bound", () => {
+    expect(routeNaturalLanguageIntent("我想写个港风商战悬疑")).toEqual({
+      intent: "develop_book",
+      instruction: "我想写个港风商战悬疑",
+    });
+    expect(routeNaturalLanguageIntent("先不要开书，我想想名字", {
+      hasCreationDraft: true,
+    })).toEqual({
+      intent: "develop_book",
+      instruction: "先不要开书，我想想名字",
+    });
+    expect(routeNaturalLanguageIntent("名字再狠一点", {
+      activeBookId: "harbor",
+      hasCreationDraft: true,
+    })).toEqual({
+      intent: "develop_book",
+      instruction: "名字再狠一点",
+    });
+  });
+
   it("maps mode switch requests to switch_mode", () => {
     expect(routeNaturalLanguageIntent("切换到全自动", { activeBookId: "harbor" })).toEqual({
       intent: "switch_mode",
@@ -109,8 +129,14 @@ describe("interaction natural-language router", () => {
       intent: "list_books",
     });
     expect(routeNaturalLanguageIntent("/new Night Harbor", { activeBookId: "harbor" })).toEqual({
+      intent: "develop_book",
+      instruction: "Night Harbor",
+    });
+    expect(routeNaturalLanguageIntent("/create", { hasCreationDraft: true })).toEqual({
       intent: "create_book",
-      title: "Night Harbor",
+    });
+    expect(routeNaturalLanguageIntent("/discard", { hasCreationDraft: true })).toEqual({
+      intent: "discard_book_draft",
     });
     expect(routeNaturalLanguageIntent("/open beta", { activeBookId: "harbor" })).toEqual({
       intent: "select_book",

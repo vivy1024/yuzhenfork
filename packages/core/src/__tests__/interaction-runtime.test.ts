@@ -5,6 +5,7 @@ import { runInteractionRequest } from "../interaction/runtime.js";
 function makeTools(overrides: Partial<Parameters<typeof runInteractionRequest>[0]["tools"]> = {}) {
   return {
     listBooks: vi.fn(async () => ["harbor"]),
+    developBookDraft: vi.fn(),
     createBook: vi.fn(),
     exportBook: vi.fn(),
     writeNextChapter: vi.fn(),
@@ -19,6 +20,48 @@ function makeTools(overrides: Partial<Parameters<typeof runInteractionRequest>[0
 }
 
 describe("interaction runtime", () => {
+  it("routes develop_book through the shared draft tool and updates the creation draft", async () => {
+    const developBookDraft = vi.fn(async () => ({
+      __interaction: {
+        responseText: "我先按港风商战悬疑收着。你更想写长篇连载，还是十来章能收住？",
+        details: {
+          creationDraft: {
+            concept: "港风商战悬疑，主角从灰产洗白。",
+            title: "夜港账本",
+            genre: "urban",
+            nextQuestion: "更想写长篇连载，还是十来章能收住？",
+            missingFields: ["targetChapters"],
+            readyToCreate: false,
+          },
+        },
+      },
+    }));
+
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-draft",
+        projectRoot: "/tmp/project",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      }),
+      request: {
+        intent: "develop_book",
+        instruction: "我想写个港风商战悬疑，主角从灰产洗白。",
+      },
+      tools: makeTools({
+        developBookDraft,
+      }),
+    });
+
+    expect(developBookDraft).toHaveBeenCalledWith("我想写个港风商战悬疑，主角从灰产洗白。", undefined);
+    expect(result.session.creationDraft).toEqual(expect.objectContaining({
+      title: "夜港账本",
+      genre: "urban",
+    }));
+    expect(result.responseText).toContain("港风商战悬疑");
+  });
+
   it("routes create_book through the shared create tool and binds the created book", async () => {
     const createBook = vi.fn(async () => ({
       bookId: "night-harbor",
@@ -33,16 +76,21 @@ describe("interaction runtime", () => {
         sessionId: "session-create",
         projectRoot: "/tmp/project",
         automationMode: "semi",
+        creationDraft: {
+          concept: "港风商战悬疑，主角从灰产洗白。",
+          title: "Night Harbor",
+          genre: "urban",
+          platform: "tomato",
+          targetChapters: 120,
+          chapterWordCount: 2800,
+          readyToCreate: true,
+          missingFields: [],
+        },
         messages: [],
         events: [],
       }),
       request: {
         intent: "create_book",
-        title: "Night Harbor",
-        genre: "urban",
-        platform: "tomato",
-        targetChapters: 120,
-        chapterWordCount: 2800,
       },
       tools: makeTools({
         createBook,
@@ -57,7 +105,33 @@ describe("interaction runtime", () => {
       chapterWordCount: 2800,
     });
     expect(result.session.activeBookId).toBe("night-harbor");
+    expect(result.session.creationDraft).toBeUndefined();
     expect(result.responseText).toContain("Created Night Harbor.");
+  });
+
+  it("clears the creation draft when discard_book_draft is requested", async () => {
+    const result = await runInteractionRequest({
+      session: InteractionSessionSchema.parse({
+        sessionId: "session-discard",
+        projectRoot: "/tmp/project",
+        automationMode: "semi",
+        creationDraft: {
+          concept: "港风商战悬疑，主角从灰产洗白。",
+          title: "夜港账本",
+          readyToCreate: false,
+          missingFields: ["genre"],
+        },
+        messages: [],
+        events: [],
+      }),
+      request: {
+        intent: "discard_book_draft",
+      },
+      tools: makeTools(),
+    });
+
+    expect(result.session.creationDraft).toBeUndefined();
+    expect(result.responseText).toContain("已丢弃");
   });
 
   it("routes export_book through the shared export tool", async () => {
@@ -187,7 +261,7 @@ describe("interaction runtime", () => {
       "stage.changed",
       "task.completed",
     ]);
-    expect(result.responseText).toContain("waiting for your next decision");
+    expect(result.responseText).toContain("等待你的下一步决定");
   });
 
   it("routes revise_chapter to reviseDraft with local-fix", async () => {
@@ -495,7 +569,7 @@ describe("interaction runtime", () => {
     });
 
     expect(result.session.currentExecution?.status).toBe("blocked");
-    expect(result.responseText).toContain("Paused");
+    expect(result.responseText).toContain("已暂停");
     expect(result.session.events.map((event) => event.kind)).toEqual([
       "task.started",
       "task.completed",

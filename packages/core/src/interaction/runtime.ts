@@ -6,7 +6,9 @@ import type { PendingDecision, InteractionSession } from "./session.js";
 import {
   appendInteractionEvent,
   bindActiveBook,
+  clearCreationDraft,
   clearPendingDecision,
+  updateCreationDraft,
   updateAutomationMode,
 } from "./session.js";
 
@@ -15,6 +17,10 @@ type RuntimeLanguage = "zh" | "en";
 
 export interface InteractionRuntimeTools {
   readonly listBooks: () => Promise<ReadonlyArray<string>>;
+  readonly developBookDraft?: (
+    input: string,
+    existingDraft?: InteractionSession["creationDraft"],
+  ) => Promise<unknown>;
   readonly createBook?: (input: {
     readonly title: string;
     readonly genre?: string;
@@ -129,6 +135,15 @@ function buildTaskStartedState(
           en: "preparing chapter inputs",
         }),
       };
+    case "develop_book":
+      return {
+        status: "planning",
+        bookId: request.bookId ?? session.activeBookId,
+        stageLabel: localize(language, {
+          zh: "收敛创作草案",
+          en: "developing book draft",
+        }),
+      };
     case "create_book":
       return {
         status: "planning",
@@ -171,6 +186,7 @@ function buildTaskStartedState(
         }),
       };
     case "pause_book":
+    case "discard_book_draft":
       return {
         status: "blocked",
         bookId: request.bookId ?? session.activeBookId,
@@ -328,6 +344,46 @@ export async function runInteractionRequest(params: {
   });
 
   switch (request.intent) {
+    case "develop_book": {
+      if (!params.tools.developBookDraft) {
+        throw new Error(localize(language, {
+          zh: "创作草案会话暂未实现。",
+          en: "Book-draft ideation is not implemented yet.",
+        }));
+      }
+      if (!request.instruction) {
+        throw new Error(localize(language, {
+          zh: "创作草案需要一条用户输入。",
+          en: "Book-draft ideation requires user input.",
+        }));
+      }
+      const toolResult = await params.tools.developBookDraft(request.instruction, session.creationDraft);
+      const metadata = extractToolMetadata(toolResult);
+      const draft = metadata.details?.creationDraft as InteractionSession["creationDraft"] | undefined;
+      if (!draft) {
+        throw new Error(localize(language, {
+          zh: "创作草案工具没有返回草案数据。",
+          en: "Book-draft tool did not return draft data.",
+        }));
+      }
+      session = updateCreationDraft(session, draft);
+      session = appendToolEvents(session, metadata.events);
+      const completed = {
+        ...markCompleted(session),
+        currentExecution: metadata.currentExecution ?? markCompleted(session).currentExecution,
+      };
+      return {
+        session: addEvent(completed, "task.completed", "completed", localize(language, {
+          zh: "已更新创作草案。",
+          en: "Updated the book draft.",
+        })),
+        responseText: metadata.responseText ?? localize(language, {
+          zh: "已更新创作草案。",
+          en: "Updated the book draft.",
+        }),
+        details: metadata.details,
+      };
+    }
     case "create_book": {
       if (!params.tools.createBook) {
         throw new Error(localize(language, {
@@ -335,19 +391,21 @@ export async function runInteractionRequest(params: {
           en: "Book creation is not implemented in the interaction runtime yet.",
         }));
       }
-      if (!request.title) {
+      const effectiveDraft = session.creationDraft;
+      const title = request.title ?? effectiveDraft?.title;
+      if (!title) {
         throw new Error(localize(language, {
           zh: "创建作品需要标题。",
           en: "Book creation requires a title.",
         }));
       }
       const toolResult = await params.tools.createBook({
-        title: request.title,
-        genre: request.genre,
-        platform: request.platform,
-        language: request.language,
-        chapterWordCount: request.chapterWordCount,
-        targetChapters: request.targetChapters,
+        title,
+        genre: request.genre ?? effectiveDraft?.genre,
+        platform: request.platform ?? effectiveDraft?.platform,
+        language: request.language ?? effectiveDraft?.language,
+        chapterWordCount: request.chapterWordCount ?? effectiveDraft?.chapterWordCount,
+        targetChapters: request.targetChapters ?? effectiveDraft?.targetChapters,
       });
       const metadata = extractToolMetadata(toolResult);
       const createdBookId = typeof toolResult === "object" && toolResult !== null && "bookId" in toolResult
@@ -360,7 +418,7 @@ export async function runInteractionRequest(params: {
           en: "Create-book tool did not return a book id.",
         }));
       }
-      session = bindActiveBook(session, createdBookId);
+      session = clearCreationDraft(bindActiveBook(session, createdBookId));
       session = appendToolEvents(session, metadata.events);
       const completed = {
         ...markCompleted(session),
@@ -376,6 +434,19 @@ export async function runInteractionRequest(params: {
           en: `Created ${createdBookId}.`,
         }),
         details: metadata.details,
+      };
+    }
+    case "discard_book_draft": {
+      const completed = markCompleted(clearCreationDraft(session));
+      return {
+        session: addEvent(completed, "task.completed", "completed", localize(language, {
+          zh: "已丢弃当前创作草案。",
+          en: "Discarded the current book draft.",
+        })),
+        responseText: localize(language, {
+          zh: "已丢弃当前创作草案。",
+          en: "Discarded the current book draft.",
+        }),
       };
     }
     case "write_next":

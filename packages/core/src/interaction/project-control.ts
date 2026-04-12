@@ -80,6 +80,7 @@ export async function processProjectInteractionInput(params: {
   });
   const request = attachRequestLanguage(routeNaturalLanguageIntent(params.input, {
     activeBookId: userSession.activeBookId,
+    hasCreationDraft: Boolean(userSession.creationDraft),
   }), requestLanguage);
   try {
     const result = await runInteractionRequest({

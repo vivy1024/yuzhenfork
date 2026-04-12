@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   AutomationModeSchema,
+  BookCreationDraftSchema,
   InteractionIntentTypeSchema,
   ExecutionStatusSchema,
   InteractionSessionSchema,
@@ -9,6 +10,8 @@ import {
   isTerminalExecutionStatus,
   appendInteractionMessage,
   appendInteractionEvent,
+  updateCreationDraft,
+  clearCreationDraft,
 } from "../index.js";
 
 describe("interaction models", () => {
@@ -19,7 +22,9 @@ describe("interaction models", () => {
   });
 
   it("parses supported interaction intents", () => {
+    expect(InteractionIntentTypeSchema.parse("develop_book")).toBe("develop_book");
     expect(InteractionIntentTypeSchema.parse("create_book")).toBe("create_book");
+    expect(InteractionIntentTypeSchema.parse("discard_book_draft")).toBe("discard_book_draft");
     expect(InteractionIntentTypeSchema.parse("chat")).toBe("chat");
     expect(InteractionIntentTypeSchema.parse("write_next")).toBe("write_next");
     expect(InteractionIntentTypeSchema.parse("rewrite_chapter")).toBe("rewrite_chapter");
@@ -125,5 +130,26 @@ describe("interaction models", () => {
       bookId: "harbor",
       detail: "Completed write_next for harbor.",
     }]);
+  });
+
+  it("stores and clears a creation draft inside the shared session", () => {
+    const draft = BookCreationDraftSchema.parse({
+      concept: "港风商战悬疑，主角从灰产洗白。",
+      title: "夜港账本",
+      genre: "urban",
+      readyToCreate: false,
+    });
+
+    const session = InteractionSessionSchema.parse({
+      sessionId: "session-5",
+      projectRoot: "/tmp/project",
+      automationMode: "semi",
+      messages: [],
+      events: [],
+    });
+
+    const withDraft = updateCreationDraft(session, draft);
+    expect(withDraft.creationDraft?.title).toBe("夜港账本");
+    expect(clearCreationDraft(withDraft).creationDraft).toBeUndefined();
   });
 });

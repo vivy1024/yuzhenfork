@@ -675,4 +675,36 @@ describe("createStudioServer daemon lifecycle", () => {
       activeBookId: "demo-book",
     });
   });
+
+  it("returns creation-draft state through the shared interaction session endpoint", async () => {
+    loadProjectSessionMock.mockResolvedValue({
+      sessionId: "session-3",
+      projectRoot: root,
+      automationMode: "semi",
+      creationDraft: {
+        concept: "港风商战悬疑，主角从灰产洗白。",
+        title: "夜港账本",
+        nextQuestion: "你更想写长篇连载，还是十来章能收住？",
+        missingFields: ["targetChapters"],
+        readyToCreate: false,
+      },
+      messages: [],
+    });
+    resolveSessionActiveBookMock.mockResolvedValue(undefined);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/interaction/session");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      session: expect.objectContaining({
+        creationDraft: expect.objectContaining({
+          title: "夜港账本",
+          nextQuestion: "你更想写长篇连载，还是十来章能收住？",
+        }),
+      }),
+    });
+  });
 });

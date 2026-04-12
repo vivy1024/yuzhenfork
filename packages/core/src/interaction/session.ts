@@ -19,11 +19,30 @@ export const InteractionMessageSchema = z.object({
 
 export type InteractionMessage = z.infer<typeof InteractionMessageSchema>;
 
+export const BookCreationDraftSchema = z.object({
+  concept: z.string().min(1),
+  title: z.string().min(1).optional(),
+  genre: z.string().min(1).optional(),
+  platform: z.string().min(1).optional(),
+  language: z.enum(["zh", "en"]).optional(),
+  targetChapters: z.number().int().min(1).optional(),
+  chapterWordCount: z.number().int().min(1).optional(),
+  blurb: z.string().min(1).optional(),
+  authorIntent: z.string().min(1).optional(),
+  currentFocus: z.string().min(1).optional(),
+  nextQuestion: z.string().min(1).optional(),
+  missingFields: z.array(z.string().min(1)).default([]),
+  readyToCreate: z.boolean().default(false),
+});
+
+export type BookCreationDraft = z.infer<typeof BookCreationDraftSchema>;
+
 export const InteractionSessionSchema = z.object({
   sessionId: z.string().min(1),
   projectRoot: z.string().min(1),
   activeBookId: z.string().min(1).optional(),
   activeChapterNumber: z.number().int().min(1).optional(),
+  creationDraft: BookCreationDraftSchema.optional(),
   automationMode: AutomationModeSchema.default("semi"),
   messages: z.array(InteractionMessageSchema).default([]),
   events: z.array(InteractionEventSchema).default([]),
@@ -53,6 +72,27 @@ export function clearPendingDecision(session: InteractionSession): InteractionSe
   return {
     ...session,
     pendingDecision: undefined,
+  };
+}
+
+export function updateCreationDraft(
+  session: InteractionSession,
+  draft: BookCreationDraft,
+): InteractionSession {
+  return {
+    ...session,
+    creationDraft: draft,
+  };
+}
+
+export function clearCreationDraft(session: InteractionSession): InteractionSession {
+  if (!session.creationDraft) {
+    return session;
+  }
+
+  return {
+    ...session,
+    creationDraft: undefined,
   };
 }
 

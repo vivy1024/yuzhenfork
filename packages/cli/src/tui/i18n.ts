@@ -16,6 +16,7 @@ export interface TuiCopy {
     readonly error: string;
     readonly recent: string;
     readonly pending: string;
+    readonly draft: string;
     readonly ready: string;
     readonly none: string;
     readonly notConfigured: string;
@@ -70,6 +71,7 @@ const ZH_CN: TuiCopy = {
     error: "错误",
     recent: "最近",
     pending: "待确认",
+    draft: "草稿",
     ready: "就绪",
     none: "无",
     notConfigured: "未配置",
@@ -149,6 +151,7 @@ const EN: TuiCopy = {
     error: "Error",
     recent: "Recent",
     pending: "Pending",
+    draft: "Draft",
     ready: "Ready",
     none: "none",
     notConfigured: "not configured",

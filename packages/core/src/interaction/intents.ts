@@ -2,7 +2,9 @@ import { z } from "zod";
 import { AutomationModeSchema } from "./modes.js";
 
 export const InteractionIntentTypeSchema = z.enum([
+  "develop_book",
   "create_book",
+  "discard_book_draft",
   "list_books",
   "select_book",
   "continue_book",

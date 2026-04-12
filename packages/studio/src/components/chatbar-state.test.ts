@@ -58,4 +58,12 @@ describe("resolveDirectWriteTarget", () => {
       currentStage: "waiting for your next decision",
     })).toBe("harbor · semi · waiting for your next decision");
   });
+
+  it("surfaces creation-draft context when no active book is bound yet", () => {
+    expect(formatSharedSessionContext({
+      draftTitle: "夜港账本",
+      automationMode: "semi",
+      currentStage: "developing book draft",
+    })).toBe("no-book · draft:夜港账本 · semi · developing book draft");
+  });
 });

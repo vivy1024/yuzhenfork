@@ -56,6 +56,8 @@ export function buildDashboardViewModel(params: BuildDashboardViewModelParams): 
   const executionLabel = normalizeStageLabel(params.session.currentExecution?.stageLabel ?? status, params.copy);
   const modeLabel = formatModeLabel(params.session.automationMode, params.copy);
   const bookLabel = params.activeBookTitle ?? params.session.activeBookId ?? params.copy.labels.none;
+  const draftTitle = params.session.creationDraft?.title;
+  const draftQuestion = params.session.creationDraft?.nextQuestion;
   const sinceTimestamp = params.sinceTimestamp ?? 0;
   const terminalRows = params.terminalRows ?? process.stdout.rows ?? 24;
   const conversationLimit = Math.max(4, terminalRows - 10);
@@ -88,15 +90,26 @@ export function buildDashboardViewModel(params: BuildDashboardViewModelParams): 
     modeLabel,
     executionStatus: status,
     executionLabel,
-    headerLine: `${params.copy.labels.project} ${params.projectName} · ${params.copy.labels.book} ${bookLabel} · ${params.copy.labels.depth} ${params.depthLabel ?? params.copy.depthLabels.normal} · ${params.copy.labels.session} ${params.session.sessionId.slice(-4)} · ${params.copy.labels.messageCount(params.session.messages.length)}`,
+    headerLine: [
+      `${params.copy.labels.project} ${params.projectName}`,
+      `${params.copy.labels.book} ${bookLabel}`,
+      draftTitle ? `${params.copy.labels.draft} ${draftTitle}` : undefined,
+      `${params.copy.labels.depth} ${params.depthLabel ?? params.copy.depthLabels.normal}`,
+      `${params.copy.labels.session} ${params.session.sessionId.slice(-4)}`,
+      params.copy.labels.messageCount(params.session.messages.length),
+    ].filter(Boolean).join(" · "),
     statusPrimaryLine: `${params.copy.labels.stage} ${executionLabel} · ${params.copy.labels.mode} ${modeLabel} · ${params.copy.labels.model} ${params.modelLabel}`,
     statusSecondaryLine: params.lastError
       ? `${params.copy.labels.error} · ${compactInline(params.lastError)}`
       : params.isSubmitting && latestEventSummary
         ? `${params.copy.labels.recent} · ${latestEventSummary}`
-        : params.session.pendingDecision?.summary
+      : params.session.pendingDecision?.summary
           ? `${params.copy.labels.pending} · ${compactInline(params.session.pendingDecision.summary)}`
-          : latestEventSummary
+        : draftQuestion
+          ? `${params.copy.labels.draft} · ${compactInline(draftQuestion)}`
+        : draftTitle
+          ? `${params.copy.labels.draft} · ${draftTitle}`
+        : latestEventSummary
             ? `${params.copy.labels.recent} · ${latestEventSummary}`
             : `${params.copy.labels.ready} · ${bookLabel}`,
     messageRows,

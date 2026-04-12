@@ -89,15 +89,19 @@ export {
   isTerminalExecutionStatus,
 } from "./interaction/events.js";
 export {
+  BookCreationDraftSchema,
   PendingDecisionSchema,
   InteractionMessageSchema,
   InteractionSessionSchema,
+  type BookCreationDraft,
   type PendingDecision,
   type InteractionMessage,
   type InteractionSession,
   bindActiveBook,
+  clearCreationDraft,
   clearPendingDecision,
   updateAutomationMode,
+  updateCreationDraft,
   appendInteractionMessage,
   appendInteractionEvent,
 } from "./interaction/session.js";

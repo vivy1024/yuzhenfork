@@ -177,4 +177,46 @@ describe("ink dashboard", () => {
     expect(frame).toContain("告诉 InkOS 要写什么、修改什么，或解释什么");
     expect(frame).toContain("回车发送");
   });
+
+  it("surfaces the shared creation draft when no active book exists yet", async () => {
+    const mod = await import("../tui/dashboard.js");
+
+    const draftSession: InteractionSession = {
+      ...createSession(),
+      activeBookId: undefined,
+      activeChapterNumber: undefined,
+      currentExecution: {
+        status: "planning",
+        stageLabel: "developing book draft",
+      },
+      pendingDecision: undefined,
+      creationDraft: {
+        concept: "港风商战悬疑，主角从灰产洗白。",
+        title: "夜港账本",
+        nextQuestion: "你更想写长篇连载，还是十来章能收住？",
+        missingFields: ["targetChapters"],
+        readyToCreate: false,
+      },
+      messages: [
+        { role: "user", content: "我想写个港风商战悬疑。", timestamp: 1 },
+        { role: "assistant", content: "先把这本书的大概方向收住。", timestamp: 2 },
+      ],
+      events: [],
+    };
+
+    const { lastFrame } = render(
+      <mod.InkTuiDashboard
+        locale="zh-CN"
+        projectName="inkos-demo"
+        modelLabel="gpt-5.4 (openai)"
+        session={draftSession}
+        inputValue=""
+        isSubmitting={false}
+      />,
+    );
+
+    const frame = lastFrame() ?? "";
+    expect(frame).toContain("草稿 夜港账本");
+    expect(frame).toContain("你更想写长篇连载，还是十来章能收住？");
+  });
 });

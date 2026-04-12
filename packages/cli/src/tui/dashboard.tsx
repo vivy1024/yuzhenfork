@@ -335,7 +335,10 @@ export function InkTuiApp(props: InkTuiAppProps): React.JSX.Element {
       }
 
       const activeBookId = await resolveSessionActiveBook(props.projectRoot, session);
-      const routed = routeNaturalLanguageIntent(input, { activeBookId });
+      const routed = routeNaturalLanguageIntent(input, {
+        activeBookId,
+        hasCreationDraft: Boolean(session.creationDraft),
+      });
       const userTimestamp = Date.now();
       const assistantDraftTimestamp = routed.intent === "chat" ? userTimestamp + 1 : null;
       assistantDraftTimestampRef.current = assistantDraftTimestamp;

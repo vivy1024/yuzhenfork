@@ -13,6 +13,7 @@ import type {
 import { chatCompletion } from "../index.js";
 import { executeEditTransaction } from "./edit-controller.js";
 import type { InteractionRuntimeTools } from "./runtime.js";
+import type { BookCreationDraft } from "./session.js";
 
 type PipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft"> & {
   readonly initBook?: PipelineRunner["initBook"];
@@ -34,6 +35,84 @@ function normalizePlatform(platform?: string): Platform {
       return platform;
     default:
       return "other";
+  }
+}
+
+function extractBalancedJsonObject(text: string): string | null {
+  const start = text.indexOf("{");
+  if (start < 0) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let index = start; index < text.length; index += 1) {
+    const char = text[index]!;
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+        continue;
+      }
+      if (char === "\\") {
+        escaped = true;
+        continue;
+      }
+      if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, index + 1);
+      }
+      if (depth < 0) {
+        return null;
+      }
+    }
+  }
+
+  return null;
+}
+
+function parseCreationDraftResult(text: string): {
+  readonly assistantReply: string;
+  readonly draft: BookCreationDraft;
+} | null {
+  const candidate = extractBalancedJsonObject(text);
+  if (!candidate) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(candidate) as {
+      assistantReply?: string;
+      draft?: BookCreationDraft;
+    };
+    if (!parsed.assistantReply || !parsed.draft) {
+      return null;
+    }
+    return {
+      assistantReply: parsed.assistantReply,
+      draft: parsed.draft,
+    };
+  } catch {
+    return null;
   }
 }
 
@@ -327,6 +406,74 @@ export function createInteractionToolsFromDeps(
 
   return {
     listBooks: () => state.listBooks(),
+    developBookDraft: async (input, existingDraft) => {
+      if (!instrumentedPipeline.config?.client || !instrumentedPipeline.config?.model) {
+        const concept = existingDraft?.concept ?? input;
+        return {
+          __interaction: {
+            responseText: "先把这本书的大概方向收住。你更想写长篇连载，还是十来章能收住的版本？",
+            details: {
+              creationDraft: {
+                concept,
+                title: existingDraft?.title,
+                genre: existingDraft?.genre,
+                platform: existingDraft?.platform,
+                language: existingDraft?.language,
+                targetChapters: existingDraft?.targetChapters,
+                chapterWordCount: existingDraft?.chapterWordCount,
+                blurb: existingDraft?.blurb,
+                authorIntent: existingDraft?.authorIntent,
+                currentFocus: existingDraft?.currentFocus,
+                nextQuestion: "你更想写长篇连载，还是十来章能收住的版本？",
+                missingFields: existingDraft?.missingFields ?? ["title", "genre", "targetChapters"],
+                readyToCreate: existingDraft?.readyToCreate ?? false,
+              } satisfies BookCreationDraft,
+            },
+          },
+        };
+      }
+
+      const response = await chatCompletion(
+        instrumentedPipeline.config.client,
+        instrumentedPipeline.config.model,
+        [
+          {
+            role: "system",
+            content: [
+              "You are InkOS book ideation assistant.",
+              "Turn the user's latest message and the current draft into a tighter book creation draft.",
+              "Ask at most one sharp next question.",
+              "Default to concise Chinese unless the draft language is clearly English.",
+              "Return JSON only with keys assistantReply and draft.",
+              "draft must include concept and may include title, genre, platform, language, targetChapters, chapterWordCount, blurb, authorIntent, currentFocus, nextQuestion, missingFields, readyToCreate.",
+              "Be conservative: only mark readyToCreate=true when the draft already has a workable title, genre, targetChapters, and chapterWordCount.",
+            ].join(" "),
+          },
+          {
+            role: "user",
+            content: JSON.stringify({
+              currentDraft: existingDraft ?? null,
+              latestMessage: input,
+            }, null, 2),
+          },
+        ],
+        { temperature: 0.4, maxTokens: 700 },
+      );
+
+      const parsed = parseCreationDraftResult(response.content);
+      if (!parsed) {
+        throw new Error("Book draft assistant returned invalid JSON.");
+      }
+
+      return {
+        __interaction: {
+          responseText: parsed.assistantReply,
+          details: {
+            creationDraft: parsed.draft,
+          },
+        },
+      };
+    },
     createBook: async (input) => {
       const book = buildBookConfig(input);
       if (!pipeline.initBook) {

@@ -2,6 +2,7 @@ import type { InteractionRequest } from "./intents.js";
 
 export interface NaturalLanguageRoutingContext {
   readonly activeBookId?: string;
+  readonly hasCreationDraft?: boolean;
 }
 
 export function routeNaturalLanguageIntent(
@@ -9,7 +10,6 @@ export function routeNaturalLanguageIntent(
   context: NaturalLanguageRoutingContext = {},
 ): InteractionRequest {
   const trimmed = input.trim();
-  const lower = trimmed.toLowerCase();
   const bookId = context.activeBookId;
 
   if (/^(hi|hello|hey|你好|嗨|哈喽)$/i.test(trimmed)) {
@@ -43,8 +43,21 @@ export function routeNaturalLanguageIntent(
   const newCommand = trimmed.match(/^\/new\s+(.+)$/i);
   if (newCommand) {
     return {
+      intent: "develop_book",
+      instruction: newCommand[1]!.trim(),
+    };
+  }
+
+  if (/^\/create$/i.test(trimmed)) {
+    return {
       intent: "create_book",
-      title: newCommand[1]!.trim(),
+      ...(bookId ? { bookId } : {}),
+    };
+  }
+
+  if (/^\/discard$/i.test(trimmed)) {
+    return {
+      intent: "discard_book_draft",
     };
   }
 
@@ -220,6 +233,13 @@ export function routeNaturalLanguageIntent(
       intent: "export_book",
       ...(bookId ? { bookId } : {}),
       format: matchedFormat ?? "txt",
+    };
+  }
+
+  if (!bookId || context.hasCreationDraft) {
+    return {
+      intent: "develop_book",
+      instruction: trimmed,
     };
   }
 

@@ -46,6 +46,7 @@ interface SharedSessionMeta {
   readonly automationMode?: string;
   readonly currentStage?: string;
   readonly pendingSummary?: string;
+  readonly draftTitle?: string;
 }
 
 interface BookRef {
@@ -83,6 +84,7 @@ export function resolveDirectWriteTarget(
 export function formatSharedSessionContext(meta: SharedSessionMeta): string {
   return [
     meta.activeBookId ?? "no-book",
+    meta.draftTitle ? `draft:${meta.draftTitle}` : undefined,
     meta.automationMode ?? "semi",
     meta.currentStage,
   ].filter(Boolean).join(" · ");
@@ -255,6 +257,9 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
       session?: {
         activeBookId?: string;
         automationMode?: string;
+        creationDraft?: {
+          title?: string;
+        };
         currentExecution?: {
           status?: string;
           stageLabel?: string;
@@ -269,6 +274,7 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
       if (cancelled) return;
       setSessionMeta({
         activeBookId: data.activeBookId ?? data.session?.activeBookId,
+        draftTitle: data.session?.creationDraft?.title,
         automationMode: data.session?.automationMode,
         currentStage: data.session?.currentExecution?.stageLabel ?? data.session?.currentExecution?.status,
         pendingSummary: data.session?.pendingDecision?.summary,
@@ -373,6 +379,9 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
         session?: {
           activeBookId?: string;
           automationMode?: string;
+          creationDraft?: {
+            title?: string;
+          };
           currentExecution?: {
             status?: string;
             stageLabel?: string;
@@ -391,6 +400,7 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
       if (data.session) {
         setSessionMeta({
           activeBookId: data.session.activeBookId ?? activeBookId,
+          draftTitle: data.session.creationDraft?.title,
           automationMode: data.session.automationMode,
           currentStage: data.session.currentExecution?.stageLabel ?? data.session.currentExecution?.status,
           pendingSummary: data.session.pendingDecision?.summary,
