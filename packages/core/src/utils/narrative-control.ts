@@ -1,4 +1,4 @@
-import type { ContextPackage } from "../models/input-governance.js";
+import type { ChapterBrief, ContextPackage } from "../models/input-governance.js";
 
 const HOOK_ID_PATTERN = /\bH\d+\b/gi;
 const HOOK_SLUG_PATTERN = /\b[a-z]+(?:-[a-z]+){1,3}\b/g;
@@ -37,6 +37,66 @@ export function sanitizeNarrativeControlText(
   }
 
   return result;
+}
+
+/**
+ * Render a ChapterBrief into a sanitized narrative control block for the
+ * writer / reviser prompt. This replaces the old buildNarrativeIntentBrief
+ * path: the brief is the single source of chapter intent.
+ */
+export function renderBriefAsNarrativeBlock(
+  brief: ChapterBrief,
+  language: "zh" | "en" = "zh",
+): string {
+  const s = (text: string) => sanitizeNarrativeControlText(text, language);
+  const isEn = language === "en";
+
+  const sections: string[] = [];
+
+  // Goal
+  sections.push(`## ${isEn ? "Goal" : "目标"}\n- ${s(brief.goal)}`);
+
+  // Chapter type
+  sections.push(`## ${isEn ? "Chapter Type" : "章节类型"}\n- ${s(brief.chapterType)}`);
+
+  // Beat outline
+  if (brief.beatOutline.length > 0) {
+    const beats = brief.beatOutline
+      .map((beat) => `- ${beat.phase}: ${s(beat.instruction)}`)
+      .join("\n");
+    sections.push(`## ${isEn ? "Beat Outline" : "节拍大纲"}\n${beats}`);
+  }
+
+  // Hook plan
+  if (brief.hookPlan.length > 0) {
+    const hooks = brief.hookPlan
+      .map((hook) => `- ${s(hook.hookId)} | ${hook.movement} | ${s(hook.targetEffect)}`)
+      .join("\n");
+    sections.push(`## ${isEn ? "Hook Plan" : "伏笔计划"}\n${hooks}`);
+  }
+
+  // Dormant reason
+  if (brief.dormantReason) {
+    sections.push(
+      `## ${isEn ? "Dormant Hooks" : "按兵不动的伏笔"}\n- ${s(brief.dormantReason)}`,
+    );
+  }
+
+  // Props and setting
+  if (brief.propsAndSetting.length > 0) {
+    sections.push(
+      `## ${isEn ? "Props & Setting" : "道具与场景"}\n- ${brief.propsAndSetting.map(s).join(", ")}`,
+    );
+  }
+
+  // Golden opening flag
+  if (brief.isGoldenOpening) {
+    sections.push(
+      `## ${isEn ? "Golden Opening" : "黄金开场"}\n- ${isEn ? "This is a golden opening chapter — prioritize hook-dense, high-tempo pacing." : "本章是黄金开场章——优先钩子密集、高节奏。"}`,
+    );
+  }
+
+  return sections.join("\n\n");
 }
 
 export function buildNarrativeIntentBrief(
