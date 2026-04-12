@@ -901,7 +901,15 @@ describe("WriterAgent", () => {
         },
         bookDir,
         chapterNumber: 4,
-        chapterIntent: "# Chapter Intent\n\n## Goal\nForce Mara back toward the ledger trail.\n",
+        chapterBrief: {
+          chapter: 4,
+          goal: "Force Mara back toward the ledger trail.",
+          chapterType: "confrontation",
+          isGoldenOpening: false,
+          beatOutline: [{ phase: "opening" as const, instruction: "Open with tension at the archive window." }],
+          hookPlan: [{ hookId: "ledger-fragment", movement: "advance" as const, targetEffect: "Mara is forced to confront the ledger." }],
+          propsAndSetting: ["archive window"],
+        },
         contextPackage: {
           chapter: 4,
           selectedContext: [
@@ -1025,7 +1033,15 @@ describe("WriterAgent", () => {
         },
         bookDir,
         chapterNumber: 4,
-        chapterIntent: "# Chapter Intent\n\n## Goal\nPush Mara back toward the archive ledger.\n",
+        chapterBrief: {
+          chapter: 4,
+          goal: "Push Mara back toward the archive ledger.",
+          chapterType: "confrontation",
+          isGoldenOpening: false,
+          beatOutline: [{ phase: "opening" as const, instruction: "Open with tension at the archive." }],
+          hookPlan: [{ hookId: "ledger-fragment", movement: "advance" as const, targetEffect: "Mara is forced to confront the ledger." }],
+          propsAndSetting: ["archive"],
+        },
         contextPackage: {
           chapter: 4,
           selectedContext: [
@@ -1168,29 +1184,18 @@ describe("WriterAgent", () => {
         },
         bookDir,
         chapterNumber: 4,
-        chapterIntent: [
-          "# Chapter Intent",
-          "",
-          "## Goal",
-          "Push Mara back toward the archive ledger.",
-          "",
-          "## Must Avoid",
-          "- 不要写成前几章回顾",
-          "- 本章要做的是推进 ledger-fragment，但不要把 H001/H002 写进正文",
-          "",
-          "## Hook Agenda",
-          "### Must Advance",
-          "- mentor-oath",
-          "",
-          "### Eligible Resolve",
-          "- ledger-fragment",
-          "",
-          "### Stale Debt",
-          "- stale-ledger",
-          "",
-          "### Avoid New Hook Families",
-          "- relationship",
-        ].join("\n"),
+        chapterBrief: {
+          chapter: 4,
+          goal: "Push Mara back toward the archive ledger.",
+          chapterType: "confrontation",
+          isGoldenOpening: false,
+          beatOutline: [{ phase: "opening" as const, instruction: "本章要做的是推进 ledger-fragment tension at the archive." }],
+          hookPlan: [
+            { hookId: "mentor-oath", movement: "advance" as const, targetEffect: "Advance the oath debt with H001 ledger-fragment callback." },
+            { hookId: "ledger-fragment", movement: "partial-payoff" as const, targetEffect: "Partially resolve stale-ledger." },
+          ],
+          propsAndSetting: ["archive"],
+        },
         contextPackage: {
           chapter: 4,
           selectedContext: [
@@ -1219,15 +1224,14 @@ describe("WriterAgent", () => {
 
       expect(systemPrompt).not.toContain("Hook-A / Hook-B");
       expect(systemPrompt).toContain("真实 hook_id");
-      expect(creativePrompt).not.toContain("## Explicit Hook Agenda");
+      // Hook IDs from the brief should be sanitized by renderBriefAsNarrativeBlock
       expect(creativePrompt).not.toContain("## Hook Agenda");
       expect(creativePrompt).not.toContain("mentor-oath");
       expect(creativePrompt).not.toContain("ledger-fragment");
       expect(creativePrompt).not.toContain("stale-ledger");
       expect(creativePrompt).not.toContain("H001");
-      expect(creativePrompt).not.toContain("H002");
-      expect(creativePrompt).not.toContain("前几章");
       expect(creativePrompt).not.toContain("本章要做的");
+      // The goal text should survive sanitization
       expect(creativePrompt).toContain("Push Mara back toward the archive ledger.");
     } finally {
       await rm(root, { recursive: true, force: true });

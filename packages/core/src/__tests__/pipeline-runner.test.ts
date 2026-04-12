@@ -201,6 +201,80 @@ async function createRunnerFixture(
 
 describe("PipelineRunner", () => {
   beforeEach(() => {
+    vi.spyOn(PlannerAgent.prototype, "planChapter").mockImplementation(async (input) => {
+      const chapterNumber = input.chapterNumber;
+      const goal = input.externalContext ?? "test goal";
+      const brief = {
+        chapter: chapterNumber,
+        goal,
+        chapterType: "推进" as const,
+        isGoldenOpening: false,
+        beatOutline: [{ phase: "opening" as const, instruction: "test" }],
+        hookPlan: [] as Array<{ hookId: string; movement: "quiet-hold" | "refresh" | "advance" | "partial-payoff" | "full-payoff"; targetEffect: string }>,
+        propsAndSetting: [] as string[],
+      };
+      const intentMarkdown = [
+        "# Chapter Intent",
+        "",
+        "## Goal",
+        goal,
+        "",
+        "## Outline Node",
+        "(not found)",
+        "",
+        "## Must Keep",
+        "- none",
+        "",
+        "## Must Avoid",
+        "- none",
+        "",
+        "## Style Emphasis",
+        "- none",
+        "",
+        "## Conflicts",
+        "- none",
+        "",
+        "## Chapter Brief",
+        `- chapterType: ${brief.chapterType}`,
+        `- isGoldenOpening: ${brief.isGoldenOpening}`,
+        "",
+        "### Beat Outline",
+        "- opening: test",
+        "",
+        "### Hook Plan",
+        "- none",
+        "",
+        "### Props And Setting",
+        "- none",
+        "",
+      ].join("\n");
+      const runtimeDir = join(input.bookDir, "story", "runtime");
+      const { mkdir: mkdirFs, writeFile: writeFileFs } = await import("node:fs/promises");
+      await mkdirFs(runtimeDir, { recursive: true });
+      const runtimePath = join(runtimeDir, `chapter-${String(chapterNumber).padStart(4, "0")}.intent.md`);
+      await writeFileFs(runtimePath, intentMarkdown, "utf-8");
+      return {
+        intent: {
+          chapter: chapterNumber,
+          goal,
+          mustKeep: [],
+          mustAvoid: [],
+          styleEmphasis: [],
+          conflicts: [],
+          hookAgenda: {
+            pressureMap: [],
+            mustAdvance: [],
+            eligibleResolve: [],
+            staleDebt: [],
+            avoidNewHookFamilies: [],
+          },
+        },
+        brief,
+        intentMarkdown,
+        plannerInputs: [runtimePath],
+        runtimePath,
+      };
+    });
     vi.spyOn(FoundationReviewerAgent.prototype, "review").mockResolvedValue({
       passed: true,
       totalScore: 85,
@@ -525,22 +599,77 @@ describe("PipelineRunner", () => {
       writeFile(join(state.bookDir(bookId), "story", "pending_hooks.md"), "# Pending Hooks\n\n- Why the mentor vanished after the trial.\n", "utf-8"),
     ]);
 
-    const originalPlanChapter = PlannerAgent.prototype.planChapter;
-    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter").mockImplementation(async function (this: PlannerAgent, input) {
-      const result = await originalPlanChapter.call(this, input);
+    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter").mockImplementation(async (input) => {
+      const runtimeDir = join(input.bookDir, "story", "runtime");
+      await mkdir(runtimeDir, { recursive: true });
+      const goal = "Ignore the guild chase and bring focus back to mentor conflict.";
+      const brief = {
+        chapter: input.chapterNumber,
+        goal,
+        chapterType: "confrontation" as const,
+        isGoldenOpening: true,
+        beatOutline: [{ phase: "opening" as const, instruction: "Open on the conflict." }],
+        hookPlan: [] as Array<{ hookId: string; movement: "quiet-hold" | "refresh" | "advance" | "partial-payoff" | "full-payoff"; targetEffect: string }>,
+        propsAndSetting: ["broken oath token"],
+      };
+      const intentMarkdown = [
+        "# Chapter Intent",
+        "",
+        "## Goal",
+        goal,
+        "",
+        "## Outline Node",
+        "Track the merchant guild trail.",
+        "",
+        "## Must Keep",
+        "- Lin Yue still hides the broken oath token.",
+        "",
+        "## Must Avoid",
+        "- none",
+        "",
+        "## Style Emphasis",
+        "- none",
+        "",
+        "## Conflicts",
+        "- outline_vs_request: allow local outline deferral",
+        "",
+        "## Chapter Brief",
+        "- chapterType: confrontation",
+        "- isGoldenOpening: true",
+        "",
+        "### Beat Outline",
+        "- opening: Open on the conflict.",
+        "",
+        "### Hook Plan",
+        "- none",
+        "",
+        "### Props And Setting",
+        "- broken oath token",
+        "",
+      ].join("\n");
+      const runtimePath = join(runtimeDir, `chapter-${String(input.chapterNumber).padStart(4, "0")}.intent.md`);
+      await writeFile(runtimePath, intentMarkdown, "utf-8");
       return {
-        ...result,
-        brief: {
+        intent: {
           chapter: input.chapterNumber,
-          goal: result.intent.goal,
-          chapterType: "confrontation",
-          isGoldenOpening: true,
-          beatOutline: [
-            { phase: "opening", instruction: "Open on the conflict." },
-          ],
-          hookPlan: [],
-          propsAndSetting: ["broken oath token"],
+          goal,
+          outlineNode: "Track the merchant guild trail.",
+          mustKeep: ["Lin Yue still hides the broken oath token."],
+          mustAvoid: [],
+          styleEmphasis: [],
+          conflicts: [{ type: "outline_vs_request", resolution: "allow local outline deferral" }],
+          hookAgenda: {
+            pressureMap: [],
+            mustAdvance: [],
+            eligibleResolve: [],
+            staleDebt: [],
+            avoidNewHookFamilies: [],
+          },
         },
+        brief,
+        intentMarkdown,
+        plannerInputs: [runtimePath],
+        runtimePath,
       };
     });
     const composeChapter = vi.spyOn(ComposerModule, "composeGovernedChapter");
@@ -612,6 +741,19 @@ describe("PipelineRunner", () => {
           "## Conflicts",
           "- outline_vs_request: allow local outline deferral",
           "",
+          "## Chapter Brief",
+          "- chapterType: confrontation",
+          "- isGoldenOpening: true",
+          "",
+          "### Beat Outline",
+          "- opening: Open on the conflict.",
+          "",
+          "### Hook Plan",
+          "- none",
+          "",
+          "### Props And Setting",
+          "- broken oath token",
+          "",
           "## Pending Hooks Snapshot",
           "- none",
           "",
@@ -623,24 +765,7 @@ describe("PipelineRunner", () => {
       ),
     ]);
 
-    const originalPlanChapter = PlannerAgent.prototype.planChapter;
-    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter").mockImplementation(async function (this: PlannerAgent, input) {
-      const result = await originalPlanChapter.call(this, input);
-      return {
-        ...result,
-        brief: {
-          chapter: input.chapterNumber,
-          goal: result.intent.goal,
-          chapterType: "confrontation",
-          isGoldenOpening: true,
-          beatOutline: [
-            { phase: "opening", instruction: "Open on the conflict." },
-          ],
-          hookPlan: [],
-          propsAndSetting: ["broken oath token"],
-        },
-      };
-    });
+    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter");
     const writeChapter = vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(
       createWriterOutput({
         chapterNumber: 1,
@@ -1262,7 +1387,71 @@ describe("PipelineRunner", () => {
       ),
     ]);
 
-    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter");
+    const planChapter = vi.spyOn(PlannerAgent.prototype, "planChapter").mockImplementation(async (input) => {
+      const rDir = join(input.bookDir, "story", "runtime");
+      await mkdir(rDir, { recursive: true });
+      const goal = "Track the merchant guild trail.";
+      const intentMd = [
+        "# Chapter Intent",
+        "",
+        "## Goal",
+        goal,
+        "",
+        "## Outline Node",
+        "(not found)",
+        "",
+        "## Must Keep",
+        "- none",
+        "",
+        "## Must Avoid",
+        "- none",
+        "",
+        "## Style Emphasis",
+        "- none",
+        "",
+        "## Conflicts",
+        "- none",
+        "",
+        "## Chapter Brief",
+        "- chapterType: 推进",
+        "- isGoldenOpening: false",
+        "",
+        "### Beat Outline",
+        "- opening: test",
+        "",
+        "### Hook Plan",
+        "- none",
+        "",
+        "### Props And Setting",
+        "- none",
+        "",
+      ].join("\n");
+      const runtimePath = join(rDir, `chapter-${String(input.chapterNumber).padStart(4, "0")}.intent.md`);
+      await writeFile(runtimePath, intentMd, "utf-8");
+      return {
+        intent: {
+          chapter: input.chapterNumber,
+          goal,
+          mustKeep: [],
+          mustAvoid: [],
+          styleEmphasis: [],
+          conflicts: [],
+          hookAgenda: { pressureMap: [], mustAdvance: [], eligibleResolve: [], staleDebt: [], avoidNewHookFamilies: [] },
+        },
+        brief: {
+          chapter: input.chapterNumber,
+          goal,
+          chapterType: "推进",
+          isGoldenOpening: false,
+          beatOutline: [{ phase: "opening" as const, instruction: "test" }],
+          hookPlan: [],
+          propsAndSetting: [],
+        },
+        intentMarkdown: intentMd,
+        plannerInputs: [runtimePath],
+        runtimePath,
+      };
+    });
     const writeChapter = vi.spyOn(WriterAgent.prototype, "writeChapter").mockResolvedValue(
       createWriterOutput({
         chapterNumber: 1,

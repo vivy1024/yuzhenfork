@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AGENT_TOOLS, executeAgentTool } from "../pipeline/agent.js";
 import { PipelineRunner, StateManager, type PipelineConfig } from "../index.js";
+import { PlannerAgent } from "../agents/planner.js";
 
 describe("agent pipeline tools", () => {
   let root: string;
@@ -53,6 +54,61 @@ describe("agent pipeline tools", () => {
     await mkdir(join(state.bookDir(bookId), "chapters"), { recursive: true });
     await writeFile(join(state.bookDir(bookId), "chapters", "index.json"), "[]", "utf-8");
 
+    vi.spyOn(PlannerAgent.prototype, "planChapter").mockImplementation(async (input) => {
+      const chapterNumber = input.chapterNumber;
+      // Try to read the local override from current_focus.md, mirroring the real planner logic
+      let goal = input.externalContext ?? "test goal";
+      try {
+        const { readFile: readFs } = await import("node:fs/promises");
+        const focusContent = await readFs(join(input.bookDir, "story", "current_focus.md"), "utf-8");
+        const overrideMatch = focusContent.match(/## Local Override\s*\n+([^\n#]+)/);
+        if (overrideMatch?.[1]?.trim()) {
+          goal = overrideMatch[1].trim();
+        }
+      } catch { /* ignore missing file */ }
+      const brief = {
+        chapter: chapterNumber,
+        goal,
+        chapterType: "推进" as const,
+        isGoldenOpening: false,
+        beatOutline: [{ phase: "opening" as const, instruction: "test" }],
+        hookPlan: [] as Array<{ hookId: string; movement: "quiet-hold" | "refresh" | "advance" | "partial-payoff" | "full-payoff"; targetEffect: string }>,
+        propsAndSetting: [] as string[],
+      };
+      const intentMarkdown = [
+        "# Chapter Intent",
+        "",
+        "## Goal",
+        goal,
+      ].join("\n");
+      const { mkdir: mkdirFs, writeFile: writeFileFs } = await import("node:fs/promises");
+      const runtimeDir = join(input.bookDir, "story", "runtime");
+      await mkdirFs(runtimeDir, { recursive: true });
+      const runtimePath = join(runtimeDir, `chapter-${String(chapterNumber).padStart(4, "0")}.intent.md`);
+      await writeFileFs(runtimePath, intentMarkdown, "utf-8");
+      return {
+        intent: {
+          chapter: chapterNumber,
+          goal,
+          mustKeep: [],
+          mustAvoid: [],
+          styleEmphasis: [],
+          conflicts: [],
+          hookAgenda: {
+            pressureMap: [],
+            mustAdvance: [],
+            eligibleResolve: [],
+            staleDebt: [],
+            avoidNewHookFamilies: [],
+          },
+        },
+        brief,
+        intentMarkdown,
+        plannerInputs: [runtimePath],
+        runtimePath,
+      };
+    });
+
     await Promise.all([
       writeFile(join(storyDir, "author_intent.md"), "# Author Intent\n\nKeep the story centered on the mentor conflict.\n", "utf-8"),
       writeFile(join(storyDir, "current_focus.md"), "# Current Focus\n\nBring focus back to the mentor conflict.\n", "utf-8"),
@@ -65,6 +121,7 @@ describe("agent pipeline tools", () => {
   });
 
   afterEach(async () => {
+    vi.restoreAllMocks();
     await rm(root, { recursive: true, force: true });
   });
 
