@@ -2068,7 +2068,7 @@ ${matrix}`,
     bookDir: string,
     chapterNumber: number,
     externalContext?: string,
-  ): Promise<Pick<WriteChapterInput, "externalContext" | "chapterIntent" | "chapterBrief" | "contextPackage" | "ruleStack" | "trace">> {
+  ): Promise<Pick<WriteChapterInput, "externalContext" | "chapterIntent" | "chapterBrief" | "moodDirective" | "titleDirective" | "contextPackage" | "ruleStack" | "trace">> {
     if ((this.config.inputGovernanceMode ?? "v2") === "legacy") {
       return { externalContext };
     }
@@ -2084,6 +2084,8 @@ ${matrix}`,
     return {
       chapterIntent: plan.intentMarkdown,
       chapterBrief: plan.brief,
+      moodDirective: plan.intent.moodDirective,
+      titleDirective: plan.intent.titleDirective,
       contextPackage: composed.contextPackage,
       ruleStack: composed.ruleStack,
       trace: composed.trace,

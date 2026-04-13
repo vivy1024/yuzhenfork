@@ -50,6 +50,8 @@ export interface WriteChapterInput {
   readonly externalContext?: string;
   readonly chapterIntent?: string;
   readonly chapterBrief?: ChapterBrief;
+  readonly moodDirective?: string;
+  readonly titleDirective?: string;
   readonly contextPackage?: ContextPackage;
   readonly ruleStack?: RuleStack;
   readonly trace?: ChapterTrace;
@@ -196,6 +198,8 @@ export class WriterAgent extends BaseAgent {
       ? this.buildGovernedUserPrompt({
           chapterNumber,
           chapterBrief: input.chapterBrief,
+          moodDirective: input.moodDirective,
+          titleDirective: input.titleDirective,
           contextPackage: input.contextPackage,
           ruleStack: input.ruleStack,
           trace: input.trace,
@@ -813,6 +817,8 @@ ${lengthRequirementBlock}
   private buildGovernedUserPrompt(params: {
     readonly chapterNumber: number;
     readonly chapterBrief: ChapterBrief;
+    readonly moodDirective?: string;
+    readonly titleDirective?: string;
     readonly contextPackage: ContextPackage;
     readonly ruleStack: RuleStack;
     readonly trace?: ChapterTrace;
@@ -848,11 +854,13 @@ ${lengthRequirementBlock}
       ? `\n${sanitizeNarrativeEvidenceBlock(params.selectedEvidenceBlock, language)}\n`
       : "";
     const briefNarrative = renderBriefAsNarrativeBlock(params.chapterBrief, language);
+    const cadenceBlock = this.buildCadenceDirectiveBlock(params.moodDirective, params.titleDirective, language);
 
     if (params.language === "en") {
       return `Write chapter ${params.chapterNumber}.
 
 ${briefNarrative}
+${cadenceBlock}
 
 ## Selected Context
 ${contextSections || "(none)"}
@@ -878,6 +886,7 @@ ${lengthRequirementBlock}
     return `请续写第${params.chapterNumber}章。
 
 ${briefNarrative}
+${cadenceBlock}
 
 ## 已选上下文
 ${contextSections || "(无)"}
@@ -918,6 +927,24 @@ ${lengthRequirementBlock}
       .join("\n");
 
     return joined || undefined;
+  }
+
+  private buildCadenceDirectiveBlock(
+    moodDirective: string | undefined,
+    titleDirective: string | undefined,
+    language: "zh" | "en",
+  ): string {
+    if (!moodDirective && !titleDirective) return "";
+    const isEn = language === "en";
+    const lines: string[] = [];
+    if (moodDirective) {
+      lines.push(`- ${isEn ? "mood" : "情绪节奏"}: ${moodDirective}`);
+    }
+    if (titleDirective) {
+      lines.push(`- ${isEn ? "title" : "标题提示"}: ${titleDirective}`);
+    }
+    const heading = isEn ? "## Cadence Directives" : "## 节奏指令";
+    return `\n${heading}\n${lines.join("\n")}`;
   }
 
   private buildSettlerGovernedControlBlock(
