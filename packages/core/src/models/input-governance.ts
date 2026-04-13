@@ -79,10 +79,14 @@ export const ChapterHookMoveSchema = z.object({
 });
 export type ChapterHookMove = z.infer<typeof ChapterHookMoveSchema>;
 
+export const CyclePhaseSchema = z.enum(["蓄压", "升级", "爆发", "后效"]);
+export type CyclePhase = z.infer<typeof CyclePhaseSchema>;
+
 export const ChapterBriefSchema = z.object({
   chapter: z.number().int().min(1),
   goal: z.string().min(1),
   chapterType: z.string().min(1),
+  cyclePhase: CyclePhaseSchema.optional(),
   isGoldenOpening: z.boolean().default(false),
   beatOutline: z.array(ChapterBeatSchema).min(1),
   hookPlan: z.array(ChapterHookMoveSchema).default([]),

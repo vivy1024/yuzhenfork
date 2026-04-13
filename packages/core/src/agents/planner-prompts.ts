@@ -1,4 +1,5 @@
 import type { PlanningMaterials } from "../utils/planning-materials.js";
+import type { ObjectiveCycleAnalysis } from "../utils/chapter-cadence.js";
 
 export interface PlannerPromptInput {
   readonly chapterNumber: number;
@@ -6,6 +7,7 @@ export interface PlannerPromptInput {
   readonly genreName: string;
   readonly language: "zh" | "en";
   readonly materials: PlanningMaterials;
+  readonly cycleAnalysis?: ObjectiveCycleAnalysis;
 }
 
 export function buildPlannerSystemPrompt(language: "zh" | "en"): string {
@@ -41,7 +43,9 @@ const ZH_SYSTEM_PROMPT = `你是 InkOS 的章节规划器。
 ### 关于配角和情绪
 9. 配角有目的：推动剧情，不是充场面。B 面只在需要时露。
 10. 爽点有代价，刀子有余温。
-11. 和上一章有呼吸差：不重复情绪，也不割裂。是对比或递进。
+11. 节奏由目标周期驱动，不由情绪档位决定。每 3-5 章是一个小周期：
+    蓄压（铺新阻力、新信息）→ 升级（冲突加码、缺口扩大）→ 爆发（爽点落地、承诺兑现、释放超预期）→ 后效（写改变：关系变了、地位变了、代价显现了）。
+    不要机械轮换——如果故事需要连续蓄压就连续蓄压，但 5 章内必须有一次爆发。
 
 ## 开场打开方式（工具箱，非强制）
 
@@ -111,7 +115,9 @@ but to decide that this chapter is written *right* — making it a proper micro-
 ### Supporting cast and emotion
 9. Supporting characters have purpose: they drive plot, not fill scenes. Show their B-side only when needed.
 10. Payoffs have costs; knife-twists leave warmth.
-11. Breathing difference from the prior chapter: contrast or progression, not repetition.
+11. Rhythm is driven by objective cycles, not mood buckets. Every 3-5 chapters form a mini-arc:
+    蓄压 (build pressure — new obstacles, new info) → 升级 (escalate — raise stakes, widen gaps) → 爆发 (payoff — deliver on promises, exceed expectations) → 后效 (aftermath — write change: relationships shifted, status changed, costs visible).
+    Don't rotate mechanically — if the story needs consecutive pressure-building, do it. But there must be at least one payoff within every 5 chapters.
 
 ## Opening types (toolbox, not mandatory)
 
@@ -182,6 +188,26 @@ function renderActiveHooks(materials: PlanningMaterials): string {
     .join("\n");
 }
 
+function renderCycleContext(
+  cycleAnalysis: ObjectiveCycleAnalysis | undefined,
+  language: "zh" | "en",
+): string {
+  if (!cycleAnalysis) return "(not available)";
+  const isEn = language === "en";
+  const phaseLabel = isEn ? "Suggested Phase" : "建议阶段";
+  const reasonLabel = isEn ? "Reasoning" : "依据";
+  const debtLabel = isEn ? "Hook Debt" : "伏笔债务";
+  const payoffLabel = isEn ? "Payoff Due" : "需要兑现";
+  const streakLabel = isEn ? "Chapters in Current Phase" : "当前阶段连续章数";
+  return [
+    `- ${phaseLabel}: ${cycleAnalysis.phase}`,
+    `- ${reasonLabel}: ${cycleAnalysis.reasoning}`,
+    `- ${streakLabel}: ${cycleAnalysis.chaptersInCurrentPhase}`,
+    `- ${payoffLabel}: ${cycleAnalysis.payoffDue ? (isEn ? "yes" : "是") : (isEn ? "no" : "否")}`,
+    `- ${debtLabel}: ${cycleAnalysis.hookDebtLevel}`,
+  ].join("\n");
+}
+
 export function buildPlannerUserPrompt(input: PlannerPromptInput): string {
   const { materials } = input;
 
@@ -219,6 +245,9 @@ export function buildPlannerUserPrompt(input: PlannerPromptInput): string {
     "## Active Hooks",
     renderActiveHooks(materials),
     "",
+    "## Cycle Context",
+    renderCycleContext(input.cycleAnalysis, input.language),
+    "",
     "## Output Requirements",
     input.language === "zh"
       ? ZH_OUTPUT_REQUIREMENTS
@@ -237,6 +266,7 @@ const ZH_OUTPUT_REQUIREMENTS = `按核心原则产出 ChapterBrief JSON。严格
   每个对象必须有 hookId (string)、movement (string)、targetEffect (string) 三个字段。
   其他 active hook 省略，用 dormantReason 解释为什么按兵不动。
 - propsAndSetting (string[]): 本章出现在页面上的人/物/地，平铺为字符串数组。
+- cyclePhase (string, 可选): 本章在小目标周期中的位置——"蓄压" / "升级" / "爆发" / "后效"
 - dormantReason (string, 可选): 其他 hook 按兵不动的原因。
 - isGoldenOpening (boolean): 前 3 章设 true，其他 false。`;
 
@@ -251,5 +281,6 @@ const EN_OUTPUT_REQUIREMENTS = `Produce ChapterBrief JSON following the core pri
   Each object must have hookId (string), movement (string), targetEffect (string).
   Omit other active hooks; explain in dormantReason why they stay dormant.
 - propsAndSetting (string[]): People/items/locations on-page, as a flat string array.
+- cyclePhase (string, optional): This chapter's position in the mini objective cycle — "蓄压" / "升级" / "爆发" / "后效"
 - dormantReason (string, optional): Why other hooks stay dormant.
 - isGoldenOpening (boolean): true for first 5 chapters, false otherwise.`;

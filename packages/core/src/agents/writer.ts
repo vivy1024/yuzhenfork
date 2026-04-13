@@ -938,7 +938,7 @@ ${lengthRequirementBlock}
     const isEn = language === "en";
     const lines: string[] = [];
     if (moodDirective) {
-      lines.push(`- ${isEn ? "mood" : "情绪节奏"}: ${moodDirective}`);
+      lines.push(`- ${isEn ? "rhythm" : "节奏"}: ${moodDirective}`);
     }
     if (titleDirective) {
       lines.push(`- ${isEn ? "title" : "标题提示"}: ${titleDirective}`);

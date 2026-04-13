@@ -15,7 +15,7 @@ import {
   renderHookSnapshot,
   renderSummarySnapshot,
 } from "../utils/memory-retrieval.js";
-import { analyzeChapterCadence } from "../utils/chapter-cadence.js";
+import { analyzeChapterCadence, analyzeObjectiveCycle, type ObjectiveCycleAnalysis } from "../utils/chapter-cadence.js";
 import { buildPlannerHookAgenda } from "../utils/hook-agenda.js";
 import {
   gatherPlanningMaterials,
@@ -25,6 +25,7 @@ import {
 import {
   buildPlannerSystemPrompt,
   buildPlannerUserPrompt,
+  type PlannerPromptInput,
 } from "./planner-prompts.js";
 
 export interface PlanChapterInput {
@@ -89,19 +90,24 @@ export class PlannerAgent extends BaseAgent {
       targetChapters: input.book.targetChapters,
       language: input.book.language ?? "zh",
     });
-    const directives = this.buildStructuredDirectives({
+    const { cycleAnalysis, ...directives } = this.buildStructuredDirectives({
       chapterNumber: input.chapterNumber,
       language: input.book.language,
       volumeOutline: seedMaterials.volumeOutline,
       outlineNode,
       matchedOutlineAnchor,
       chapterSummaries: materials.chapterSummariesRaw,
+      hookAgenda: {
+        eligibleResolve: hookAgenda.eligibleResolve,
+        staleDebt: hookAgenda.staleDebt,
+      },
     });
 
     const brief = await this.planChapterBrief({
       input,
       outlineNode: planningAnchor,
       materials,
+      cycleAnalysis,
     });
 
     const intent = ChapterIntentSchema.parse({
@@ -142,6 +148,7 @@ export class PlannerAgent extends BaseAgent {
     readonly input: PlanChapterInput;
     readonly outlineNode: string | undefined;
     readonly materials: PlanningMaterials;
+    readonly cycleAnalysis?: ObjectiveCycleAnalysis;
   }): Promise<ChapterBrief> {
     const language = this.isChineseLanguage(params.input.book.language) ? "zh" : "en";
     const response = await this.chat([
@@ -160,6 +167,7 @@ export class PlannerAgent extends BaseAgent {
             ...params.materials,
             outlineNode: params.outlineNode,
           },
+          cycleAnalysis: params.cycleAnalysis,
         }),
       },
     ], {
@@ -266,20 +274,36 @@ export class PlannerAgent extends BaseAgent {
     readonly outlineNode: string | undefined;
     readonly matchedOutlineAnchor: boolean;
     readonly chapterSummaries: string;
-  }): Pick<ChapterIntent, "sceneDirective" | "arcDirective" | "moodDirective" | "titleDirective"> {
+    readonly hookAgenda?: {
+      readonly eligibleResolve: ReadonlyArray<string>;
+      readonly staleDebt: ReadonlyArray<string>;
+    };
+  }): Pick<ChapterIntent, "sceneDirective" | "arcDirective" | "moodDirective" | "titleDirective"> & {
+    readonly cycleAnalysis?: ObjectiveCycleAnalysis;
+  } {
+    const language = this.isChineseLanguage(input.language) ? "zh" as const : "en" as const;
     const recentSummaries = parseChapterSummariesMarkdown(input.chapterSummaries)
       .filter((summary) => summary.chapter < input.chapterNumber)
       .sort((left, right) => left.chapter - right.chapter)
       .slice(-4);
+    const cadenceRows = recentSummaries.map((summary) => ({
+      chapter: summary.chapter,
+      title: summary.title,
+      mood: summary.mood,
+      chapterType: summary.chapterType,
+    }));
     const cadence = analyzeChapterCadence({
-      language: this.isChineseLanguage(input.language) ? "zh" : "en",
-      rows: recentSummaries.map((summary) => ({
-        chapter: summary.chapter,
-        title: summary.title,
-        mood: summary.mood,
-        chapterType: summary.chapterType,
-      })),
+      language,
+      rows: cadenceRows,
     });
+
+    const cycleAnalysis = input.hookAgenda
+      ? analyzeObjectiveCycle({
+          rows: cadenceRows,
+          hookAgenda: input.hookAgenda,
+          language,
+        })
+      : undefined;
 
     return {
       arcDirective: this.buildArcDirective(
@@ -289,8 +313,11 @@ export class PlannerAgent extends BaseAgent {
         input.matchedOutlineAnchor,
       ),
       sceneDirective: this.buildSceneDirective(input.language, cadence),
-      moodDirective: this.buildMoodDirective(input.language, cadence),
+      moodDirective: cycleAnalysis
+        ? this.buildCycleDirective(input.language, cycleAnalysis)
+        : this.buildMoodDirective(input.language, cadence),
       titleDirective: this.buildTitleDirective(input.language, cadence),
+      cycleAnalysis,
     };
   }
 
@@ -498,6 +525,31 @@ export class PlannerAgent extends BaseAgent {
     return this.isChineseLanguage(language)
       ? `最近${moods.length}章情绪持续高压（${moods.slice(0, 3).join("、")}），本章必须降调——安排日常/喘息/温情/幽默场景，让读者呼吸。`
       : `The last ${moods.length} chapters have been relentlessly tense (${moods.slice(0, 3).join(", ")}). This chapter must downshift — write a quieter scene with warmth, humor, or breathing room.`;
+  }
+
+  private buildCycleDirective(
+    language: string | undefined,
+    cycle: ObjectiveCycleAnalysis,
+  ): string | undefined {
+    const isZh = this.isChineseLanguage(language);
+    switch (cycle.phase) {
+      case "蓄压":
+        return isZh
+          ? "本章铺压制，新阻力或新信息——不急着爆发。"
+          : "This chapter builds pressure — introduce new obstacles or information. Don't rush to climax.";
+      case "升级":
+        return isZh
+          ? "本章升级冲突，已有缺口还没释放——加码不松手。"
+          : "This chapter escalates conflict — existing gaps are unresolved. Raise the stakes, don't relent.";
+      case "爆发":
+        return isZh
+          ? "本章有一个承诺必须兑现——让积累的压力落地，给读者超预期的释放。"
+          : "This chapter must deliver on a promise — release accumulated pressure with a payoff that exceeds expectations.";
+      case "后效":
+        return isZh
+          ? "上一章刚爆发，写改变：关系变了、地位变了、代价显现了。"
+          : "Previous chapter just climaxed — write the aftermath: changed relationships, shifted status, visible costs.";
+    }
   }
 
   private buildTitleDirective(

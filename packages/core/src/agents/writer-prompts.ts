@@ -187,6 +187,7 @@ function buildCoreRules(lengthSpec: LengthSpec): string {
 - 【铁律】转折/惊讶标记词（仿佛、忽然、竟、竟然、猛地、猛然、不禁、宛如）全篇总数不超过每3000字1次。超出时改用具体动作或感官描写传递突然性
 - 【铁律】同一体感/意象禁止连续渲染超过两轮。第三次出现相同意象域（如"火在体内流动"）时必须切换到新信息或新动作，避免原地打转
 - 【铁律】六步走心理分析是写作推导工具，其中的术语（"当前处境""核心动机""信息边界""性格过滤"等）只用于PRE_WRITE_CHECK内部推理，绝不可出现在正文叙事中
+- 反例→正例速查：✗"虽然他很强，但是他还是输了"→✓"他确实强，可对面那个老东西更脏"；✗"然而事情并没有那么简单"→✓"哪有那么便宜的事"；✗"这一刻他终于明白了什么是力量"→✓删掉，让读者自己感受
 
 ## 硬性禁令
 
@@ -372,7 +373,11 @@ function buildWritingCraftCard(language: "zh" | "en"): string {
 - **Character check**: Before every character action ask: Why? Does it match their profile? Would the reader find it jarring?
 - **Dialogue**: Different characters speak differently — vocabulary, sentence length, verbal tics, dialect traces
 - **Forbidden**: Info-dump character introductions / introducing 3+ new characters at once / "everyone gasped in unison"
-- **Escalation**: Bad things stack — each layer worse than the last. Not one setback, but setback → worse setback → even worse`;
+- **Escalation**: Bad things stack — each layer worse than the last. Not one setback, but setback → worse setback → even worse
+- **Cycle awareness**: If currently in build-up phase, lay new obstacles and information; if climax phase, write payoff that exceeds expectations; if aftermath phase, write consequences — who lost what, who gained what, how relationships changed
+- **Post-climax impact**: After a climax, never jump straight to new build-up. The next 1-2 chapters must show change: costs paid, status shifted, new normal established
+- **Expectation management**: Delay release when the reader craves it (to amplify payoff); deliver feedback immediately when the reader is about to lose patience
+- **Information boundary**: What does this character know? What don't they know? What are they wrong about? Characters must act only on information they possess`;
   }
 
   return `## 写作铁律
@@ -387,7 +392,11 @@ function buildWritingCraftCard(language: "zh" | "en"): string {
 - **人设三问**：为什么这么做？符合人设吗？读者会觉得突兀吗？
 - **对话**：不同角色说话方式不同——用词习惯、句子长短、口头禅、方言痕迹
 - **禁止**：资料卡式介绍角色 / 一次引入超3个新角色 / 众人齐声惊呼
-- **升级**：坏事叠坏事，每层比上一层过分——被骂→手机掉了→直播课结束了→包子噎住了`;
+- **升级**：坏事叠坏事，每层比上一层过分——被骂→手机掉了→直播课结束了→包子噎住了
+- **小目标周期意识**：如果当前处于蓄压阶段，铺新阻力新信息；如果是爆发阶段，写兑现超预期；如果是后效阶段，写改变和代价
+- **高潮后影响**：爆发后不能直接跳到下一个蓄压。紧接着的 1-2 章必须写出改变——谁失去了什么、谁得到了什么、关系怎么变了
+- **期待管理**：读者期待释放时适当延迟以增强快感；读者即将失去耐心时立即给反馈
+- **信息边界**：角色此刻知道什么？不知道什么？对局势有什么误判？角色只能基于已掌握的信息行动`;
 }
 
 // ---------------------------------------------------------------------------

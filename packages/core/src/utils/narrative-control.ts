@@ -93,6 +93,13 @@ export function renderBriefAsNarrativeBlock(
     );
   }
 
+  // Cycle phase
+  if (brief.cyclePhase) {
+    sections.push(
+      `## ${isEn ? "Cycle Phase" : "周期阶段"}\n- ${brief.cyclePhase}`,
+    );
+  }
+
   // Golden opening flag
   if (brief.isGoldenOpening) {
     sections.push(

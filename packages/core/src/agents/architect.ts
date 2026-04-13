@@ -115,10 +115,9 @@ Core blurb principle:
 - Chapter 5: raise the stakes before paywall — strongest cliffhanger yet
 
 ### Emotional Wave Design
-- Each volume must have a tension curve: build → peak → release → bigger build
-- Never plan 3+ consecutive high-tension chapters without a breathing chapter
-- Never plan 3+ consecutive quiet chapters without a complication or revelation
-- Daily/transition chapters must serve the main plot (plant hooks, advance relationships)`
+- Organize each volume in 3-5 chapter mini-goal cycles: build-up → escalation → climax → aftermath. Not mechanical rotation — each cycle has a clear short-term goal and payoff point.
+- After a climax, the next 1-2 chapters MUST show change: relationships shifted, status changed, costs paid. Never jump straight from climax to new build-up.
+- Daily/transition chapters must carry a mission: plant a hook, advance a relationship, set up contrast, prepare the next cycle. No filler allowed — everything is "bait".`
       : `卷纲规划，每卷包含：卷名、章节范围、核心冲突、关键转折、收益目标
 
 ### 黄金三章法则（前三章必须遵循）
@@ -127,10 +126,9 @@ Core blurb principle:
 - 第3章：明确短期目标（主角确立第一个具体可达成的目标），给读者追读理由
 
 ### 情绪波形设计
-- 每卷必须有张力曲线：蓄压→爆发→释放→更大蓄压
-- 不得连续规划3章以上的高压章节而没有喘息章
-- 不得连续规划3章以上的平淡章节而没有冲突或揭秘
-- 日常/过渡章必须为主线服务（埋伏笔、推关系、建反差），禁止纯填充`;
+- 每卷以 3-5 章的小目标周期为单位组织：蓄压→升级→爆发→后效。不是机械轮换，而是每个周期有明确的短期目标和兑现点。
+- 高潮后 1-2 章必须写改变：关系变了、地位变了、代价显现了。不要高潮后直接跳到下一个蓄压。
+- 日常/过渡段落必须承担伏笔或关系推进任务，不准水。万物皆为"饵"。`;
 
     const bookRulesPrompt = resolvedLanguage === "en"
       ? `Generate book_rules.md as YAML frontmatter plus narrative guidance:

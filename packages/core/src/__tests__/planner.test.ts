@@ -392,7 +392,7 @@ describe("PlannerAgent", () => {
     expect(result.brief.beatOutline.length).toBeGreaterThanOrEqual(1);
   });
 
-  it("emits a mood directive when recent chapters are all high-tension", async () => {
+  it("emits a cycle directive when recent chapters are all high-tension", async () => {
     book = {
       ...book,
       genre: "other",
@@ -435,12 +435,13 @@ describe("PlannerAgent", () => {
       chapterNumber: 5,
     });
 
+    // With objective cycle analysis, the moodDirective now contains
+    // cycle-phase guidance instead of the old mood-based cooldown
     expect(result.intent.moodDirective).toBeDefined();
-    expect(result.intent.moodDirective).toContain("降调");
-    expect(result.intent.moodDirective).toContain("日常");
+    expect(result.intent.moodDirective).toContain("本章");
   });
 
-  it("does not emit a mood directive when recent moods are varied", async () => {
+  it("emits a cycle directive for varied moods based on chapter type patterns", async () => {
     book = {
       ...book,
       genre: "other",
@@ -483,7 +484,10 @@ describe("PlannerAgent", () => {
       chapterNumber: 5,
     });
 
-    expect(result.intent.moodDirective).toBeUndefined();
+    // With the new cycle system, a cycle directive is always emitted
+    // based on chapter type patterns rather than mood analysis
+    expect(result.intent.moodDirective).toBeDefined();
+    expect(result.intent.moodDirective).toContain("chapter");
   });
 
   it("ignores the default current_focus placeholder and falls back to author intent when no chapter outline is available", async () => {
