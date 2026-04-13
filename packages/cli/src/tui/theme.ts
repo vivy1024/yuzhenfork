@@ -1,9 +1,15 @@
 /** Whether the terminal is macOS Terminal.app. */
 export const isAppleTerminal = process.env.TERM_PROGRAM === "Apple_Terminal";
 
+import { execSync } from "node:child_process";
+
 type TerminalTheme = "dark" | "light";
 
-/** Detect via $COLORFGBG (set by iTerm2, rxvt, etc.). Default: dark. */
+/**
+ * 1. $COLORFGBG (iTerm2, rxvt)
+ * 2. macOS AppleInterfaceStyle (Terminal.app doesn't set COLORFGBG)
+ * 3. Default: dark
+ */
 function detectTerminalTheme(): TerminalTheme {
   const raw = process.env.COLORFGBG;
   if (raw) {
@@ -11,6 +17,16 @@ function detectTerminalTheme(): TerminalTheme {
     const bg = Number(parts[parts.length - 1]);
     if (!Number.isNaN(bg)) {
       return bg <= 6 || bg === 8 ? "dark" : "light";
+    }
+  }
+  if (process.platform === "darwin") {
+    try {
+      const result = execSync("defaults read -g AppleInterfaceStyle", {
+        encoding: "utf8", timeout: 500, stdio: ["pipe", "pipe", "pipe"],
+      }).trim();
+      return result === "Dark" ? "dark" : "light";
+    } catch {
+      return "light";
     }
   }
   return "dark";
