@@ -229,10 +229,14 @@ describe("CLI integration", () => {
         updatedAt: "2026-04-07T00:00:00.000Z",
       });
 
-      const output = run(["interact", "--json", "--book", "harbor", "--message", "explain status"]);
+      const output = run(["interact", "--json", "--book", "harbor", "--message", "/books"]);
       const data = JSON.parse(output);
 
       expect(data.session.activeBookId).toBe("harbor");
+
+      // Clean up harbor book and session so subsequent tests start with an empty project
+      await rm(join(projectDir, "books", "harbor"), { recursive: true, force: true });
+      await rm(join(projectDir, ".inkos-session.json"), { force: true }).catch(() => {});
     });
   });
 
