@@ -1,7 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { renderMarkdown } from "../markdown.js";
 
 describe("renderMarkdown", () => {
+  const origTermProgram = process.env.TERM_PROGRAM;
+  afterEach(() => {
+    if (origTermProgram === undefined) delete process.env.TERM_PROGRAM;
+    else process.env.TERM_PROGRAM = origTermProgram;
+  });
   it("converts **text** to ANSI bold", () => {
     const result = renderMarkdown("这是 **加粗** 文本");
     // Should contain ANSI bold on/off around 加粗
