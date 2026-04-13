@@ -504,7 +504,7 @@ export function createInteractionToolsFromDeps(
             }, null, 2),
           },
         ],
-        { temperature: 0.4, maxTokens: 700 },
+        { temperature: 0.4 },
       );
 
       const parsed = parseCreationDraftResult(response.content);
@@ -561,8 +561,9 @@ export function createInteractionToolsFromDeps(
     chat: async (input, options) => {
       const bookLabel = options.bookId ?? "none";
       const chatRequestOptions = hooks?.getChatRequestOptions?.() ?? {};
-      const response = instrumentedPipeline.config?.client && instrumentedPipeline.config?.model
-        ? await chatCompletion(
+      let response: Awaited<ReturnType<typeof chatCompletion>> | undefined;
+      if (instrumentedPipeline.config?.client && instrumentedPipeline.config?.model) {
+        response = await chatCompletion(
           instrumentedPipeline.config.client,
           instrumentedPipeline.config.model,
           [
@@ -582,11 +583,11 @@ export function createInteractionToolsFromDeps(
           ],
           {
             temperature: chatRequestOptions.temperature ?? 0.4,
-            maxTokens: chatRequestOptions.maxTokens ?? 240,
+            ...(chatRequestOptions.maxTokens !== undefined && { maxTokens: chatRequestOptions.maxTokens }),
             onTextDelta: hooks?.onChatTextDelta,
           },
-        )
-        : undefined;
+        );
+      }
 
       return {
         __interaction: {
