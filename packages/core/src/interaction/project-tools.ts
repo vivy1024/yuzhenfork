@@ -563,35 +563,30 @@ export function createInteractionToolsFromDeps(
       const chatRequestOptions = hooks?.getChatRequestOptions?.() ?? {};
       let response: Awaited<ReturnType<typeof chatCompletion>> | undefined;
       if (instrumentedPipeline.config?.client && instrumentedPipeline.config?.model) {
-        try {
-          response = await chatCompletion(
-            instrumentedPipeline.config.client,
-            instrumentedPipeline.config.model,
-            [
-              {
-                role: "system",
-                content: [
-                  "You are InkOS inside the terminal workbench.",
-                  "Respond conversationally and briefly.",
-                  "If there is no active book, help the user decide what to write next.",
-                  "If there is an active book, keep the answer grounded in that book context.",
-                ].join(" "),
-              },
-              {
-                role: "user",
-                content: `activeBook=${bookLabel}\nautomationMode=${options.automationMode}\nmessage=${input}`,
-              },
-            ],
+        response = await chatCompletion(
+          instrumentedPipeline.config.client,
+          instrumentedPipeline.config.model,
+          [
             {
-              temperature: chatRequestOptions.temperature ?? 0.4,
-              ...(chatRequestOptions.maxTokens !== undefined && { maxTokens: chatRequestOptions.maxTokens }),
-              onTextDelta: hooks?.onChatTextDelta,
+              role: "system",
+              content: [
+                "You are InkOS inside the terminal workbench.",
+                "Respond conversationally and briefly.",
+                "If there is no active book, help the user decide what to write next.",
+                "If there is an active book, keep the answer grounded in that book context.",
+              ].join(" "),
             },
-          );
-        } catch {
-          // Thinking models (e.g. kimi-k2.5) may return empty content for simple inputs.
-          // Fall through to the built-in reply below.
-        }
+            {
+              role: "user",
+              content: `activeBook=${bookLabel}\nautomationMode=${options.automationMode}\nmessage=${input}`,
+            },
+          ],
+          {
+            temperature: chatRequestOptions.temperature ?? 0.4,
+            ...(chatRequestOptions.maxTokens !== undefined && { maxTokens: chatRequestOptions.maxTokens }),
+            onTextDelta: hooks?.onChatTextDelta,
+          },
+        );
       }
 
       return {
