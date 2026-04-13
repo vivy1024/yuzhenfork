@@ -23,3 +23,4 @@ autoresearch/
 .playwright-cli/
 .superpowers/
 _*.md
+docs/plans/
