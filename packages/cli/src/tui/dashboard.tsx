@@ -13,6 +13,7 @@ import { resolveComposerCaretState } from "./composer-caret.js";
 import { resolveChatDepthProfile, type ChatDepth } from "./chat-depth.js";
 import { appendStreamingAssistantChunk, createOptimisticUserMessageSession } from "./chat-draft.js";
 import { renderComposerDisplay } from "./composer-display.js";
+import { renderMarkdown } from "./markdown.js";
 import { formatTuiResult } from "./output.js";
 import { buildDashboardViewModel, type DashboardMessageRow } from "./dashboard-model.js";
 import { buildInputHistory, moveHistoryCursor } from "./input-history.js";
@@ -447,11 +448,11 @@ function ConversationRow(props: { readonly row: DashboardMessageRow }): React.JS
     );
   }
 
-  // assistant
+  // assistant — render markdown (bold, tables, code, etc.)
   return (
     <Box marginBottom={1} columnGap={1}>
       <Text color={WARM_ACCENT}>◆</Text>
-      <Text color={WARM_REPLY}>{content}</Text>
+      <Text color={WARM_REPLY}>{renderMarkdown(content)}</Text>
     </Box>
   );
 }
