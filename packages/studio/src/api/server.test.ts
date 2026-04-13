@@ -314,6 +314,37 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
+  it("allows reading and updating fixed control truth files", async () => {
+    const bookDir = join(root, "books", "demo-book");
+    const storyDir = join(bookDir, "story");
+    await mkdir(storyDir, { recursive: true });
+    await Promise.all([
+      writeFile(join(storyDir, "author_intent.md"), "# Author Intent\n\nStay cold.\n", "utf-8"),
+      writeFile(join(storyDir, "current_focus.md"), "# Current Focus\n\nReturn to the old case.\n", "utf-8"),
+    ]);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const readAuthorIntent = await app.request("http://localhost/api/books/demo-book/truth/author_intent.md");
+    expect(readAuthorIntent.status).toBe(200);
+    await expect(readAuthorIntent.json()).resolves.toMatchObject({
+      file: "author_intent.md",
+      content: "# Author Intent\n\nStay cold.\n",
+    });
+
+    const updateCurrentFocus = await app.request("http://localhost/api/books/demo-book/truth/current_focus.md", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ content: "# Current Focus\n\nPull focus back to the harbor trail.\n" }),
+    });
+    expect(updateCurrentFocus.status).toBe(200);
+
+    await expect(readFile(join(storyDir, "current_focus.md"), "utf-8")).resolves.toBe(
+      "# Current Focus\n\nPull focus back to the harbor trail.\n",
+    );
+  });
+
   it("reflects project edits immediately without restarting the studio server", async () => {
     const { createStudioServer } = await import("./server.js");
     const app = createStudioServer(cloneProjectConfig() as never, root);
