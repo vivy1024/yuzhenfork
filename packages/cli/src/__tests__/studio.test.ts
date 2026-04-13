@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
 
 const accessMock = vi.fn();
 const spawnMock = vi.fn(() => ({
@@ -28,8 +29,9 @@ describe("studio command", () => {
   });
 
   it("launches TypeScript sources through tsx in monorepo mode", async () => {
+    const tsEntry = join("/project", "packages", "studio", "src", "api", "index.ts");
     accessMock.mockImplementation(async (path: string) => {
-      if (path === "/project/packages/studio/src/api/index.ts") {
+      if (path === tsEntry) {
         return;
       }
       throw new Error(`missing: ${path}`);
@@ -40,7 +42,7 @@ describe("studio command", () => {
 
     expect(spawnMock).toHaveBeenCalledWith(
       "npx",
-      ["tsx", "/project/packages/studio/src/api/index.ts", "/project"],
+      ["tsx", tsEntry, "/project"],
       expect.objectContaining({
         cwd: "/project",
         stdio: "inherit",
@@ -50,8 +52,17 @@ describe("studio command", () => {
   });
 
   it("launches built JavaScript entries through node", async () => {
+    const jsEntry = join(
+      "/project",
+      "node_modules",
+      "@actalk",
+      "inkos-studio",
+      "dist",
+      "api",
+      "index.js",
+    );
     accessMock.mockImplementation(async (path: string) => {
-      if (path === "/project/node_modules/@actalk/inkos-studio/dist/api/index.js") {
+      if (path === jsEntry) {
         return;
       }
       throw new Error(`missing: ${path}`);
@@ -62,7 +73,7 @@ describe("studio command", () => {
 
     expect(spawnMock).toHaveBeenCalledWith(
       "node",
-      ["/project/node_modules/@actalk/inkos-studio/dist/api/index.js", "/project"],
+      [jsEntry, "/project"],
       expect.objectContaining({
         cwd: "/project",
         stdio: "inherit",
