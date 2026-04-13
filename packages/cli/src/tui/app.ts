@@ -12,6 +12,7 @@ import { formatModeLabel, getTuiCopy, normalizeStageLabel, resolveTuiLocale, typ
 import { formatTuiResult } from "./output.js";
 import { loadProjectSession, persistProjectSession } from "./session-store.js";
 import { detectModelInfo, detectProjectLanguage, ensureProject, interactiveLlmSetup } from "./setup.js";
+import { isAppleTerminal } from "./theme.js";
 import { createInteractionTools } from "./tools.js";
 import { animateStartup } from "./effects.js";
 
@@ -172,7 +173,12 @@ export async function launchTui(
         tools,
         chatStreamBridge,
       }),
-      { exitOnCtrlC: true },
+      {
+        exitOnCtrlC: true,
+        // Terminal.app crashes with rapid ANSI redraws + CJK IME input;
+        // halve the frame rate to reduce rendering pressure.
+        ...(isAppleTerminal && { maxFps: 15 }),
+      },
     );
     await app.waitUntilExit();
   } finally {

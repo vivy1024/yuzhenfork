@@ -230,7 +230,12 @@ export function InkTuiApp(props: InkTuiAppProps): React.JSX.Element {
     }
 
     if (key.backspace || key.delete) {
-      setInputValue((current) => current.slice(0, -1));
+      setInputValue((current) => {
+        // Use Intl.Segmenter for grapheme-aware backspace (handles CJK, emoji, etc.)
+        const segments = [...new Intl.Segmenter().segment(current)];
+        segments.pop();
+        return segments.map((s) => s.segment).join("");
+      });
       setSelectedSlashIndex(0);
       return;
     }

@@ -2,6 +2,9 @@ import { execSync } from "node:child_process";
 
 export type TerminalTheme = "dark" | "light";
 
+/** Whether the terminal is macOS Terminal.app (limited ANSI support). */
+export const isAppleTerminal = process.env.TERM_PROGRAM === "Apple_Terminal";
+
 /**
  * Detect terminal background color.
  *
