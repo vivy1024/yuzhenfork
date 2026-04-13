@@ -186,13 +186,14 @@ export async function launchTui(
     return (originalStderrWrite as Function)(chunk, ...args);
   };
 
-  // Enter alternate screen buffer — isolates Ink rendering from the primary
-  // terminal view. This prevents IME XPC corruption on Terminal.app (the IME's
+  // Terminal.app only: enter alternate screen buffer to isolate Ink rendering
+  // from the primary terminal view. This prevents IME XPC corruption (the IME's
   // NSRemoteView interacts with the primary screen; the alt screen is separate).
-  // Claude Code uses the same approach via <AlternateScreen> + DEC 1049.
-  const ENTER_ALT = "\x1b[?1049h";
-  const EXIT_ALT = "\x1b[?1049l";
-  process.stdout.write(ENTER_ALT);
+  // Other terminals keep their scrollback.
+  const useAltScreen = isAppleTerminal;
+  if (useAltScreen) {
+    process.stdout.write("\x1b[?1049h");
+  }
 
   try {
     await animateStartup(version, basename(projectRoot), session.activeBookId, modelInfo);
@@ -214,7 +215,9 @@ export async function launchTui(
     );
     await app.waitUntilExit();
   } finally {
-    process.stdout.write(EXIT_ALT);
+    if (useAltScreen) {
+      process.stdout.write("\x1b[?1049l");
+    }
     process.emitWarning = originalEmitWarning;
     process.stderr.write = originalStderrWrite;
   }
