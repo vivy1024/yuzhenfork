@@ -51,7 +51,7 @@ describe("interaction natural-language router", () => {
   });
 
   it("maps explanation requests to explain_failure", () => {
-    expect(routeNaturalLanguageIntent("为什么主角名字没按设定走", { activeBookId: "harbor" })).toEqual({
+    expect(routeNaturalLanguageIntent("为什么主角名字没按设定走", { activeBookId: "harbor", hasFailed: true })).toEqual({
       intent: "explain_failure",
       bookId: "harbor",
       instruction: "为什么主角名字没按设定走",
