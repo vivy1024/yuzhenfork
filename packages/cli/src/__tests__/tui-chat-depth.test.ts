@@ -9,12 +9,14 @@ describe("tui chat depth", () => {
       maxTokens: 160,
       label: "light",
     });
-    expect(resolveChatDepthProfile("normal")).toEqual({
+    const normal = resolveChatDepthProfile("normal");
+    expect(normal).toEqual({
       depth: "normal",
       temperature: 0.4,
-      maxTokens: 240,
       label: "normal",
     });
+    // normal depth must NOT include maxTokens — let the model decide
+    expect(normal.maxTokens).toBeUndefined();
     expect(resolveChatDepthProfile("deep")).toEqual({
       depth: "deep",
       temperature: 0.45,
