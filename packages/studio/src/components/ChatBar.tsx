@@ -279,10 +279,10 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
         currentStage: data.session?.currentExecution?.stageLabel ?? data.session?.currentExecution?.status,
         pendingSummary: data.session?.pendingDecision?.summary,
       });
-      const restored = coerceSharedSessionMessages(data.session?.messages ?? []);
-      if (restored.length > 0) {
-        setMessages(restored);
-      }
+      setMessages((current) => {
+        if (current.length > 0) return current;
+        return coerceSharedSessionMessages(data.session?.messages ?? []);
+      });
     }).catch(() => {
       // keep local empty state on session fetch failures
     });
@@ -394,15 +394,10 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
           currentStage: data.session.currentExecution?.stageLabel ?? data.session.currentExecution?.status,
           pendingSummary: data.session.pendingDecision?.summary,
         });
-        const restored = coerceSharedSessionMessages(data.session.messages ?? []);
-        if (restored.length > 0) {
-          setMessages(restored);
-          return;
-        }
       }
       setMessages((prev) => [...prev, {
         role: "assistant",
-        content: data.response ?? data.error ?? "Acknowledged.",
+        content: data.response ?? "Acknowledged.",
         timestamp: Date.now(),
       }]);
     } catch (e) {
