@@ -627,6 +627,7 @@ describe("createStudioServer daemon lifecycle", () => {
   it("routes /api/agent through the shared interaction control layer", async () => {
     processProjectInteractionInputMock.mockResolvedValue({
       request: { intent: "write_next", bookId: "demo-book" },
+      responseText: "Completed write_next for demo-book.",
       session: {
         sessionId: "session-1",
         projectRoot: root,

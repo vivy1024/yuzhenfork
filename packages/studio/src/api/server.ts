@@ -592,7 +592,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         tools,
         activeBookId,
       });
-      const response = result.session.messages.at(-1)?.content ?? "Acknowledged.";
+      const response = result.responseText ?? "Acknowledged.";
 
       broadcast("agent:complete", { instruction, activeBookId, response });
       return c.json({ response, session: result.session, request: result.request });
