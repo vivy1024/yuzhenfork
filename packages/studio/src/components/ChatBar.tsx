@@ -293,6 +293,9 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
   }, [open]);
 
   // SSE events → assistant messages
+  const loadingRef = useRef(false);
+  loadingRef.current = loading;
+
   useEffect(() => {
     const recent = sse.messages.slice(-1)[0];
     if (!recent || recent.event === "ping") return;
@@ -316,7 +319,7 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
         timestamp: Date.now(),
       }]);
     }
-    if (recent.event === "log" && loading) {
+    if (recent.event === "log" && loadingRef.current) {
       const msg = d.message as string;
       if (msg && (msg.includes("Phase") || msg.includes("streaming") || msg.includes("Writing") || msg.includes("Audit") || msg.includes("Revis"))) {
         setMessages((prev) => {
@@ -336,14 +339,7 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
     return lastStatus?.content.replace("⋯ ", "") ?? "Initializing...";
   }, [messages]);
 
-  const handleSubmit = async () => {
-    const text = input.trim();
-    if (!text || loading) return;
-
-    setInput("");
-    setMessages((prev) => [...prev, { role: "user", content: text, timestamp: Date.now() }]);
-    setLoading(true);
-
+  const executeCommand = async (text: string) => {
     const lower = text.toLowerCase();
 
     try {
@@ -366,8 +362,8 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
           role: "assistant",
           content:
             target.reason === "missing"
-              ? (isZh ? "✗ 还没有书，先创建一本再写。" : "✗ No books yet. Create one first.")
-              : (isZh ? "✗ 当前有多本书，请先打开目标书籍后再执行“写下一章”。" : '✗ Multiple books found. Open the target book first, then run "write next".'),
+              ? (isZh ? "\u2717 \u8fd8\u6ca1\u6709\u4e66\uff0c\u5148\u521b\u5efa\u4e00\u672c\u518d\u5199\u3002" : "\u2717 No books yet. Create one first.")
+              : (isZh ? "\u2717 \u5f53\u524d\u6709\u591a\u672c\u4e66\uff0c\u8bf7\u5148\u6253\u5f00\u76ee\u6807\u4e66\u7c4d\u540e\u518d\u6267\u884c\u201c\u5199\u4e0b\u4e00\u7ae0\u201d\u3002" : '\u2717 Multiple books found. Open the target book first, then run "write next".'),
           timestamp: Date.now(),
         }]);
         return;
@@ -379,16 +375,9 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
         session?: {
           activeBookId?: string;
           automationMode?: string;
-          creationDraft?: {
-            title?: string;
-          };
-          currentExecution?: {
-            status?: string;
-            stageLabel?: string;
-          };
-          pendingDecision?: {
-            summary?: string;
-          };
+          creationDraft?: { title?: string };
+          currentExecution?: { status?: string; stageLabel?: string };
+          pendingDecision?: { summary?: string };
           messages?: ReadonlyArray<{ role: "user" | "assistant" | "system"; content: string; timestamp: number }>;
         };
       }>("/agent", {
@@ -426,91 +415,21 @@ export function ChatPanel({ open, onClose, t, sse, activeBookId }: {
     }
   };
 
+  const handleSubmit = async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    setInput("");
+    setMessages((prev) => [...prev, { role: "user", content: text, timestamp: Date.now() }]);
+    setLoading(true);
+    await executeCommand(text);
+  };
+
   const handleQuickCommand = async (command: string) => {
     if (loading) return;
     setInput("");
     setMessages((prev) => [...prev, { role: "user", content: command, timestamp: Date.now() }]);
     setLoading(true);
-
-    const lower = command.toLowerCase();
-    try {
-      if (lower.match(/^(写下一章|write next)/)) {
-        const { books } = await fetchJson<{ books: ReadonlyArray<BookRef> }>("/books");
-        const target = resolveDirectWriteTarget(activeBookId, books);
-
-        if (target.bookId) {
-          setMessages((prev) => [...prev, {
-            role: "assistant",
-            content: isZh ? `⋯ 开始处理《${target.bookId}》...` : `⋯ Starting ${target.bookId}...`,
-            timestamp: Date.now(),
-          }]);
-          await postApi(`/books/${target.bookId}/write-next`, {});
-          return;
-        }
-
-        setLoading(false);
-        setMessages((prev) => [...prev, {
-          role: "assistant",
-          content:
-            target.reason === "missing"
-              ? (isZh ? "✗ 还没有书，先创建一本再写。" : "✗ No books yet. Create one first.")
-              : (isZh ? "✗ 当前有多本书，请先打开目标书籍后再执行\u201C写下一章\u201D。" : '✗ Multiple books found. Open the target book first, then run "write next".'),
-          timestamp: Date.now(),
-        }]);
-        return;
-      }
-
-      const data = await fetchJson<{
-        response?: string;
-        error?: string;
-        session?: {
-          activeBookId?: string;
-          automationMode?: string;
-          creationDraft?: {
-            title?: string;
-          };
-          currentExecution?: {
-            status?: string;
-            stageLabel?: string;
-          };
-          pendingDecision?: {
-            summary?: string;
-          };
-          messages?: ReadonlyArray<{ role: "user" | "assistant" | "system"; content: string; timestamp: number }>;
-        };
-      }>("/agent", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ instruction: command, activeBookId }),
-      });
-      setLoading(false);
-      if (data.session) {
-        setSessionMeta({
-          activeBookId: data.session.activeBookId ?? activeBookId,
-          draftTitle: data.session.creationDraft?.title,
-          automationMode: data.session.automationMode,
-          currentStage: data.session.currentExecution?.stageLabel ?? data.session.currentExecution?.status,
-          pendingSummary: data.session.pendingDecision?.summary,
-        });
-        const restored = coerceSharedSessionMessages(data.session.messages ?? []);
-        if (restored.length > 0) {
-          setMessages(restored);
-          return;
-        }
-      }
-      setMessages((prev) => [...prev, {
-        role: "assistant",
-        content: data.response ?? data.error ?? "Acknowledged.",
-        timestamp: Date.now(),
-      }]);
-    } catch (e) {
-      setLoading(false);
-      setMessages((prev) => [...prev, {
-        role: "assistant",
-        content: `✗ ${e instanceof Error ? e.message : String(e)}`,
-        timestamp: Date.now(),
-      }]);
-    }
+    await executeCommand(command);
   };
 
   const isZh = t("nav.connected") === "已连接";
