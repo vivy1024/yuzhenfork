@@ -121,19 +121,18 @@ inkos config show-models        # 查看当前路由
 
 未单独配置的 Agent 自动使用全局模型。
 
-### v1 更新
+### v1.2 更新
 
-**InkOS Studio + 写作管线全面升级**
+**统一交互内核 + TUI 仪表盘 + Studio 助手**
 
-- **InkOS Studio**（v1.0）：`inkos studio` 启动本地 Web 工作台（Vite + React + Hono）。书籍管理、章节审阅编辑、实时写作进度、市场雷达、数据分析、AI 检测、文风分析、题材管理、守护进程控制、真相文件编辑——CLI 能做的，Studio 全部可视化
-- **Foundation Reviewer**（v1.1）：建书时新增独立审核 Agent，5 维度百分制打分，不达 80 分自动驳回重新生成
-- **Hook Seed Excerpt**（v1.1）：伏笔回收时提取原始种子场景原文片段注入上下文，Writer 基于具体素材写回收场景
-- **Review Reject 回滚**（v1.1）：`inkos review reject` 回滚 state 到被拒章节之前的快照，防止坏草稿污染后续生成
-- **State Validation Recovery**（v1.1）：state 校验失败自动重试 settler，仍失败则降级保存，支持 `inkos write repair-state` 手动修复
-- **双语导入**（v1.1.1）：`import chapters` 和 `fanfic init` 支持双语 prompt，续写/系列模式自动适配语言
-- **章节号锚定**（v1.1）：章节进度唯一权威来源为连续章节文件，叙事文本中的数字不再被误解析
-- Audit drift 隔离、标题坍缩修复、Hook 预算提示、章节结尾摘要、情绪/节奏单调检测
-- AI-tells 和敏感词双语支持、自定义 HTTP Headers（`INKOS_LLM_HEADERS`）
+- **共享交互运行时**：TUI、Studio、`inkos interact`、OpenClaw Skill 共用同一套自然语言理解 + 执行内核，支持 15+ 种意图（写作、修订、重写、改名、导出、切换书籍等）
+- **Ink TUI 仪表盘**：`inkos` 直接进入全屏交互式仪表盘（Ink + React），对话式创作体验，slash 命令自动补全，主题动效，i18n 双语
+- **Studio 助手面板**：右侧 AI 助手面板接入共享交互内核，支持自然语言操作书籍——改名、写章、审计、导出等，实时显示执行状态
+- **对话式建书**：通过自然语言对话逐步构思书籍设定，草稿就绪后一键创建
+- **全书实体改名**：`把林烬改成张三` 或 `/rename 林烬 => 张三`，全量扫描章节 + 真相文件，一次替换
+- **`inkos interact`**：共享交互 JSON 入口，OpenClaw / 外部 Agent 可直接调用
+- **Thinking 模型温度夹制**：kimi-k2.5 等 thinking 模型自动强制 temperature=1，兼容 per-call 温度调参
+- **Studio 死代码清理**：移除未使用的 shadcn 组件和依赖，-2800 行
 
 ### 写第一本书
 

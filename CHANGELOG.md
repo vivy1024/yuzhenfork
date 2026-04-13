@@ -1,5 +1,44 @@
 # Changelog
 
+## v1.2.0
+
+### Release Focus
+
+统一交互内核——TUI、Studio、`inkos interact`、OpenClaw Skill 共享同一套自然语言理解和执行运行时。
+
+### 新功能
+
+- **共享交互运行时**（`packages/core/src/interaction/`）：自然语言路由器（15+ intent）、会话管理、编辑事务控制器、事件追踪、阶段遥测
+- **Ink TUI 仪表盘**：`inkos` 直接进入全屏 Ink + React 仪表盘，对话式创作，slash 命令 Tab 补全，主题动效（writing/auditing/revising/planning 各有独立动画），i18n 中英双语
+- **Studio 助手面板**：右侧 AI 助手接入共享交互内核，自然语言操作书籍（写章、改名、审计、导出），SSE 实时状态推送，执行阶段图标
+- **对话式建书**：通过 Studio 助手自然语言对话逐步构思书籍概念、设定、目标章数，草稿就绪后一键创建
+- **全书实体改名**：`把林烬改成张三` / `/rename 林烬 => 张三`，全量扫描章节 + 真相文件一次替换
+- **单章文本替换**：`/replace 5 旧文本 => 新文本`，精确修补指定章节
+- **`inkos interact --json`**：共享交互 JSON 入口，返回 request / response / session / events，供 OpenClaw 和外部 Agent 直接调用
+- **Thinking 模型温度夹制**（PR #174）：kimi-k2.5 等 thinking 模型自动 temperature=1，兼容 per-call 温度调参，每模型只 warn 一次
+
+### 改进
+
+- Studio ChatBar 去重：`executeCommand()` 提取公共逻辑，消除 handleSubmit/handleQuickCommand 80 行重复
+- Studio ChatBar SSE effect 用 `loadingRef` 替代 stale closure
+- Studio 下拉菜单 z-index 修复：移除 paper-sheet 的 transform（消除 stacking context），菜单打开时 card 提升 z-50
+- Studio agent 响应修复：使用 `result.responseText` 而非 `session.messages.at(-1)`
+- TUI 主题扩展：语义色（成功/错误/活跃/空闲）+ 角色色（用户/助手/系统）
+- TUI 状态徽标：✓ 完成 / ✗ 失败 / ✎ 写作 / ◇ 规划 / ◈ 等待决策
+- TUI i18n 修复：`stageLabels` 移入 TuiCopy，消除 hardcoded 状态字符串
+- Studio 死代码清理（PR #176）：移除未使用的 shadcn 组件、`dotenv`、`shadcn`、`tw-animate-css`、`class-variance-authority`，-2800 行
+
+### Bug Fixes
+
+- Studio ChatBar 助手回复丢失：session 历史覆盖导致 response 被静默丢弃
+- Studio BookMenu 下拉被下层 card 遮挡：fadeIn 动画的 transform 创建 stacking context
+- Studio GenreManager 用 `window.confirm` 替换为 `ConfirmDialog`
+- Studio BookDetail Nav `toTruth` 类型断言 hack 修复
+- Studio ChapterReader/Dashboard approve/reject 缺失错误处理
+- ChatBar curly quote 编码导致 esbuild 解析失败
+
+---
+
 ## v1.1.1
 
 ### Release Focus
