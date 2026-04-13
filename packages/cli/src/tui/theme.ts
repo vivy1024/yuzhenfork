@@ -1,17 +1,41 @@
+import { execSync } from "node:child_process";
+
 export type TerminalTheme = "dark" | "light";
 
 /**
- * Detect terminal background via $COLORFGBG (format: "fg;bg" or "fg;other;bg").
- * ANSI color indices 0-6 and 8 are dark; 7 and 9-15 are light.
- * Falls back to "dark" when the variable is missing or unparseable.
+ * Detect terminal background color.
+ *
+ * 1. $COLORFGBG (iTerm2, rxvt, etc.) — format: "fg;bg" or "fg;other;bg"
+ * 2. macOS system appearance via `defaults read` (for Terminal.app which lacks COLORFGBG)
+ * 3. Default: "dark"
  */
 export function detectTerminalTheme(): TerminalTheme {
+  // Method 1: COLORFGBG
   const raw = process.env.COLORFGBG;
-  if (!raw) return "dark";
-  const parts = raw.split(";");
-  const bg = Number(parts[parts.length - 1]);
-  if (Number.isNaN(bg)) return "dark";
-  return bg <= 6 || bg === 8 ? "dark" : "light";
+  if (raw) {
+    const parts = raw.split(";");
+    const bg = Number(parts[parts.length - 1]);
+    if (!Number.isNaN(bg)) {
+      return bg <= 6 || bg === 8 ? "dark" : "light";
+    }
+  }
+
+  // Method 2: macOS system appearance (AppleInterfaceStyle = "Dark" in dark mode)
+  if (process.platform === "darwin") {
+    try {
+      const result = execSync("defaults read -g AppleInterfaceStyle", {
+        encoding: "utf8",
+        timeout: 500,
+        stdio: ["pipe", "pipe", "pipe"],
+      }).trim();
+      return result === "Dark" ? "dark" : "light";
+    } catch {
+      // Command fails when light mode is active (key doesn't exist)
+      return "light";
+    }
+  }
+
+  return "dark";
 }
 
 interface ThemePalette {
