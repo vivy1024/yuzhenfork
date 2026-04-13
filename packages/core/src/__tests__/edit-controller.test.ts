@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { beforeAll, describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { ChapterMeta } from "../models/chapter.js";
 import {
   classifyTruthAuthority,
@@ -166,5 +166,25 @@ describe("edit controller", () => {
     expect(savedIndex[0]?.status).toBe("audit-failed");
     expect(savedIndex[0]?.auditIssues.at(-1)).toContain("Manual text edit requires review");
     expect(result.reviewRequired).toBe(true);
+  });
+
+  it("does not swallow unexpected filesystem errors while collecting editable files", async () => {
+    const invalidRoot = join(projectRoot, "invalid-root.txt");
+    await writeFile(invalidRoot, "not a directory", "utf-8");
+
+    await expect(executeEditTransaction(
+      {
+        bookDir: () => invalidRoot,
+        loadChapterIndex: async () => [],
+        saveChapterIndex: async () => undefined,
+      },
+      {
+        kind: "entity-rename",
+        bookId: "harbor",
+        entityType: "protagonist",
+        oldValue: "陆尘",
+        newValue: "林砚",
+      },
+    )).rejects.toThrow(/not a directory|ENOTDIR/i);
   });
 });

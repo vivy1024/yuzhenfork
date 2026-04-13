@@ -664,6 +664,27 @@ describe("createStudioServer daemon lifecycle", () => {
     }));
   });
 
+  it("returns 500 with an error payload when the shared agent execution fails", async () => {
+    processProjectInteractionInputMock.mockRejectedValueOnce(new Error("boom"));
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "continue", activeBookId: "demo-book" }),
+    });
+
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "INTERACTION_ERROR",
+        message: "boom",
+      },
+    });
+  });
+
   it("returns the shared interaction session state", async () => {
     loadProjectSessionMock.mockResolvedValue({
       sessionId: "session-2",

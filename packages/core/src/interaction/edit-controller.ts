@@ -62,6 +62,13 @@ export interface ExecutedEditTransaction {
   readonly summary: string;
 }
 
+function isMissingDirectoryError(error: unknown): boolean {
+  return typeof error === "object"
+    && error !== null
+    && "code" in error
+    && (error as { code?: unknown }).code === "ENOENT";
+}
+
 export function planEditTransaction(request: EditRequest): PlannedEditTransaction {
   switch (request.kind) {
     case "entity-rename":
@@ -116,7 +123,12 @@ function escapeRegExp(text: string): string {
 }
 
 async function collectEditableFiles(dir: string): Promise<ReadonlyArray<string>> {
-  const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+  const entries = await readdir(dir, { withFileTypes: true }).catch((error) => {
+    if (isMissingDirectoryError(error)) {
+      return [];
+    }
+    throw error;
+  });
   const files = await Promise.all(entries.map(async (entry) => {
     const fullPath = join(dir, entry.name);
     if (entry.isDirectory()) {
@@ -169,7 +181,12 @@ async function executeChapterLocalEdit(
   const root = deps.bookDir(request.bookId);
   const chaptersDir = join(root, "chapters");
   const paddedChapter = String(request.chapterNumber).padStart(4, "0");
-  const chapterFile = (await readdir(chaptersDir).catch(() => []))
+  const chapterFile = (await readdir(chaptersDir).catch((error) => {
+    if (isMissingDirectoryError(error)) {
+      return [];
+    }
+    throw error;
+  }))
     .find((file) => file.startsWith(`${paddedChapter}_`) && file.endsWith(".md"));
 
   if (!chapterFile) {
@@ -188,7 +205,12 @@ async function executeChapterLocalEdit(
   await writeFile(chapterPath, nextContent, "utf-8");
 
   const runtimeDir = join(root, "story", "runtime");
-  const runtimeFiles = (await readdir(runtimeDir).catch(() => []))
+  const runtimeFiles = (await readdir(runtimeDir).catch((error) => {
+    if (isMissingDirectoryError(error)) {
+      return [];
+    }
+    throw error;
+  }))
     .filter((file) => file.startsWith(`chapter-${paddedChapter}.`));
   await Promise.all(runtimeFiles.map((file) => unlink(join(runtimeDir, file)).catch(() => undefined)));
 

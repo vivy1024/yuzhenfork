@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createLogger, type LogSink } from "../index.js";
-import { createInteractionToolsFromDeps } from "../interaction/project-tools.js";
+import {
+  buildChapterFileLookup,
+  createInteractionToolsFromDeps,
+} from "../interaction/project-tools.js";
 
 let projectRoot: string;
 
@@ -249,5 +252,18 @@ describe("interaction tools", () => {
         currentFocus: expect.stringContaining("旧账线"),
       }),
     );
+  });
+
+  it("builds a reusable chapter lookup from a single directory listing", () => {
+    const lookup = buildChapterFileLookup([
+      "0001_First.md",
+      "0002_Second.md",
+      "notes.txt",
+      "0002_Second.backup",
+    ]);
+
+    expect(lookup.get(1)).toBe("0001_First.md");
+    expect(lookup.get(2)).toBe("0002_Second.md");
+    expect(lookup.size).toBe(2);
   });
 });

@@ -599,7 +599,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       broadcast("agent:error", { instruction, activeBookId, error: msg });
-      return c.json({ response: msg });
+      return c.json({
+        error: {
+          code: "INTERACTION_ERROR",
+          message: msg,
+        },
+      }, 500);
     }
   });
 

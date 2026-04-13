@@ -182,6 +182,20 @@ function buildCreationExternalContext(input: {
   return sections.join("\n\n");
 }
 
+export function buildChapterFileLookup(files: ReadonlyArray<string>): ReadonlyMap<number, string> {
+  const lookup = new Map<number, string>();
+  for (const file of files) {
+    if (!file.endsWith(".md") || !/^\d{4}/.test(file)) {
+      continue;
+    }
+    const chapterNumber = parseInt(file.slice(0, 4), 10);
+    if (!lookup.has(chapterNumber)) {
+      lookup.set(chapterNumber, file);
+    }
+  }
+  return lookup;
+}
+
 async function exportBookToPath(state: StateLike, bookId: string, options: {
   readonly format?: "txt" | "md" | "epub";
   readonly approvedOnly?: boolean;
@@ -202,6 +216,7 @@ async function exportBookToPath(state: StateLike, bookId: string, options: {
   const chaptersDir = join(bookDir, "chapters");
   const projectRoot = dirname(dirname(bookDir));
   const outputPath = options.outputPath ?? join(projectRoot, `${bookId}_export.${format}`);
+  const chapterFiles = buildChapterFileLookup(await readdir(chaptersDir));
 
   if (format === "epub") {
     const sections: string[] = [
@@ -211,9 +226,7 @@ async function exportBookToPath(state: StateLike, bookId: string, options: {
     ];
 
     for (const chapter of chapters) {
-      const padded = String(chapter.number).padStart(4, "0");
-      const files = await readdir(chaptersDir);
-      const match = files.find((file) => file.startsWith(padded) && file.endsWith(".md"));
+      const match = chapterFiles.get(chapter.number);
       if (!match) {
         continue;
       }
@@ -234,9 +247,7 @@ async function exportBookToPath(state: StateLike, bookId: string, options: {
     const parts: string[] = [];
     parts.push(format === "md" ? `# ${book.title}\n\n---\n` : `${book.title}\n\n`);
     for (const chapter of chapters) {
-      const padded = String(chapter.number).padStart(4, "0");
-      const files = await readdir(chaptersDir);
-      const match = files.find((file) => file.startsWith(padded) && file.endsWith(".md"));
+      const match = chapterFiles.get(chapter.number);
       if (!match) {
         continue;
       }
