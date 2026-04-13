@@ -19,7 +19,9 @@ function detectTerminalTheme(): TerminalTheme {
       return bg <= 6 || bg === 8 ? "dark" : "light";
     }
   }
-  if (process.platform === "darwin") {
+  // Only Terminal.app follows macOS system appearance; other terminals
+  // (Ghostty, kitty, etc.) have their own theme independent of the OS.
+  if (isAppleTerminal && process.platform === "darwin") {
     try {
       const result = execSync("defaults read -g AppleInterfaceStyle", {
         encoding: "utf8", timeout: 500, stdio: ["pipe", "pipe", "pipe"],
