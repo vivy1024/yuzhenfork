@@ -205,7 +205,7 @@ function deriveRetrievalHints(plan: PlanChapterOutput): string[] {
   return [
     plan.intent.goal,
     plan.intent.outlineNode,
-    ...plan.memo.hookRefs,
+    ...plan.memo.threadRefs,
   ].filter((value): value is string => Boolean(value));
 }
 
@@ -315,7 +315,7 @@ async function buildHookDebtEntries(
     }>,
   language: "zh" | "en",
 ): Promise<ContextPackage["selectedContext"]> {
-    const targetHookIds = [...new Set(plan.memo.hookRefs)];
+    const targetHookIds = [...new Set(plan.memo.threadRefs)];
     if (targetHookIds.length === 0) {
       return [];
     }

@@ -63,9 +63,9 @@ export function renderMemoAsNarrativeBlock(
     sections.push(`## ${isEn ? "Memo" : "本章备忘"}\n${s(memo.body)}`);
   }
 
-  if (memo.hookRefs.length > 0) {
-    const hooks = memo.hookRefs.map((hook) => `- ${hook}`).join("\n");
-    sections.push(`## ${isEn ? "Hook Refs" : "关联伏笔"}\n${hooks}`);
+  if (memo.threadRefs.length > 0) {
+    const threads = memo.threadRefs.map((id) => `- ${id}`).join("\n");
+    sections.push(`## ${isEn ? "Thread Refs" : "关联线索"}\n${threads}`);
   }
 
   if (memo.isGoldenOpening) {

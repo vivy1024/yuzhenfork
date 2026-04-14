@@ -71,7 +71,7 @@ describe("agent pipeline tools", () => {
         goal,
         isGoldenOpening: false,
         body: "",
-        hookRefs: [] as string[],
+        threadRefs: [] as string[],
       };
       const intentMarkdown = [
         "# Chapter Intent",

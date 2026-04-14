@@ -209,7 +209,7 @@ describe("PipelineRunner", () => {
         goal,
         isGoldenOpening: false,
         body: "",
-        hookRefs: [] as string[],
+        threadRefs: [] as string[],
       };
       const intentMarkdown = [
         "# Chapter Intent",
@@ -582,7 +582,7 @@ describe("PipelineRunner", () => {
         goal,
         isGoldenOpening: true,
         body: "",
-        hookRefs: [] as string[],
+        threadRefs: [] as string[],
       };
       const intentMarkdown = [
         "# Chapter Intent",
@@ -1256,7 +1256,7 @@ describe("PipelineRunner", () => {
           goal: result.intent.goal,
           isGoldenOpening: true,
           body: "",
-          hookRefs: [],
+          threadRefs: [],
         },
       };
     });
@@ -1400,7 +1400,7 @@ describe("PipelineRunner", () => {
           goal,
           isGoldenOpening: false,
           body: "",
-          hookRefs: [],
+          threadRefs: [],
         },
         intentMarkdown: intentMd,
         plannerInputs: [runtimePath],

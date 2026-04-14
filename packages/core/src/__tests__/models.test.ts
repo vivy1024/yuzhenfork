@@ -535,30 +535,49 @@ describe("ChapterIntentSchema", () => {
 });
 
 describe("ChapterMemoSchema", () => {
-  it("accepts a memo with body prose", () => {
+  it("accepts a memo with prose body and threadRefs", () => {
     const result = ChapterMemoSchema.parse({
       chapter: 12,
-      goal: "Force the heroine to choose between the ledger and the mentor debt.",
+      goal: "把七号门被动过手脚钉成现场实证",
       isGoldenOpening: true,
-      body: "Seven-section memo body (Phase 3 fills this with prose).",
-      hookRefs: ["H019", "H045"],
+      body: "## 当前任务\n主角进入七号门……\n## 不要做\n不要让对手降智。",
+      threadRefs: ["H019", "S004"],
     });
 
     expect(result.isGoldenOpening).toBe(true);
-    expect(result.body).toContain("memo body");
-    expect(result.hookRefs).toEqual(["H019", "H045"]);
+    expect(result.body).toContain("当前任务");
+    expect(result.threadRefs).toEqual(["H019", "S004"]);
   });
 
-  it("accepts a stub memo with empty body", () => {
+  it("defaults isGoldenOpening and threadRefs when omitted", () => {
     const result = ChapterMemoSchema.parse({
       chapter: 3,
-      goal: "Lock the protagonist into the first irreversible choice.",
-      body: "",
+      goal: "让主角做下第一次不可逆选择",
+      body: "## 当前任务\n主角落下决定。",
     });
 
     expect(result.isGoldenOpening).toBe(false);
-    expect(result.body).toBe("");
-    expect(result.hookRefs).toEqual([]);
+    expect(result.threadRefs).toEqual([]);
+  });
+
+  it("rejects goal longer than 50 chars", () => {
+    expect(() =>
+      ChapterMemoSchema.parse({
+        chapter: 1,
+        goal: "a".repeat(51),
+        body: "## 当前任务\nx",
+      }),
+    ).toThrow();
+  });
+
+  it("rejects empty body", () => {
+    expect(() =>
+      ChapterMemoSchema.parse({
+        chapter: 1,
+        goal: "xxx",
+        body: "",
+      }),
+    ).toThrow();
   });
 });
 

@@ -906,7 +906,7 @@ describe("WriterAgent", () => {
           goal: "Force Mara back toward the ledger trail.",
           isGoldenOpening: false,
           body: "",
-          hookRefs: ["ledger-fragment"],
+          threadRefs: ["ledger-fragment"],
         },
         contextPackage: {
           chapter: 4,
@@ -1036,7 +1036,7 @@ describe("WriterAgent", () => {
           goal: "Push Mara back toward the archive ledger.",
           isGoldenOpening: false,
           body: "",
-          hookRefs: ["ledger-fragment"],
+          threadRefs: ["ledger-fragment"],
         },
         contextPackage: {
           chapter: 4,
@@ -1185,7 +1185,7 @@ describe("WriterAgent", () => {
           goal: "Push Mara back toward the archive ledger.",
           isGoldenOpening: false,
           body: "本章要做的是推进 ledger-fragment tension at the archive.",
-          hookRefs: ["mentor-oath", "ledger-fragment"],
+          threadRefs: ["mentor-oath", "ledger-fragment"],
         },
         contextPackage: {
           chapter: 4,

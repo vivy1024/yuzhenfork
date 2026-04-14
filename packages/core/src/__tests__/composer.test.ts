@@ -72,7 +72,7 @@ describe("ComposerAgent", () => {
         goal: "Bring the focus back to the mentor conflict.",
         isGoldenOpening: false,
         body: "",
-        hookRefs: [],
+        threadRefs: [],
       },
       intentMarkdown: "# Chapter Intent\n",
       plannerInputs: [
@@ -542,7 +542,7 @@ describe("ComposerAgent", () => {
           ...plan.memo,
           chapter: 10,
           goal: "Bring the focus back to the mentor oath conflict.",
-          hookRefs: ["mentor-oath"],
+          threadRefs: ["mentor-oath"],
         },
       },
     });
@@ -606,7 +606,7 @@ describe("ComposerAgent", () => {
           ...plan.memo,
           chapter: 8,
           goal: "Follow the black ring pressure.",
-          hookRefs: ["black-ring"],
+          threadRefs: ["black-ring"],
         },
       },
     });
