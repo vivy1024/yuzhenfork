@@ -224,7 +224,6 @@ export class WriterAgent extends BaseAgent {
           return this.buildUserPrompt({
             chapterNumber,
             storyBible,
-            volumeOutline,
             currentState,
             ledger: genreProfile.numericalSystem ? ledger : "",
             hooks: povFilteredHooks,
@@ -698,7 +697,6 @@ export class WriterAgent extends BaseAgent {
   private buildUserPrompt(params: {
     readonly chapterNumber: number;
     readonly storyBible: string;
-    readonly volumeOutline: string;
     readonly currentState: string;
     readonly ledger: string;
     readonly hooks: string;
@@ -768,15 +766,6 @@ ${params.recentChapters || "(This is the first chapter, no previous text)"}
 ## Worldbuilding
 ${params.storyBible}
 
-## Volume Outline (Hard Constraint — Must Follow)
-${params.volumeOutline}
-
-[Outline Rules]
-- This chapter must advance the plot points assigned to it in the volume outline. Do not skip ahead or consume future plot points.
-- If the outline specifies an event for chapter N, do not resolve it early.
-- Pacing must match the outline's chapter span: if 5 chapters are planned for an arc, do not compress into 1-2.
-- PRE_WRITE_CHECK must identify which outline node this chapter covers.
-
 ${lengthRequirementBlock}
 - Output PRE_WRITE_CHECK first, then the chapter
 - Output only PRE_WRITE_CHECK, CHAPTER_TITLE, and CHAPTER_CONTENT blocks`;
@@ -795,15 +784,6 @@ ${params.recentChapters || "(这是第一章，无前文)"}
 
 ## 世界观设定
 ${params.storyBible}
-
-## 卷纲（硬约束——必须遵守）
-${params.volumeOutline}
-
-【卷纲遵守规则】
-- 本章内容必须对应卷纲中当前章节范围内的剧情节点，严禁跳过或提前消耗后续节点
-- 如果卷纲指定了某个事件/转折发生在第N章，不得提前到本章完成
-- 剧情推进速度必须与卷纲规划的章节跨度匹配：如果卷纲规划某段剧情跨5章，不得在1-2章内讲完
-- PRE_WRITE_CHECK中必须明确标注本章对应的卷纲节点
 
 ${lengthRequirementBlock}
 - 先输出写作自检表，再写正文
