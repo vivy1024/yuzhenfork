@@ -132,6 +132,11 @@ export class PlannerAgent extends BaseAgent {
       previousEndingExcerpt: seedMaterials.previousEndingExcerpt,
     });
 
+    // memo.goal is LLM-produced and specific (<=50 chars, validated).
+    // Overwrite intent.goal so downstream composer/retrieval gets the
+    // concrete task statement instead of the outline-derived fallback.
+    intent.goal = memo.goal;
+
     const runtimePath = join(runtimeDir, `chapter-${String(input.chapterNumber).padStart(4, "0")}.intent.md`);
     const intentMarkdown = this.renderIntentMarkdown(
       intent,
