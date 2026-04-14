@@ -1,7 +1,7 @@
 ---
 name: inkos
 description: Autonomous novel writing CLI agent with web workbench (InkOS Studio) - use for creative fiction writing, novel generation, style imitation, chapter continuation/import, EPUB export, AIGC detection, and fan fiction. Native English support with 10 built-in English genre profiles (LitRPG, Progression Fantasy, Isekai, Cultivation, System Apocalypse, Dungeon Core, Romantasy, Sci-Fi, Tower Climber, Cozy Fantasy). Also supports Chinese web novel genres (xuanhuan, xianxia, urban, horror, other). Multi-agent pipeline, two-phase writer (creative + settlement), 33-dimension auditing, token usage analytics, creative brief input, structured logging (JSON Lines), multi-model routing, custom OpenAI-compatible provider support, and InkOS Studio web UI for visual book management, chapter review, real-time writing progress, market radar, and analytics.
-version: 2.3.0
+version: 2.3.1
 license: AGPL-3.0-only
 metadata: { "openclaw": { "emoji": "📖", "requires": { "bins": ["inkos", "node"], "env": ["OPENAI_API_KEY"] }, "primaryEnv": "OPENAI_API_KEY", "homepage": "https://github.com/Narcooo/inkos", "install": [{ "id": "npm", "kind": "node", "package": "@actalk/inkos", "label": "Install InkOS (npm)" }] } }
 ---
