@@ -20,6 +20,8 @@
 
 Open-source AI Agent that autonomously writes, audits, and revises novels — with human review gates that keep you in control. Supports LitRPG, Progression Fantasy, Isekai, Romantasy, Sci-Fi, and more. Continuation, spinoff, fanfic, and style imitation workflows built in.
 
+**InkOS TUI is here!** — run `inkos` to launch a full-screen interactive dashboard. Conversational creation, natural-language book operations, slash command autocomplete, themed animations — TUI, Studio, and OpenClaw share the same interaction kernel.
+
 **InkOS Studio is here!** — run `inkos studio` to launch a local web workbench. Book management, chapter review & editing, real-time writing progress, market radar, analytics, AI detection, style analysis, genre management, daemon control, truth file editing — everything the CLI does, now visual.
 
 **Native English novel writing now supported！** — 10 built-in English genre profiles with dedicated pacing rules, fatigue word lists, and audit dimensions. Set `--lang en` and go.
