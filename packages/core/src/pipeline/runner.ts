@@ -2070,7 +2070,7 @@ ${matrix}`,
     bookDir: string,
     chapterNumber: number,
     externalContext?: string,
-  ): Promise<Pick<WriteChapterInput, "externalContext" | "chapterIntent" | "chapterMemo" | "chapterIntentData" | "contextPackage" | "ruleStack" | "trace">> {
+  ): Promise<Pick<WriteChapterInput, "externalContext" | "chapterIntent" | "chapterMemo" | "chapterIntentData" | "contextPackage" | "ruleStack">> {
     if ((this.config.inputGovernanceMode ?? "v2") === "legacy") {
       return { externalContext };
     }
@@ -2089,7 +2089,6 @@ ${matrix}`,
       chapterIntentData: plan.intent,
       contextPackage: composed.contextPackage,
       ruleStack: composed.ruleStack,
-      trace: composed.trace,
     };
   }
 

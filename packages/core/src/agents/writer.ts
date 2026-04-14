@@ -15,7 +15,7 @@ import {
   type PostWriteViolation,
 } from "./post-write-validator.js";
 import { analyzeAITells } from "./ai-tells.js";
-import type { ChapterIntent, ChapterMemo, ChapterTrace, ContextPackage, RuleStack } from "../models/input-governance.js";
+import type { ChapterIntent, ChapterMemo, ContextPackage, RuleStack } from "../models/input-governance.js";
 import type { LengthSpec } from "../models/length-governance.js";
 import type { RuntimeStateDelta } from "../models/runtime-state.js";
 import { buildLengthSpec, countChapterLength } from "../utils/length-metrics.js";
@@ -53,7 +53,6 @@ export interface WriteChapterInput {
   readonly chapterIntentData?: ChapterIntent;
   readonly contextPackage?: ContextPackage;
   readonly ruleStack?: RuleStack;
-  readonly trace?: ChapterTrace;
   readonly lengthSpec?: LengthSpec;
   readonly wordCountOverride?: number;
   readonly temperatureOverride?: number;
@@ -200,7 +199,6 @@ export class WriterAgent extends BaseAgent {
           chapterIntentData: input.chapterIntentData,
           contextPackage: input.contextPackage,
           ruleStack: input.ruleStack,
-          trace: input.trace,
           lengthSpec: resolvedLengthSpec,
           language: book.language ?? genreProfile.language,
           varianceBrief: englishVarianceBrief?.text,
@@ -818,7 +816,6 @@ ${lengthRequirementBlock}
     readonly chapterIntentData?: ChapterIntent;
     readonly contextPackage: ContextPackage;
     readonly ruleStack: RuleStack;
-    readonly trace?: ChapterTrace;
     readonly lengthSpec: LengthSpec;
     readonly language?: "zh" | "en";
     readonly varianceBrief?: string;
@@ -830,19 +827,10 @@ ${lengthRequirementBlock}
       language,
     );
 
-    const overrideLines = params.ruleStack.activeOverrides.length > 0
-      ? params.ruleStack.activeOverrides
-        .map((override) => `- ${override.from} -> ${override.to}: ${override.reason} (${override.target})`)
-        .join("\n")
-      : "- none";
-
     const diagnosticLines = params.ruleStack.sections.diagnostic.length > 0
       ? params.ruleStack.sections.diagnostic.join(", ")
       : "none";
 
-    const traceNotes = params.trace && params.trace.notes.length > 0
-      ? params.trace.notes.map((note) => `- ${note}`).join("\n")
-      : "- none";
     const lengthRequirementBlock = this.buildLengthRequirementBlock(params.lengthSpec, params.language ?? "zh");
     const varianceBlock = params.varianceBrief
       ? `\n${params.varianceBrief}\n`
@@ -866,12 +854,6 @@ ${selectedEvidenceBlock}
 - Soft: ${params.ruleStack.sections.soft.join(", ") || "(none)"}
 - Diagnostic: ${diagnosticLines}
 
-## Active Overrides
-${overrideLines}
-
-## Trace Notes
-${traceNotes}
-
 ${varianceBlock}
 ${lengthRequirementBlock}
 - Output PRE_WRITE_CHECK first, then the chapter
@@ -890,12 +872,6 @@ ${selectedEvidenceBlock}
 - 硬护栏：${params.ruleStack.sections.hard.join("、") || "(无)"}
 - 软约束：${params.ruleStack.sections.soft.join("、") || "(无)"}
 - 诊断规则：${diagnosticLines}
-
-## 当前覆盖
-${overrideLines}
-
-## 追踪说明
-${traceNotes}
 
 ${varianceBlock}
 ${lengthRequirementBlock}
