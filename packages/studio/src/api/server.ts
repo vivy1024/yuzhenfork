@@ -2135,7 +2135,7 @@ export async function startStudioServer(
   port = 4567,
   options?: { readonly staticDir?: string },
 ): Promise<void> {
-  const config = await loadProjectConfig(root);
+  const config = await loadProjectConfig(root, { requireApiKey: false });
 
   const app = createStudioServer(config, root);
 
