@@ -18,8 +18,8 @@ import {
 } from "../utils/planning-materials.js";
 import { parseMemo, PlannerParseError } from "../utils/chapter-memo-parser.js";
 import {
-  PLANNER_MEMO_SYSTEM_PROMPT,
   buildPlannerUserMessage,
+  getPlannerMemoSystemPrompt,
 } from "./planner-prompts.js";
 import {
   composeCurrentArcProse,
@@ -131,6 +131,10 @@ export class PlannerAgent extends BaseAgent {
       fallbackGoal: goal,
       chapterSummariesRaw: seedMaterials.chapterSummariesRaw,
       previousEndingExcerpt: seedMaterials.previousEndingExcerpt,
+      // Phase hotfix 4: thread book language through so the planner uses
+      // English prompts (system + user template + golden opening guidance)
+      // for English books instead of always-Chinese.
+      language: input.book.language ?? "zh",
     });
 
     // memo.goal is LLM-produced and specific (<=50 chars, validated).
@@ -171,6 +175,7 @@ export class PlannerAgent extends BaseAgent {
     readonly fallbackGoal: string;
     readonly chapterSummariesRaw: string;
     readonly previousEndingExcerpt?: string;
+    readonly language?: "zh" | "en";
   }): Promise<ChapterMemo> {
     const [characterMatrix, subplotBoard, emotionalArcs, pendingHooks, bookRulesRaw] = await Promise.all([
       readCharacterMatrix(input.storyDir),
@@ -180,11 +185,25 @@ export class PlannerAgent extends BaseAgent {
       readBookRules(input.storyDir),
     ]);
 
+    const language = input.language ?? "zh";
+    const noPriorChapter = language === "en"
+      ? "(this is the opening chapter — no prior chapter)"
+      : "（本章为起始章，无前章）";
+    const noBookRules = language === "en"
+      ? "(no book_rules entries)"
+      : "（暂无 book_rules 条目）";
+    const retryFeedbackHeader = language === "en"
+      ? "## Error from previous output"
+      : "## 上次输出的错误";
+    const retryFeedbackTrailer = language === "en"
+      ? "Fix and re-emit."
+      : "请修正后重新输出。";
+
     const userMessage = buildPlannerUserMessage({
       chapterNumber: input.chapterNumber,
       previousChapterEndingExcerpt: input.previousEndingExcerpt?.trim()
         ? input.previousEndingExcerpt.trim()
-        : "（本章为起始章，无前章）",
+        : noPriorChapter,
       recentSummaries: formatRecentSummaries(input.chapterSummariesRaw, input.chapterNumber, 3),
       currentArcProse: composeCurrentArcProse(subplotBoard, emotionalArcs, input.chapterNumber),
       protagonistMatrixRow: extractProtagonistRow(characterMatrix),
@@ -192,8 +211,11 @@ export class PlannerAgent extends BaseAgent {
       collaboratorRows: extractCollaboratorRows(characterMatrix, 3),
       relevantThreads: extractRelevantThreads(pendingHooks, subplotBoard),
       isGoldenOpening: input.isGoldenOpening,
-      bookRulesRelevant: bookRulesRaw.trim().length > 0 ? bookRulesRaw.trim() : "（暂无 book_rules 条目）",
+      bookRulesRelevant: bookRulesRaw.trim().length > 0 ? bookRulesRaw.trim() : noBookRules,
+      language,
     });
+
+    const systemPrompt = getPlannerMemoSystemPrompt(language);
 
     let currentUserMessage = userMessage;
     let lastError: PlannerParseError | undefined;
@@ -201,7 +223,7 @@ export class PlannerAgent extends BaseAgent {
     for (let attempt = 0; attempt < MEMO_RETRY_LIMIT; attempt += 1) {
       const response = await this.chat(
         [
-          { role: "system", content: PLANNER_MEMO_SYSTEM_PROMPT },
+          { role: "system", content: systemPrompt },
           { role: "user", content: currentUserMessage },
         ],
         { temperature: 0.7, maxTokens: 2000 },
@@ -215,7 +237,7 @@ export class PlannerAgent extends BaseAgent {
         }
         lastError = error;
         this.log?.warn(`[planner] memo parse failed (attempt ${attempt + 1}/${MEMO_RETRY_LIMIT}): ${error.message}`);
-        currentUserMessage = `${userMessage}\n\n## 上次输出的错误\n${error.message}\n请修正后重新输出。`;
+        currentUserMessage = `${userMessage}\n\n${retryFeedbackHeader}\n${error.message}\n${retryFeedbackTrailer}`;
       }
     }
 

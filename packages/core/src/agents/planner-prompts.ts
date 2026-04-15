@@ -78,6 +78,128 @@ threadRefs:
 - 不要产生正文片段或对话片段
 - 如果卷纲和上章摘要冲突，信上章摘要（剧情已实际发生）`;
 
+// ---------------------------------------------------------------------------
+// English variants — Phase hotfix 4
+// Same 7-section structure, same placeholders, same sparse-memo legality.
+// Used when book.language === "en" so English-language books no longer
+// receive a Chinese system prompt + Chinese user template.
+// ---------------------------------------------------------------------------
+
+export const PLANNER_MEMO_SYSTEM_PROMPT_EN = `You are this novel's editor-in-chief. Your job is to produce a chapter_memo for the next chapter. You do NOT write prose — you plan what this chapter must accomplish, what it must pay off, and what it must NOT do. The downstream writer expands your memo into prose.
+
+Your working principles (internalize them — do not cite by number in the memo):
+
+1. Small-goal cycle every 3-5 chapters: every 3-5 chapters there must be a small goal achieved or a suspense escalation; the mainline keeps moving.
+2. Actively shape reader expectation: the author deliberately creates "not yet paid off but imminent" gaps; the eventual payoff must exceed reader expectation by 70%.
+3. Everything is bait: in slow / transitional chapters every beat must be a future foreshadow or hook.
+4. No persona collapse: character behavior is driven by past experience + current interest + personality core. Never let antagonists suddenly turn dumb or the protagonist suddenly turn saintly.
+5. 1 mainline + 1 subplot: subplots must serve the mainline; never run 3+ subplots concurrently.
+6. Dense satisfaction beats: every 3-5 chapters needs a small payoff (small conflict → fast resolution → strong reader feedback); everyone stays sharp.
+7. Pre-climax setup: 3-5 chapters before any big climax must seed clear setups.
+8. Post-climax fallout: 1-2 chapters after a peak must show concrete change (mainline advance, persona growth, relationship shift).
+9. Three-dimensional characters: core tag + contrast detail = a living person.
+10. Five-sense concretization: scene description must include specific, visualizable sensory detail.
+11. Hook-passing: every chapter ends with a hook for the next.
+
+## Output format (strict)
+
+Output YAML frontmatter + markdown body. Do NOT wrap markdown in a JSON object. Do NOT add code-block fences.
+
+Structure:
+
+---
+chapter: 12
+goal: Pin the Door 7 tampering from suspicion to live evidence
+isGoldenOpening: false
+threadRefs:
+  - H03
+  - S004
+---
+
+## Current task
+<one sentence: the concrete action the protagonist must complete this chapter — no abstractions>
+
+## What the reader is waiting for right now
+<two lines:
+1) what the reader currently expects (based on prior chapters' setups)
+2) what this chapter does with that expectation — widen the gap / partial payoff / full payoff / hint without paying off>
+
+## To pay off / to keep buried
+- Pay off: X → to what degree
+- Keep buried: Y → suppress until chapter N
+
+## What the slow / transitional beats carry
+<if this is a non-pressure chapter, name the function of each non-conflict paragraph. Format: [position] → [function]
+if this is a pressure / conflict chapter, write "n/a — pressure chapter, no transitional beats">
+
+## Three-question check on the key choice
+- Protagonist's most important choice this chapter:
+  - Why this choice?
+  - Does it match current interest?
+  - Does it match their persona?
+- Antagonist / supporting cast's most important choice this chapter:
+  - Why this choice?
+  - Does it match current interest?
+  - Does it match their persona?
+
+## Required end-of-chapter change
+<1-3 items, choose from: information change / relationship change / physical change / power change>
+
+## Do not
+<2-4 hard prohibitions>
+
+## Output requirements
+
+- goal field is no more than 50 characters
+- threadRefs is a YAML array of ids picked from the input pending_hooks / subplot_board
+- Every level-2 heading (##) must appear; none may be empty
+- Do NOT use methodology jargon ("emotional gap", "cyclePhase", "pressure buildup") in the memo — speak directly using this book's people, places, events
+- Do NOT produce prose or dialogue fragments
+- If the volume outline conflicts with the previous chapter summary, trust the summary (those events actually happened)`;
+
+export const PLANNER_MEMO_USER_TEMPLATE_EN = `# Chapter {{chapterNumber}} memo request
+
+## Last screen of previous chapter (excerpt)
+{{previous_chapter_ending_excerpt}}
+
+## Last 3 chapter summaries
+{{recent_summaries}}
+
+## What the current arc is pushing
+{{current_arc_prose}}
+
+## Protagonist current state
+{{protagonist_matrix_row}}
+
+## Main antagonist / opposing forces this chapter
+{{opponent_rows}}
+
+## Main collaborators this chapter
+{{collaborator_rows}}
+
+## Threads that may be touched (foreshadows + subplots)
+{{relevant_threads}}
+
+## Out-of-volume constraints for this chapter
+- Golden opening chapter: {{isGoldenOpening}}
+- Hard rules (excerpt of items this chapter may touch):
+{{book_rules_relevant}}
+
+Produce the memo for chapter {{chapterNumber}}. Strictly emit YAML frontmatter + markdown.`;
+
+/**
+ * Phase hotfix 4: select the language-appropriate planner system prompt.
+ * Defaults to zh for backward compatibility — explicit "en" required for
+ * the English variant.
+ */
+export function getPlannerMemoSystemPrompt(language: "zh" | "en" = "zh"): string {
+  return language === "en" ? PLANNER_MEMO_SYSTEM_PROMPT_EN : PLANNER_MEMO_SYSTEM_PROMPT;
+}
+
+export function getPlannerMemoUserTemplate(language: "zh" | "en" = "zh"): string {
+  return language === "en" ? PLANNER_MEMO_USER_TEMPLATE_EN : PLANNER_MEMO_USER_TEMPLATE;
+}
+
 export const PLANNER_MEMO_USER_TEMPLATE = `# 第 {{chapterNumber}} 章 memo 请求
 
 ## 上一章最后一屏（原文节选）
@@ -123,7 +245,12 @@ export interface PlannerUserMessageInput {
 }
 
 export function buildPlannerUserMessage(input: PlannerUserMessageInput): string {
-  const filled = PLANNER_MEMO_USER_TEMPLATE
+  const language = input.language ?? "zh";
+  const template = getPlannerMemoUserTemplate(language);
+  const yesText = language === "en" ? "yes" : "是";
+  const noText = language === "en" ? "no" : "否";
+
+  const filled = template
     .replaceAll("{{chapterNumber}}", String(input.chapterNumber))
     .replaceAll("{{previous_chapter_ending_excerpt}}", input.previousChapterEndingExcerpt)
     .replaceAll("{{recent_summaries}}", input.recentSummaries)
@@ -132,10 +259,10 @@ export function buildPlannerUserMessage(input: PlannerUserMessageInput): string 
     .replaceAll("{{opponent_rows}}", input.opponentRows)
     .replaceAll("{{collaborator_rows}}", input.collaboratorRows)
     .replaceAll("{{relevant_threads}}", input.relevantThreads)
-    .replaceAll("{{isGoldenOpening}}", input.isGoldenOpening ? "是" : "否")
+    .replaceAll("{{isGoldenOpening}}", input.isGoldenOpening ? yesText : noText)
     .replaceAll("{{book_rules_relevant}}", input.bookRulesRelevant);
 
-  const golden = buildGoldenOpeningGuidance(input.chapterNumber, input.language ?? "zh");
+  const golden = buildGoldenOpeningGuidance(input.chapterNumber, language);
   return golden ? `${filled}\n\n${golden}` : filled;
 }
 

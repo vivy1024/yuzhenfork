@@ -8,14 +8,20 @@ export class PlannerParseError extends Error {
   }
 }
 
-const REQUIRED_SECTIONS: ReadonlyArray<string> = [
-  "## 当前任务",
-  "## 读者此刻在等什么",
-  "## 该兑现的 / 暂不掀的",
-  "## 日常/过渡承担什么任务",
-  "## 关键抉择过三连问",
-  "## 章尾必须发生的改变",
-  "## 不要做",
+// Phase hotfix 4: each required section is a (zh, en) heading pair.
+// The English headings come from PLANNER_MEMO_SYSTEM_PROMPT_EN — we accept
+// EITHER language at parse time so the same parser works for both.
+const REQUIRED_SECTIONS: ReadonlyArray<{
+  readonly zh: string;
+  readonly en: string;
+}> = [
+  { zh: "## 当前任务", en: "## Current task" },
+  { zh: "## 读者此刻在等什么", en: "## What the reader is waiting for right now" },
+  { zh: "## 该兑现的 / 暂不掀的", en: "## To pay off / to keep buried" },
+  { zh: "## 日常/过渡承担什么任务", en: "## What the slow / transitional beats carry" },
+  { zh: "## 关键抉择过三连问", en: "## Three-question check on the key choice" },
+  { zh: "## 章尾必须发生的改变", en: "## Required end-of-chapter change" },
+  { zh: "## 不要做", en: "## Do not" },
 ];
 
 /**
@@ -75,9 +81,14 @@ export function parseMemo(
     );
   }
 
-  const missing = REQUIRED_SECTIONS.filter((heading) => !body.includes(heading));
+  const missing = REQUIRED_SECTIONS.filter(
+    (section) => !body.includes(section.zh) && !body.includes(section.en),
+  );
   if (missing.length > 0) {
-    throw new PlannerParseError(`missing sections: ${missing.join(", ")}`);
+    // Report by zh heading (canonical) so the LLM-feedback loop stays stable.
+    throw new PlannerParseError(
+      `missing sections: ${missing.map((s) => s.zh).join(", ")}`,
+    );
   }
 
   const threadRefs = Array.isArray(f.threadRefs)
