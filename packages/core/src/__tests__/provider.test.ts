@@ -286,6 +286,88 @@ describe("chatCompletion via pi-ai", () => {
 
     vi.unstubAllGlobals();
   });
+
+  it("uses native fetch transport for custom anthropic-compatible non-stream chat", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        content: [{ type: "text", text: "你好，Anthropic!" }],
+        usage: { input_tokens: 5, output_tokens: 3 },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeClient(0.7, {
+      provider: "anthropic",
+      service: "custom",
+      stream: false,
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        provider: "anthropic",
+        api: "anthropic-messages" as Api,
+        baseUrl: "https://gateway.example",
+      },
+    });
+    const result = await chatCompletion(client, "claude-sonnet-4-6", [{ role: "user", content: "nihao" }]);
+
+    expect(result.content).toBe("你好，Anthropic!");
+    expect(result.usage.promptTokens).toBe(5);
+    expect(result.usage.completionTokens).toBe(3);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(mockCompleteSimple).not.toHaveBeenCalled();
+    expect(mockStreamSimple).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it("uses native fetch transport for custom anthropic-compatible stream chat", async () => {
+    const encoder = new TextEncoder();
+    const sse = [
+      "event: message_start\n",
+      "data: {\"type\":\"message_start\",\"message\":{\"usage\":{\"input_tokens\":4}}}\n\n",
+      "event: content_block_delta\n",
+      "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"你\"}}\n\n",
+      "event: content_block_delta\n",
+      "data: {\"type\":\"content_block_delta\",\"delta\":{\"type\":\"text_delta\",\"text\":\"好\"}}\n\n",
+      "event: message_delta\n",
+      "data: {\"type\":\"message_delta\",\"usage\":{\"output_tokens\":2}}\n\n",
+      "event: message_stop\n",
+      "data: {\"type\":\"message_stop\"}\n\n",
+    ].join("");
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(sse));
+          controller.close();
+        },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeClient(0.7, {
+      provider: "anthropic",
+      service: "custom",
+      stream: true,
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        provider: "anthropic",
+        api: "anthropic-messages" as Api,
+        baseUrl: "https://gateway.example",
+      },
+    });
+    const result = await chatCompletion(client, "claude-sonnet-4-6", [{ role: "user", content: "nihao" }]);
+
+    expect(result.content).toBe("你好");
+    expect(result.usage.promptTokens).toBe(4);
+    expect(result.usage.completionTokens).toBe(2);
+    expect(result.usage.totalTokens).toBe(6);
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(mockCompleteSimple).not.toHaveBeenCalled();
+    expect(mockStreamSimple).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
 });
 
 describe("chatCompletion fixed-temperature clamp (thinking models)", () => {
