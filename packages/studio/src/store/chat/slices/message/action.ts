@@ -414,7 +414,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
 
       streamEs.close();
 
-      const finalContent = data.details?.draftRaw || data.response || "Acknowledged.";
+      const finalContent = data.details?.draftRaw || data.response || "";
       const toolCall = data.details?.toolCall ?? undefined;
       const hasStream = get().messages.some((m) => m.timestamp === streamTs);
 
@@ -424,7 +424,7 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         } else {
           get().addErrorMessage(extractErrorMessage(data.error));
         }
-      } else {
+      } else if (finalContent) {
         if (hasStream) {
           get().finalizeStream(streamTs, finalContent, toolCall);
         } else {
@@ -436,6 +436,13 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
         }
         if (toolCall?.name === "create_book") {
           get().setPendingBookArgs({ ...toolCall.arguments });
+        }
+      } else {
+        const emptyMsg = "模型未返回文本内容。请检查协议类型（chat/responses）、流式开关或上游服务兼容性。";
+        if (hasStream) {
+          get().replaceStreamWithError(streamTs, emptyMsg);
+        } else {
+          get().addErrorMessage(emptyMsg);
         }
       }
     } catch (e) {

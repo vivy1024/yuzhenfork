@@ -905,6 +905,64 @@ describe("createStudioServer daemon lifecycle", () => {
     );
   });
 
+  it("allows /api/agent to use explicit service+model when Studio config has no defaultModel", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        configSource: "studio",
+        services: [
+          { service: "custom", name: "CodexForMe", baseUrl: "https://api-vip.codex-for.me/v1", apiFormat: "responses", stream: false },
+        ],
+      },
+    }, null, 2), "utf-8");
+    loadProjectConfigMock.mockImplementation(async () => {
+      const raw = JSON.parse(await readFile(join(root, "inkos.json"), "utf-8")) as Record<string, unknown>;
+      return {
+        ...cloneProjectConfig(),
+        ...raw,
+        llm: {
+          ...cloneProjectConfig().llm,
+          ...((raw.llm ?? {}) as Record<string, unknown>),
+        },
+        daemon: {
+          ...cloneProjectConfig().daemon,
+          ...((raw.daemon ?? {}) as Record<string, unknown>),
+        },
+        modelOverrides: (raw.modelOverrides ?? {}) as Record<string, unknown>,
+        notify: (raw.notify ?? []) as unknown[],
+      };
+    });
+    resolveServiceModelMock.mockResolvedValue({
+      model: { id: "gpt-5.4", provider: "custom", api: "openai-responses" },
+      apiKey: "sk-test",
+    });
+    runAgentSessionMock.mockResolvedValueOnce({
+      responseText: "你好，我在。",
+      messages: [
+        { role: "user", content: "nihao" },
+        { role: "assistant", content: "你好，我在。" },
+      ],
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instruction: "nihao",
+        service: "custom:CodexForMe",
+        model: "gpt-5.4",
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      response: "你好，我在。",
+    });
+  });
+
   it("returns 500 with an error payload when the agent session fails", async () => {
     runAgentSessionMock.mockRejectedValueOnce(new Error("boom"));
 
@@ -923,6 +981,32 @@ describe("createStudioServer daemon lifecycle", () => {
         code: "AGENT_ERROR",
         message: "boom",
       },
+    });
+  });
+
+  it("probes the upstream when the agent returns empty text and surfaces the real error", async () => {
+    runAgentSessionMock.mockResolvedValueOnce({
+      responseText: "",
+      messages: [{ role: "user", content: "nihao" }],
+    });
+    chatCompletionMock.mockRejectedValueOnce(new Error("quota exhausted"));
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "nihao", activeBookId: "demo-book" }),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "AGENT_EMPTY_RESPONSE",
+        message: "quota exhausted",
+      },
+      response: "quota exhausted",
     });
   });
 

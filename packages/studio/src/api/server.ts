@@ -25,6 +25,7 @@ import {
   saveSecrets,
   getServiceApiKey,
   listModelsForService,
+  chatCompletion,
   GLOBAL_ENV_PATH,
   type ResolvedModel,
   type PipelineConfig,
@@ -371,9 +372,11 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   }
 
   async function buildPipelineConfig(
-    overrides?: Partial<Pick<PipelineConfig, "externalContext" | "client" | "model">>,
+    overrides?: Partial<Pick<PipelineConfig, "externalContext" | "client" | "model">> & {
+      readonly currentConfig?: ProjectConfig;
+    },
   ): Promise<PipelineConfig> {
-    const currentConfig = await loadCurrentProjectConfig();
+    const currentConfig = overrides?.currentConfig ?? await loadCurrentProjectConfig();
     const logger = createLogger({ tag: "studio", sinks: [sseSink, consoleSink] });
     return {
       client: overrides?.client ?? createLLMClient(currentConfig.llm),
@@ -770,7 +773,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   app.post("/api/v1/services/:service/test", async (c) => {
     const service = c.req.param("service");
-    const { apiKey, baseUrl } = await c.req.json<{ apiKey: string; baseUrl?: string }>();
+    const { apiKey, baseUrl, apiFormat, stream } = await c.req.json<{
+      apiKey: string;
+      baseUrl?: string;
+      apiFormat?: "chat" | "responses";
+      stream?: boolean;
+    }>();
 
     if (!apiKey?.trim()) {
       return c.json({ ok: false, error: "API Key 不能为空" }, 400);
@@ -802,6 +810,35 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
       if (models.length === 0) {
         return c.json({ ok: false, error: "连接成功但未返回可用模型" }, 400);
+      }
+
+      const sampleModel = models[0]?.id;
+      if (sampleModel) {
+        const client = createLLMClient({
+          provider: service === "anthropic" ? "anthropic" : "openai",
+          service: isCustomServiceId(service) ? "custom" : service,
+          configSource: "studio",
+          baseUrl: resolvedBaseUrl,
+          apiKey: apiKey.trim(),
+          model: sampleModel,
+          temperature: 0.7,
+          maxTokens: 64,
+          thinkingBudget: 0,
+          apiFormat: apiFormat ?? "chat",
+          stream: stream ?? true,
+        } as ProjectConfig["llm"]);
+
+        try {
+          await chatCompletion(
+            client,
+            sampleModel,
+            [{ role: "user", content: "ping" }],
+            { maxTokens: 5 },
+          );
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          return c.json({ ok: false, error: `模型列表可读，但生成测试失败：${message}` }, 400);
+        }
       }
 
       return c.json({ ok: true, modelCount: models.length, models: models.slice(0, 50) });
@@ -1056,7 +1093,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
     try {
       // Load config + create LLM client (pipeline created after model resolution)
-      const config = await loadCurrentProjectConfig({ requireApiKey: true });
+      const config = await loadCurrentProjectConfig({ requireApiKey: false });
       const client = createLLMClient(config.llm);
 
       // Resolve or create BookSession for history
@@ -1178,6 +1215,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       const pipeline = new PipelineRunner(await buildPipelineConfig({
         client: pipelineClient,
         model: reqModel ?? config.llm.model,
+        currentConfig: config,
       }));
 
       // Run pi-agent session
@@ -1270,6 +1308,37 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           ...(collectedToolExecs.length > 0 ? { toolExecutions: collectedToolExecs } : {}),
           timestamp: Date.now() + 1,
         });
+      }
+      if (!result.responseText) {
+        try {
+          const probeClient = createLLMClient({
+            ...config.llm,
+            service: configuredEntry?.service ?? reqService ?? config.llm.service,
+            model: reqModel ?? config.llm.model,
+            apiKey: agentApiKey ?? config.llm.apiKey,
+            baseUrl: configuredEntry?.baseUrl ?? config.llm.baseUrl,
+            ...(configuredEntry?.apiFormat ? { apiFormat: configuredEntry.apiFormat } : {}),
+            ...(configuredEntry?.stream !== undefined ? { stream: configuredEntry.stream } : {}),
+          } as ProjectConfig["llm"]);
+          await chatCompletion(
+            probeClient,
+            reqModel ?? config.llm.model,
+            [{ role: "user", content: "ping" }],
+            { maxTokens: 5 },
+          );
+        } catch (probeError) {
+          const probeMessage = probeError instanceof Error ? probeError.message : String(probeError);
+          return c.json({
+            error: { code: "AGENT_EMPTY_RESPONSE", message: probeMessage },
+            response: probeMessage,
+          }, 502);
+        }
+
+        const emptyMessage = "模型未返回文本内容。请检查协议类型（chat/responses）、流式开关或上游服务兼容性。";
+        return c.json({
+          error: { code: "AGENT_EMPTY_RESPONSE", message: emptyMessage },
+          response: emptyMessage,
+        }, 502);
       }
       await persistBookSession(root, bookSession);
 

@@ -490,6 +490,9 @@ async function chatCompletionViaPiAi(
 
   if (!client.stream) {
     const response = await piCompleteSimple(piModel, context, streamOpts);
+    if (response.stopReason === "error" && response.errorMessage) {
+      throw new Error(response.errorMessage);
+    }
     const content = response.content
       .filter((block): block is { type: "text"; text: string } => block.type === "text")
       .map((block) => block.text)
@@ -583,6 +586,9 @@ async function chatWithToolsViaPiAi(
 
   if (!client.stream) {
     const response = await piComplete(piModel, context, streamOpts);
+    if (response.stopReason === "error" && response.errorMessage) {
+      throw new Error(response.errorMessage);
+    }
     const content = response.content
       .filter((block): block is { type: "text"; text: string } => block.type === "text")
       .map((block) => block.text)

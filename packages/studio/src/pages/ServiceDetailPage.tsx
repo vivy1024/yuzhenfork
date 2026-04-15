@@ -134,6 +134,8 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             apiKey: trimmedKey,
+            apiFormat,
+            stream,
             ...(isCustom ? { baseUrl: baseUrl.trim() } : {}),
           }),
         },
