@@ -150,10 +150,15 @@ export class ReviserAgent extends BaseAgent {
     const parsedRules = await readBookRules(bookDir);
     const bookRules = parsedRules?.rules ?? null;
 
-    // Fallback: use book_rules body when style_guide.md doesn't exist
+    // Fallback: use book_rules body when style_guide.md doesn't exist.
+    // Phase 5 hotfix 2: parsedRules.body is only populated for legacy
+    // book_rules.md sources — story_frame.md frontmatter yields an empty
+    // body, and an empty string is NOT a usable style guide. Treat
+    // missing/empty body as "no fallback available".
+    const legacyRulesBody = parsedRules?.body?.trim();
     const styleGuide = styleGuideRaw !== "(文件不存在)"
       ? styleGuideRaw
-      : (parsedRules?.body ?? "(无文风指南)");
+      : (legacyRulesBody || "(无文风指南)");
 
     const isEnglish = (bookLanguage ?? gp.language) === "en";
     const resolvedLanguage = isEnglish ? "en" : "zh";

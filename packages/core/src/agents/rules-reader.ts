@@ -93,19 +93,31 @@ export function getBuiltinGenresDir(): string {
  * still live in book_rules.md instead, so we fall back to that legacy path
  * when story_frame.md has no frontmatter (or no file at all).
  *
+ * Phase 5 hotfix 2: when the source is story_frame.md, the prose body
+ * underneath the frontmatter is NOT semantic "book rules" text — it is the
+ * 5-section outline essay. We therefore slice out ONLY the frontmatter block
+ * for parseBookRules, so ParsedBookRules.body ends up empty for new-layout
+ * books. Legacy book_rules.md still carries narrow narrative rules in its
+ * body, so we pass it through verbatim.
+ *
  * Returns null only if NEITHER source yields parseable rules.
  */
 export async function readBookRules(bookDir: string): Promise<ParsedBookRules | null> {
   const storyFrameRaw = await tryReadFile(join(bookDir, "story/outline/story_frame.md"));
-  if (storyFrameRaw && /^\s*---\s*\n/.test(storyFrameRaw)) {
-    const parsed = parseBookRules(storyFrameRaw);
-    // parseBookRules returns defaults when no YAML matches — only treat the
-    // story_frame hit as authoritative when the leading frontmatter exists.
-    if (parsed) return parsed;
+  if (storyFrameRaw) {
+    // Extract just the leading `---\n...\n---` block. Anything after it is
+    // outline prose and must NOT leak into ParsedBookRules.body.
+    const frontmatterMatch = storyFrameRaw.match(/^\s*(---\s*\n[\s\S]*?\n---\s*)(?:\n|$)/);
+    if (frontmatterMatch) {
+      // Pass only the frontmatter block (no trailing prose). parseBookRules
+      // will produce an empty body, which is exactly what we want.
+      return parseBookRules(frontmatterMatch[1]);
+    }
   }
 
   const legacyRaw = await tryReadFile(join(bookDir, "story/book_rules.md"));
   if (!legacyRaw) return null;
+  // Legacy file: body intentionally preserved (narrow narrative rules).
   return parseBookRules(legacyRaw);
 }
 
