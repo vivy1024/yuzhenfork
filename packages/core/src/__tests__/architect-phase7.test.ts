@@ -133,11 +133,15 @@ describe("ArchitectAgent — Phase 7 extended hook frontmatter", () => {
 
     const result = await agent.generateFoundation(baseBook());
 
-    // The rendered ledger drops half_life (architect-only input) but keeps
-    // depends_on / pays_off_in_arc / core_hook as visible columns.
-    expect(result.pendingHooks).toContain("| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 上游依赖 | 回收卷 | 核心 | 备注 |");
-    expect(result.pendingHooks).toContain("| H01 | 1 | 主线 | 未开启 | 0 | 终章揭晓 | 终局 | 无 | 第3卷终章前 | 是 | 父亲笔记本 |");
-    expect(result.pendingHooks).toContain("| H02 | 3 | 谜团 | 未开启 | 0 | 第2卷揭开 | 中程 | [H01] | 第2卷中段 | 否 | 码头名单碎片 |");
+    // Phase 7 hotfix 1: rendered ledger now includes a 12th column `半衰期`
+    // (half_life) so architect-supplied values persist through the projection
+    // roundtrip and are read by hook-stale-detection. Hooks without an explicit
+    // half_life render an empty cell (parser falls back to timing default).
+    expect(result.pendingHooks).toContain("| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 上游依赖 | 回收卷 | 核心 | 半衰期 | 备注 |");
+    expect(result.pendingHooks).toContain("| H01 | 1 | 主线 | 未开启 | 0 | 终章揭晓 | 终局 | 无 | 第3卷终章前 | 是 | 80 | 父亲笔记本 |");
+    expect(result.pendingHooks).toContain("| H02 | 3 | 谜团 | 未开启 | 0 | 第2卷揭开 | 中程 | [H01] | 第2卷中段 | 否 | 30 | 码头名单碎片 |");
+    // H03 omits half_life; cell renders empty.
+    expect(result.pendingHooks).toContain("| H03 | 7 | 小承诺 | 未开启 | 0 | 15章 | 近期 | 无 | 第1卷末 | 否 |  | 对妹妹的承诺 |");
   });
 
   it("pending_hooks.md on disk carries the Phase 7 columns", async () => {
@@ -175,6 +179,13 @@ describe("ArchitectAgent — Phase 7 extended hook frontmatter", () => {
     expect(h02.coreHook).toBe(false);
     expect(h02.dependsOn).toEqual(["H01"]);
     expect(h02.paysOffInArc).toBe("第2卷中段");
+
+    // Phase 7 hotfix 1: half_life survives the roundtrip.
+    expect(h01.halfLifeChapters).toBe(80);
+    expect(h02.halfLifeChapters).toBe(30);
+    // H03 omitted half_life — falls back to undefined, not a default.
+    const h03 = hooks.find((h) => h.hookId === "H03")!;
+    expect(h03.halfLifeChapters).toBeUndefined();
   });
 
   it("legacy 8-column pending_hooks tables still parse without new fields (backward compat)", () => {

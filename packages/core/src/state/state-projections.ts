@@ -18,18 +18,17 @@ export function renderHooksProjection(
   options?: { readonly currentChapter?: number },
 ): string {
   const title = language === "en" ? "# Pending Hooks" : "# 伏笔池";
-  // Phase 7: depends_on / pays_off_in_arc / core_hook are visible columns,
-  // so writer and reviewer both see the causal chain and planned payoff arc.
-  // stale / blocked diagnostic flags are appended to the status cell, so the
-  // table width stays fixed at 11 columns.
+  // Phase 7 + hotfix 1: depends_on / pays_off_in_arc / core_hook / half_life are visible columns,
+  // so writer and reviewer both see the causal chain, planned payoff arc, and stale threshold.
+  // stale / blocked diagnostic flags are appended to the status cell.
   const headers = language === "en"
     ? [
-      "| hook_id | start_chapter | type | status | last_advanced_chapter | expected_payoff | payoff_timing | depends_on | pays_off_in_arc | core_hook | notes |",
-      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| hook_id | start_chapter | type | status | last_advanced_chapter | expected_payoff | payoff_timing | depends_on | pays_off_in_arc | core_hook | half_life | notes |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     : [
-      "| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 上游依赖 | 回收卷 | 核心 | 备注 |",
-      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 上游依赖 | 回收卷 | 核心 | 半衰期 | 备注 |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ];
 
   const currentChapter = options?.currentChapter;
@@ -61,6 +60,7 @@ export function renderHooksProjection(
           renderDependsOnCell(hook.dependsOn ?? [], language),
           hook.paysOffInArc ?? "",
           renderCoreHookCell(hook.coreHook === true, language),
+          renderHalfLifeCell(hook.halfLifeChapters),
           hook.notes,
         ].map(escapeTableCell).join(" | ")
       } |`;
@@ -77,6 +77,11 @@ function renderDependsOnCell(ids: ReadonlyArray<string>, language: "zh" | "en"):
 function renderCoreHookCell(isCore: boolean, language: "zh" | "en"): string {
   if (language === "en") return isCore ? "true" : "false";
   return isCore ? "是" : "否";
+}
+
+function renderHalfLifeCell(value: number | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) return "";
+  return String(Math.trunc(value));
 }
 
 export function renderChapterSummariesProjection(
