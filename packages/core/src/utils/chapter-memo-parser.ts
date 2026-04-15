@@ -11,18 +11,52 @@ export class PlannerParseError extends Error {
 // Phase hotfix 4: each required section is a (zh, en) heading pair.
 // The English headings come from PLANNER_MEMO_SYSTEM_PROMPT_EN — we accept
 // EITHER language at parse time so the same parser works for both.
-const REQUIRED_SECTIONS: ReadonlyArray<{
+//
+// Phase hotfix 7: minContentChars enforces non-emptiness per section so
+// "all 7 headings + blank payload" no longer slips through. The "do not"
+// section uses a relaxed threshold because "无 / N/A / none." is legitimate
+// for chapters with no extra prohibitions.
+//
+// Threshold rationale:
+// - 20 chars: long enough to catch obvious empty sections (whitespace,
+//   "(略)", "TODO") but short enough to accept genuinely sparse memos for
+//   breath/transition chapters (Phase 6 sparse-memo principle).
+// - 1 char for "## 不要做" / "## Do not" because "无" / "N/A" / "none" /
+//   "—" are all legitimate for a chapter with no extra prohibitions; we
+//   only need to ensure the section is not whitespace-only.
+interface RequiredSection {
   readonly zh: string;
   readonly en: string;
-}> = [
-  { zh: "## 当前任务", en: "## Current task" },
-  { zh: "## 读者此刻在等什么", en: "## What the reader is waiting for right now" },
-  { zh: "## 该兑现的 / 暂不掀的", en: "## To pay off / to keep buried" },
-  { zh: "## 日常/过渡承担什么任务", en: "## What the slow / transitional beats carry" },
-  { zh: "## 关键抉择过三连问", en: "## Three-question check on the key choice" },
-  { zh: "## 章尾必须发生的改变", en: "## Required end-of-chapter change" },
-  { zh: "## 不要做", en: "## Do not" },
+  readonly minContentChars: number;
+}
+
+const REQUIRED_SECTIONS: ReadonlyArray<RequiredSection> = [
+  { zh: "## 当前任务", en: "## Current task", minContentChars: 20 },
+  { zh: "## 读者此刻在等什么", en: "## What the reader is waiting for right now", minContentChars: 20 },
+  { zh: "## 该兑现的 / 暂不掀的", en: "## To pay off / to keep buried", minContentChars: 20 },
+  { zh: "## 日常/过渡承担什么任务", en: "## What the slow / transitional beats carry", minContentChars: 20 },
+  { zh: "## 关键抉择过三连问", en: "## Three-question check on the key choice", minContentChars: 20 },
+  { zh: "## 章尾必须发生的改变", en: "## Required end-of-chapter change", minContentChars: 20 },
+  { zh: "## 不要做", en: "## Do not", minContentChars: 1 },
 ];
+
+/**
+ * Extract the content between `heading` and the next `## ...` heading (or
+ * end-of-body). Strips whitespace and returns "" if the section payload is
+ * absent. The heading itself is NOT included.
+ */
+function extractSectionContent(body: string, heading: string): string {
+  const startIndex = body.indexOf(heading);
+  if (startIndex < 0) return "";
+  const after = body.slice(startIndex + heading.length);
+  // Find the next H2 heading on its own line. The leading newline + ## guards
+  // against false matches inside the current section's prose.
+  const nextHeadingMatch = after.match(/\n##\s/);
+  const sectionRaw = nextHeadingMatch
+    ? after.slice(0, nextHeadingMatch.index)
+    : after;
+  return sectionRaw.replace(/\s+/g, " ").trim();
+}
 
 /**
  * Parse a planner memo produced by the LLM.
@@ -89,6 +123,23 @@ export function parseMemo(
     throw new PlannerParseError(
       `missing sections: ${missing.map((s) => s.zh).join(", ")}`,
     );
+  }
+
+  // Phase hotfix 7: each section's payload must be non-empty (≥ minContentChars).
+  // Headings present + blank payload was previously accepted, allowing useless
+  // "shell" memos to flow downstream. Threshold differs per section: most need
+  // 20 chars (one short sentence) while "## 不要做" / "## Do not" allows 5
+  // (e.g. "无", "N/A") since "no extra prohibitions" is a legitimate state.
+  const empty = REQUIRED_SECTIONS.filter((section) => {
+    const heading = body.includes(section.zh) ? section.zh : section.en;
+    const content = extractSectionContent(body, heading);
+    return content.length < section.minContentChars;
+  });
+  if (empty.length > 0) {
+    const detail = empty
+      .map((s) => `${s.zh} (need ≥ ${s.minContentChars} chars)`)
+      .join(", ");
+    throw new PlannerParseError(`empty sections: ${detail}`);
   }
 
   const threadRefs = Array.isArray(f.threadRefs)

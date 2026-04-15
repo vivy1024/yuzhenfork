@@ -10,18 +10,18 @@ import { PlannerParseError } from "../utils/chapter-memo-parser.js";
 
 const VALID_BODY = `
 ## 当前任务
-主角进入七号门查看被动过手脚的痕迹。
+主角进入七号门现场，比对锁芯刮痕与监控时间线，把"被动过手脚"从猜测钉成实证。
 
 ## 读者此刻在等什么
-1) 读者在等七号门是否有异常
-2) 本章完全兑现
+1) 读者在等七号门是否有异常实锤
+2) 本章完全兑现，钉成现场实证
 
 ## 该兑现的 / 暂不掀的
 - 该兑现：七号门异常 → 钉成现场实证
 - 暂不掀：幕后主使 → 压到第 20 章
 
 ## 日常/过渡承担什么任务
-不适用 - 本章无日常过渡
+不适用 - 本章为高压实证章，无日常过渡段。
 
 ## 关键抉择过三连问
 - 主角本章最关键的一次选择：
@@ -34,7 +34,7 @@ const VALID_BODY = `
   - 符合他的人设吗？符合
 
 ## 章尾必须发生的改变
-- 信息改变：主角掌握实证
+- 信息改变：主角掌握实证，可以面对幕后主使前先压住对手的退路
 
 ## 不要做
 - 不要让对手突然降智
@@ -168,6 +168,83 @@ describe("PlannerAgent.planChapter memo generation", () => {
     expect(userMsg?.content).toContain("上次输出的错误");
   });
 
+  // Phase hotfix 4: English books must receive English system + user prompts
+  // and English golden-opening guidance for chapters ≤ 3.
+  it("uses English prompts end-to-end when book.language is en", async () => {
+    const VALID_EN_BODY = `
+## Current task
+Pin the Door 7 tampering from suspicion to live evidence.
+
+## What the reader is waiting for right now
+1) Reader expects to learn whether Door 7 is really compromised.
+2) This chapter pays it off in full — live evidence on stage.
+
+## To pay off / to keep buried
+- Pay off: Door 7 anomaly → live evidence
+- Keep buried: the mastermind → push to chapter 20
+
+## What the slow / transitional beats carry
+n/a — pressure chapter, no transitional beats.
+
+## Three-question check on the key choice
+- Protagonist's most important choice this chapter:
+  - Why this choice? It is the only remaining lead.
+  - Does it match current interest? Yes.
+  - Does it match their persona? Yes.
+- Antagonist / supporting cast's most important choice this chapter:
+  - Why this choice? To cover their tracks.
+  - Does it match current interest? Yes.
+  - Does it match their persona? Yes.
+
+## Required end-of-chapter change
+- Information change: protagonist holds live evidence.
+
+## Do not
+- Do not let the antagonist suddenly turn dumb.
+- Do not directly name the mastermind.
+`.trim();
+
+    const validEnRaw = `---\nchapter: 1\ngoal: Pin Door 7 tampering as live evidence\nisGoldenOpening: false\nthreadRefs:\n  - H03\n---\n${VALID_EN_BODY}\n`;
+
+    const chatSpy = vi.spyOn(llmProvider, "chatCompletion").mockResolvedValue({
+      content: validEnRaw,
+      usage: ZERO_USAGE,
+    } as unknown as Awaited<ReturnType<typeof llmProvider.chatCompletion>>);
+
+    const enBook = { ...makeBook(), language: "en" as const };
+    const result = await makePlanner().planChapter({
+      book: enBook,
+      bookDir,
+      chapterNumber: 1,
+    });
+
+    expect(chatSpy).toHaveBeenCalledTimes(1);
+    expect(result.memo.chapter).toBe(1);
+    expect(result.memo.isGoldenOpening).toBe(true); // ch1 en → also golden (≤5)
+
+    // System prompt must be the English variant
+    const callArgs = chatSpy.mock.calls[0]!;
+    const messages = callArgs[2] as ReadonlyArray<{ role: string; content: string }>;
+    const systemMsg = messages.find((m) => m.role === "system");
+    const userMsg = messages.find((m) => m.role === "user");
+
+    // English system prompt markers
+    expect(systemMsg?.content).toContain("editor-in-chief");
+    expect(systemMsg?.content).toContain("Output format (strict)");
+    expect(systemMsg?.content).not.toContain("你是这本小说的创作总编");
+
+    // English user template markers
+    expect(userMsg?.content).toContain("# Chapter 1 memo request");
+    expect(userMsg?.content).toContain("Last screen of previous chapter");
+    expect(userMsg?.content).toContain("Golden opening chapter: yes");
+    expect(userMsg?.content).not.toContain("# 第 1 章 memo 请求");
+
+    // English golden-opening guidance appended for ch ≤ 3
+    expect(userMsg?.content).toContain("Golden Opening Guidance");
+    expect(userMsg?.content).toContain("Chapter 1");
+    expect(userMsg?.content).not.toContain("黄金三章规划指引");
+  });
+
   it("throws PlannerParseError when all 3 attempts fail", async () => {
     vi.spyOn(llmProvider, "chatCompletion").mockResolvedValue({
       content: "permanently broken",
@@ -181,5 +258,53 @@ describe("PlannerAgent.planChapter memo generation", () => {
         chapterNumber: 2,
       }),
     ).rejects.toBeInstanceOf(PlannerParseError);
+  });
+
+  // Phase hotfix 5: planner.intent.mustAvoid must come from the Phase 5
+  // authoritative loader (story_frame frontmatter), not from raw
+  // book_rules.md — for new-layout books the legacy file is just a shim.
+  it("derives intent.mustAvoid from outline/story_frame.md frontmatter (new layout)", async () => {
+    // Replace book_rules.md with a Phase 5 compat shim (no YAML, just pointer)
+    // and put the authoritative YAML on outline/story_frame.md.
+    const storyDir = join(bookDir, "story");
+    await mkdir(join(storyDir, "outline"), { recursive: true });
+    await writeFile(
+      join(storyDir, "outline/story_frame.md"),
+      [
+        "---",
+        "version: \"1.0\"",
+        "protagonist:",
+        "  name: 阿泽",
+        "  personalityLock: []",
+        "  behavioralConstraints: []",
+        "prohibitions:",
+        "  - 禁止主角降智",
+        "  - 禁止神化反派",
+        "---",
+        "",
+        "## 主题与基调",
+        "调查与压制。",
+      ].join("\n"),
+      "utf-8",
+    );
+    await writeFile(
+      join(storyDir, "book_rules.md"),
+      "# 本书规则（兼容指针——已废弃）\n\n> 本文件仅为外部读取保留。",
+      "utf-8",
+    );
+
+    vi.spyOn(llmProvider, "chatCompletion").mockResolvedValue({
+      content: validMemoRaw(2),
+      usage: ZERO_USAGE,
+    } as unknown as Awaited<ReturnType<typeof llmProvider.chatCompletion>>);
+
+    const result = await makePlanner().planChapter({
+      book: makeBook(),
+      bookDir,
+      chapterNumber: 2,
+    });
+
+    expect(result.intent.mustAvoid).toContain("禁止主角降智");
+    expect(result.intent.mustAvoid).toContain("禁止神化反派");
   });
 });
