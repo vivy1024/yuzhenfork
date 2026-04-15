@@ -11,6 +11,7 @@ const LLMServiceEntrySchema = z.object({
 export const LLMConfigSchema = z.object({
   provider: z.enum(["anthropic", "openai", "custom"]),
   service: z.string().default("custom"),
+  configSource: z.enum(["env", "studio"]).default("env"),
   baseUrl: z.string().url(),
   apiKey: z.string().default(""),
   model: z.string().min(1),

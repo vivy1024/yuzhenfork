@@ -16,6 +16,8 @@ interface ServiceConfigEntry {
   readonly maxTokens?: number;
 }
 
+type LLMConfigSource = "env" | "studio";
+
 export function isApiKeyOptionalForEndpoint(params: {
   readonly provider?: string | undefined;
   readonly baseUrl?: string | undefined;
@@ -77,9 +79,11 @@ export async function loadProjectConfig(
     throw new Error(`inkos.json in ${root} is not valid JSON. Check the file for syntax errors.`);
   }
 
-  // .env overrides inkos.json for LLM settings
+  // llm.configSource controls whether INKOS_LLM_* env vars override project config
   const env = process.env;
   const llm = (config.llm ?? {}) as Record<string, unknown>;
+  const configSource = resolveConfigSource(llm.configSource);
+  llm.configSource = configSource;
 
   const normalizedServices = normalizeServiceEntries(llm.services);
   if (normalizedServices.length > 0) {
@@ -111,7 +115,7 @@ export async function loadProjectConfig(
         llm.maxTokens = selectedEntry.maxTokens;
       }
 
-      if (selectedServiceId && !env.INKOS_LLM_API_KEY) {
+      if (selectedServiceId && (configSource !== "env" || !env.INKOS_LLM_API_KEY)) {
         const secretApiKey = await getServiceApiKey(root, selectedServiceId);
         if (secretApiKey) {
           llm.apiKey = secretApiKey;
@@ -120,38 +124,44 @@ export async function loadProjectConfig(
     }
   }
 
-  if (env.INKOS_LLM_PROVIDER) llm.provider = env.INKOS_LLM_PROVIDER;
-  if (env.INKOS_LLM_BASE_URL) llm.baseUrl = env.INKOS_LLM_BASE_URL;
-  if (env.INKOS_LLM_MODEL) llm.model = env.INKOS_LLM_MODEL;
-  if (env.INKOS_LLM_TEMPERATURE) llm.temperature = parseFloat(env.INKOS_LLM_TEMPERATURE);
-  if (env.INKOS_LLM_MAX_TOKENS) llm.maxTokens = parseInt(env.INKOS_LLM_MAX_TOKENS, 10);
-  if (env.INKOS_LLM_THINKING_BUDGET) llm.thinkingBudget = parseInt(env.INKOS_LLM_THINKING_BUDGET, 10);
+  if (configSource === "env") {
+    if (env.INKOS_LLM_PROVIDER) llm.provider = env.INKOS_LLM_PROVIDER;
+    if (env.INKOS_LLM_BASE_URL) llm.baseUrl = env.INKOS_LLM_BASE_URL;
+    if (env.INKOS_LLM_MODEL) llm.model = env.INKOS_LLM_MODEL;
+    if (env.INKOS_LLM_TEMPERATURE) llm.temperature = parseFloat(env.INKOS_LLM_TEMPERATURE);
+    if (env.INKOS_LLM_MAX_TOKENS) llm.maxTokens = parseInt(env.INKOS_LLM_MAX_TOKENS, 10);
+    if (env.INKOS_LLM_THINKING_BUDGET) llm.thinkingBudget = parseInt(env.INKOS_LLM_THINKING_BUDGET, 10);
+  }
   // Extra params from env: INKOS_LLM_EXTRA_<key>=<value>
   const extraFromEnv: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(env)) {
-    if (key.startsWith("INKOS_LLM_EXTRA_") && value) {
-      const paramName = key.slice("INKOS_LLM_EXTRA_".length);
-      // Auto-coerce: numbers, booleans, JSON objects
-      if (/^\d+(\.\d+)?$/.test(value)) extraFromEnv[paramName] = parseFloat(value);
-      else if (value === "true") extraFromEnv[paramName] = true;
-      else if (value === "false") extraFromEnv[paramName] = false;
-      else if (value.startsWith("{") || value.startsWith("[")) {
-        try { extraFromEnv[paramName] = JSON.parse(value); } catch { extraFromEnv[paramName] = value; }
+  if (configSource === "env") {
+    for (const [key, value] of Object.entries(env)) {
+      if (key.startsWith("INKOS_LLM_EXTRA_") && value) {
+        const paramName = key.slice("INKOS_LLM_EXTRA_".length);
+        // Auto-coerce: numbers, booleans, JSON objects
+        if (/^\d+(\.\d+)?$/.test(value)) extraFromEnv[paramName] = parseFloat(value);
+        else if (value === "true") extraFromEnv[paramName] = true;
+        else if (value === "false") extraFromEnv[paramName] = false;
+        else if (value.startsWith("{") || value.startsWith("[")) {
+          try { extraFromEnv[paramName] = JSON.parse(value); } catch { extraFromEnv[paramName] = value; }
+        }
+        else extraFromEnv[paramName] = value;
       }
-      else extraFromEnv[paramName] = value;
     }
   }
   if (Object.keys(extraFromEnv).length > 0) {
     llm.extra = { ...(llm.extra as Record<string, unknown> ?? {}), ...extraFromEnv };
   }
-  if (env.INKOS_LLM_API_FORMAT) llm.apiFormat = env.INKOS_LLM_API_FORMAT;
+  if (configSource === "env" && env.INKOS_LLM_API_FORMAT) llm.apiFormat = env.INKOS_LLM_API_FORMAT;
   config.llm = llm;
 
   // Global language override
   if (env.INKOS_DEFAULT_LANGUAGE) config.language = env.INKOS_DEFAULT_LANGUAGE;
 
   // API key ONLY from env — never stored in inkos.json
-  const apiKey = env.INKOS_LLM_API_KEY || (typeof llm.apiKey === "string" ? llm.apiKey : "");
+  const apiKey = configSource === "env"
+    ? env.INKOS_LLM_API_KEY || (typeof llm.apiKey === "string" ? llm.apiKey : "")
+    : (typeof llm.apiKey === "string" ? llm.apiKey : "");
   const provider = typeof llm.provider === "string" ? llm.provider : undefined;
   const baseUrl = typeof llm.baseUrl === "string" ? llm.baseUrl : undefined;
   const apiKeyOptional = isApiKeyOptionalForEndpoint({ provider, baseUrl });
@@ -175,6 +185,10 @@ export async function loadProjectConfig(
   llm.apiKey = apiKey ?? "";
 
   return ProjectConfigSchema.parse(config);
+}
+
+function resolveConfigSource(value: unknown): LLMConfigSource {
+  return value === "studio" ? "studio" : "env";
 }
 
 function normalizeServiceEntries(raw: unknown): ServiceConfigEntry[] {

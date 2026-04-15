@@ -394,6 +394,7 @@ export class PipelineRunner {
       client = createLLMClient({
         provider,
         service: base?.service ?? "custom",
+        configSource: base?.configSource ?? "env",
         baseUrl: override.baseUrl,
         apiKey,
         model: override.model,

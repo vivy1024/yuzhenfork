@@ -150,4 +150,46 @@ describe("loadProjectConfig local provider auth", () => {
     expect(config.llm.apiKey).toBe("sk-corp");
     expect(config.llm.temperature).toBe(0.9);
   });
+
+  it("keeps Studio config active when llm.configSource is studio", async () => {
+    root = await mkdtemp(join(tmpdir(), "inkos-config-loader-studio-source-"));
+    for (const key of ENV_KEYS) {
+      previousEnv.set(key, process.env[key]);
+      process.env[key] = "";
+    }
+
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      name: "studio-source-project",
+      version: "0.1.0",
+      language: "zh",
+      llm: {
+        configSource: "studio",
+        services: [
+          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9 },
+        ],
+        defaultModel: "corp-chat",
+      },
+      notify: [],
+    }, null, 2), "utf-8");
+    await writeFile(join(root, ".env"), [
+      "INKOS_LLM_PROVIDER=openai",
+      "INKOS_LLM_BASE_URL=https://api-vip.codex-for.me/v1",
+      "INKOS_LLM_MODEL=gpt-5.4",
+      "INKOS_LLM_API_KEY=sk-env",
+    ].join("\n"), "utf-8");
+    await mkdir(join(root, ".inkos"), { recursive: true });
+    await writeFile(
+      join(root, ".inkos", "secrets.json"),
+      JSON.stringify({ services: { "custom:内网GPT": { apiKey: "sk-corp" } } }, null, 2),
+      "utf-8",
+    );
+
+    const config = await loadProjectConfig(root);
+
+    expect(config.llm.configSource).toBe("studio");
+    expect(config.llm.provider).toBe("custom");
+    expect(config.llm.baseUrl).toBe("https://llm.internal.corp/v1");
+    expect(config.llm.model).toBe("corp-chat");
+    expect(config.llm.apiKey).toBe("sk-corp");
+  });
 });

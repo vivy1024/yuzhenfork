@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useServiceStore } from "../store/service";
 import type { ServiceInfo } from "../store/service";
+import { ServiceConfigSourceCard } from "../components/ServiceConfigSourceCard";
 
 interface Nav {
   toDashboard: () => void;
@@ -23,6 +24,7 @@ export function ServiceListPage({ nav }: { nav: Nav }) {
   const services = useServiceStore((s) => s.services);
   const loading = useServiceStore((s) => s.servicesLoading);
   const fetchServices = useServiceStore((s) => s.fetchServices);
+  const refreshServices = useServiceStore((s) => s.refreshServices);
 
   useEffect(() => { void fetchServices(); }, [fetchServices]);
 
@@ -37,6 +39,8 @@ export function ServiceListPage({ nav }: { nav: Nav }) {
       </div>
 
       <h1 className="font-serif text-2xl">服务商管理</h1>
+
+      <ServiceConfigSourceCard onChange={() => { void refreshServices(); }} />
 
       <div className="grid grid-cols-2 gap-3">
         {loading

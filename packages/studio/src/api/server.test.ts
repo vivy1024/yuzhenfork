@@ -314,6 +314,7 @@ describe("createStudioServer daemon lifecycle", () => {
 
   afterEach(async () => {
     await rm(root, { recursive: true, force: true });
+    await rm(join(tmpdir(), "inkos-global.env"), { force: true });
   });
 
   it("returns from /api/daemon/start before the first write cycle finishes", async () => {
@@ -549,6 +550,83 @@ describe("createStudioServer daemon lifecycle", () => {
       { service: "moonshot", temperature: 0.5, maxTokens: 2048 },
       { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9 },
     ]);
+  });
+
+  it("reports config source and detected env overrides for Studio switching", async () => {
+    await writeFile(join(root, ".env"), [
+      "INKOS_LLM_PROVIDER=openai",
+      "INKOS_LLM_BASE_URL=https://project.example.com/v1",
+      "INKOS_LLM_MODEL=gpt-5.4",
+      "INKOS_LLM_API_KEY=sk-project",
+    ].join("\n"), "utf-8");
+    await writeFile(join(tmpdir(), "inkos-global.env"), [
+      "INKOS_LLM_PROVIDER=openai",
+      "INKOS_LLM_BASE_URL=https://global.example.com/v1",
+      "INKOS_LLM_MODEL=gpt-4o",
+      "INKOS_LLM_API_KEY=sk-global",
+    ].join("\n"), "utf-8");
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        ...projectConfig.llm,
+        configSource: "env",
+      },
+    }, null, 2), "utf-8");
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/config");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      configSource: "env",
+      envConfig: {
+        effectiveSource: "project",
+        project: {
+          detected: true,
+          baseUrl: "https://project.example.com/v1",
+          model: "gpt-5.4",
+          hasApiKey: true,
+        },
+        global: {
+          detected: true,
+          baseUrl: "https://global.example.com/v1",
+          model: "gpt-4o",
+          hasApiKey: true,
+        },
+      },
+    });
+  });
+
+  it("allows switching config source without overwriting services", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "moonshot", temperature: 1, maxTokens: 4096 },
+        ],
+        defaultModel: "kimi-k2.5",
+        configSource: "env",
+      },
+    }, null, 2), "utf-8");
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const save = await app.request("http://localhost/api/v1/services/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ configSource: "studio" }),
+    });
+
+    expect(save.status).toBe(200);
+
+    const raw = JSON.parse(await readFile(join(root, "inkos.json"), "utf-8"));
+    expect(raw.llm.configSource).toBe("studio");
+    expect(raw.llm.services).toEqual([
+      { service: "moonshot", temperature: 1, maxTokens: 4096 },
+    ]);
+    expect(raw.llm.defaultModel).toBe("kimi-k2.5");
   });
 
   it("tests and lists models for custom services using baseUrl and stored config", async () => {

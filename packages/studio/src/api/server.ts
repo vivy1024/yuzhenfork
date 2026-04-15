@@ -25,6 +25,7 @@ import {
   saveSecrets,
   getServiceApiKey,
   listModelsForService,
+  GLOBAL_ENV_PATH,
   type ResolvedModel,
   type PipelineConfig,
   type ProjectConfig,
@@ -121,6 +122,22 @@ interface ServiceConfigEntry {
   maxTokens?: number;
 }
 
+type LLMConfigSource = "env" | "studio";
+
+interface EnvConfigSummary {
+  detected: boolean;
+  provider: string | null;
+  baseUrl: string | null;
+  model: string | null;
+  hasApiKey: boolean;
+}
+
+interface EnvConfigStatus {
+  project: EnvConfigSummary;
+  global: EnvConfigSummary;
+  effectiveSource: "project" | "global" | null;
+}
+
 function broadcast(event: string, data: unknown): void {
   for (const handler of subscribers) {
     handler(event, data);
@@ -163,6 +180,10 @@ function normalizeServiceEntry(serviceId: string, value: Record<string, unknown>
   };
 }
 
+function normalizeConfigSource(value: unknown): LLMConfigSource {
+  return value === "studio" ? "studio" : "env";
+}
+
 function normalizeServiceConfig(raw: unknown): ServiceConfigEntry[] {
   if (Array.isArray(raw)) {
     return raw
@@ -201,6 +222,54 @@ async function loadRawConfig(root: string): Promise<Record<string, unknown>> {
 
 async function saveRawConfig(root: string, config: Record<string, unknown>): Promise<void> {
   await writeFile(join(root, "inkos.json"), JSON.stringify(config, null, 2), "utf-8");
+}
+
+async function readEnvConfigSummary(path: string): Promise<EnvConfigSummary> {
+  try {
+    const raw = await readFile(path, "utf-8");
+    const values = new Map<string, string>();
+
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith("#")) continue;
+      const match = trimmed.match(/^([A-Za-z_][A-Za-z0-9_]*)=(.*)$/);
+      if (!match) continue;
+      const [, key, value] = match;
+      values.set(key, value.trim());
+    }
+
+    const provider = values.get("INKOS_LLM_PROVIDER") ?? null;
+    const baseUrl = values.get("INKOS_LLM_BASE_URL") ?? null;
+    const model = values.get("INKOS_LLM_MODEL") ?? null;
+    const apiKey = values.get("INKOS_LLM_API_KEY") ?? "";
+    const detected = Boolean(provider || baseUrl || model || apiKey);
+
+    return {
+      detected,
+      provider,
+      baseUrl,
+      model,
+      hasApiKey: apiKey.length > 0,
+    };
+  } catch {
+    return {
+      detected: false,
+      provider: null,
+      baseUrl: null,
+      model: null,
+      hasApiKey: false,
+    };
+  }
+}
+
+async function readEnvConfigStatus(root: string): Promise<EnvConfigStatus> {
+  const project = await readEnvConfigSummary(join(root, ".env"));
+  const global = await readEnvConfigSummary(GLOBAL_ENV_PATH);
+  return {
+    project,
+    global,
+    effectiveSource: project.detected ? "project" : global.detected ? "global" : null,
+  };
 }
 
 async function resolveConfiguredServiceBaseUrl(root: string, serviceId: string, inlineBaseUrl?: string): Promise<string | undefined> {
@@ -650,19 +719,30 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const config = await loadRawConfig(root);
     const llm = (config.llm as Record<string, unknown> | undefined) ?? {};
     const services = normalizeServiceConfig(llm.services);
-    return c.json({ services, defaultModel: llm.defaultModel ?? null });
+    const envConfig = await readEnvConfigStatus(root);
+    return c.json({
+      services,
+      defaultModel: llm.defaultModel ?? null,
+      configSource: normalizeConfigSource(llm.configSource),
+      envConfig,
+    });
   });
 
   app.put("/api/v1/services/config", async (c) => {
-    const body = await c.req.json<{ services: unknown; defaultModel?: string }>();
+    const body = await c.req.json<{ services?: unknown; defaultModel?: string; configSource?: LLMConfigSource }>();
     const config = await loadRawConfig(root);
     config.llm = config.llm ?? {};
     const llm = config.llm as Record<string, unknown>;
-    const existingServices = normalizeServiceConfig(llm.services);
-    const incomingServices = normalizeServiceConfig(body.services);
-    llm.services = mergeServiceConfig(existingServices, incomingServices);
+    if (body.services !== undefined) {
+      const existingServices = normalizeServiceConfig(llm.services);
+      const incomingServices = normalizeServiceConfig(body.services);
+      llm.services = mergeServiceConfig(existingServices, incomingServices);
+    }
     if (body.defaultModel !== undefined) {
       llm.defaultModel = body.defaultModel;
+    }
+    if (body.configSource !== undefined) {
+      llm.configSource = normalizeConfigSource(body.configSource);
     }
     await saveRawConfig(root, config);
     return c.json({ ok: true });

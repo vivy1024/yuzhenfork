@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { fetchJson } from "../hooks/use-api";
 import { useServiceStore } from "../store/service";
 import { Eye, EyeOff, Loader2, ArrowLeft } from "lucide-react";
+import { ServiceConfigSourceCard } from "../components/ServiceConfigSourceCard";
 
 interface Nav {
   toServices: () => void;
@@ -219,6 +220,8 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
           </span>
         )}
       </div>
+
+      <ServiceConfigSourceCard onChange={() => { void refreshServices(); }} />
 
       <div className="space-y-5">
         {/* Custom fields */}
