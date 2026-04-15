@@ -673,10 +673,10 @@ Rules:
       "utf-8",
     ));
 
-    // Legacy volume_outline.md retained as a compat mirror of volume_map (so
-    // older reader paths still land on real content). Runtime settlement
-    // continues to ignore this file.
-    writes.push(writeFile(join(storyDir, "volume_outline.md"), volumeMap, "utf-8"));
+    // Cleanup #1: volume_outline.md mirror removed. All readers now resolve
+    // through readVolumeMap() in utils/outline-paths.ts, which prefers
+    // outline/volume_map.md and falls back to legacy volume_outline.md for
+    // books initialized before Phase 5.
 
     // book_rules.md is still produced — readBookRules() depends on YAML.
     writes.push(writeFile(join(storyDir, "book_rules.md"), output.bookRules, "utf-8"));

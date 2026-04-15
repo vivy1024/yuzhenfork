@@ -1,6 +1,7 @@
 import { BaseAgent } from "./base.js";
 import { readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { readVolumeMap } from "../utils/outline-paths.js";
 
 export interface ConsolidationResult {
   readonly volumeSummaries: string;
@@ -19,19 +20,19 @@ export class ConsolidatorAgent extends BaseAgent {
 
   /**
    * Consolidate chapter summaries by volume.
-   * - Reads volume_outline to determine volume boundaries
+   * - Reads outline/volume_map.md (fallback: legacy volume_outline.md) to
+   *   determine volume boundaries
    * - For each completed volume, LLM compresses chapter summaries into a narrative paragraph
    * - Archives detailed summaries, keeps only recent volume's per-chapter rows
    */
   async consolidate(bookDir: string): Promise<ConsolidationResult> {
     const storyDir = join(bookDir, "story");
     const summariesPath = join(storyDir, "chapter_summaries.md");
-    const outlinePath = join(storyDir, "volume_outline.md");
     const volumeSummariesPath = join(storyDir, "volume_summaries.md");
 
     const [summariesRaw, outlineRaw] = await Promise.all([
       readFile(summariesPath, "utf-8").catch(() => ""),
-      readFile(outlinePath, "utf-8").catch(() => ""),
+      readVolumeMap(bookDir, ""),
     ]);
 
     if (!summariesRaw || !outlineRaw) {

@@ -1880,7 +1880,7 @@ ${matrix}`,
    * Import existing chapters into a book. Reverse-engineers all truth files
    * via sequential replay so the Writer and Auditor can continue naturally.
    *
-   * Step 1: Generate foundation (story_bible, volume_outline, book_rules) from all chapters.
+   * Step 1: Generate foundation (story_frame, volume_map, book_rules) from all chapters.
    * Step 2: Sequentially replay each chapter through ChapterAnalyzer to build truth files.
    */
   async importChapters(input: ImportChaptersInput): Promise<ImportChaptersResult> {

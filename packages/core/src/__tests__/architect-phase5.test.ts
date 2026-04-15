@@ -249,9 +249,10 @@ describe("ArchitectAgent — Phase 5 prose output", () => {
     const pendingHooks = await readFile(join(storyDir, "pending_hooks.md"), "utf-8");
     expect(pendingHooks).toContain("H01");
 
-    // Legacy volume_outline.md kept as a mirror of volume_map for back-compat
-    const legacyVolume = await readFile(join(storyDir, "volume_outline.md"), "utf-8");
-    expect(legacyVolume).toBe(volumeMap);
+    // Cleanup #1: volume_outline.md mirror is NOT written anymore. All
+    // readers flow through readVolumeMap() which falls back to the legacy
+    // path only for pre-Phase-5 books that still have the file on disk.
+    await expect(readFile(join(storyDir, "volume_outline.md"), "utf-8")).rejects.toThrow();
   });
 
   it("still requires book_rules / current_state / pending_hooks to be present", async () => {

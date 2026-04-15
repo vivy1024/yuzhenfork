@@ -249,7 +249,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   // --- Truth files ---
 
   const TRUTH_FILES = [
-    "story_bible.md", "volume_outline.md", "current_state.md",
+    "story_bible.md", "current_state.md",
     "particle_ledger.md", "pending_hooks.md", "chapter_summaries.md",
     "subplot_board.md", "emotional_arcs.md", "character_matrix.md",
     "style_guide.md", "parent_canon.md", "fanfic_canon.md", "book_rules.md",
