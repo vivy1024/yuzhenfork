@@ -140,8 +140,10 @@ describe("ArchitectAgent", () => {
     );
 
     const messages = chat.mock.calls[0]?.[0] as Array<{ role: string; content: string }>;
-    expect(messages[0]?.content).toContain("## 01_Worldview");
-    expect(messages[0]?.content).toContain("## Narrative Perspective");
+    // Phase 5: architect prompts describe the new prose sections. The English
+    // import prompt must not slip Chinese section headers into the system text.
+    expect(messages[0]?.content).toContain("story_frame");
+    expect(messages[0]?.content).toContain("volume_map");
     expect(messages[0]?.content).not.toContain("## 01_世界观");
     expect(messages[0]?.content).not.toContain("## 叙事视角");
   });
