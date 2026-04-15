@@ -223,16 +223,35 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
       });
       if (trimmedKey) {
         try {
-          const data = await fetchJson<{ models: ModelInfo[] }>(`/services/${encodeURIComponent(effectiveServiceId)}/models`);
-          const m = data.models ?? [];
-          if (m.length > 0) {
-            setStoreModels(effectiveServiceId, m);
-            setStatus({ state: "connected", models: m });
+          const result = await fetchJson<{
+            ok: boolean;
+            models?: ModelInfo[];
+            selectedModel?: string;
+            detected?: DetectedConfig;
+            error?: string;
+          }>(`/services/${encodeURIComponent(effectiveServiceId)}/test`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              apiKey: trimmedKey,
+              apiFormat,
+              stream,
+              ...(isCustom ? { baseUrl: baseUrl.trim() } : {}),
+            }),
+          });
+          if (result.ok && result.models) {
+            if (result.detected?.apiFormat) setApiFormat(result.detected.apiFormat);
+            if (typeof result.detected?.stream === "boolean") setStream(result.detected.stream);
+            if (isCustom && result.detected?.baseUrl) setBaseUrl(result.detected.baseUrl);
+            setDetectedModel(result.selectedModel ?? detectedModel);
+            setDetectedConfig(result.detected ?? detectedConfig);
+            setStoreModels(effectiveServiceId, result.models);
+            setStatus({ state: "connected", models: result.models });
           } else {
-            setStatus({ state: "saved" });
+            setStatus({ state: "error", message: result.error ?? "连接失败" });
           }
-        } catch {
-          setStatus({ state: "saved" });
+        } catch (e) {
+          setStatus({ state: "error", message: e instanceof Error ? e.message : "连接失败" });
         }
       } else {
         clearStoreModels(effectiveServiceId);
