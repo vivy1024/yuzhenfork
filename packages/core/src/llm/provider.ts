@@ -85,6 +85,7 @@ export interface LLMMessage {
 
 export interface LLMClient {
   readonly provider: "openai" | "anthropic";
+  readonly service?: string;
   readonly apiFormat: "chat" | "responses";
   readonly stream: boolean;
   readonly _piModel?: PiModel<PiApi>;
@@ -162,6 +163,7 @@ export function createLLMClient(config: LLMConfig): LLMClient {
 
   return {
     provider,
+    service: serviceName,
     apiFormat,
     stream,
     _piModel: piModel,
@@ -305,6 +307,294 @@ function wrapLLMError(error: unknown, context?: { readonly baseUrl?: string; rea
   return error instanceof Error ? error : new Error(msg);
 }
 
+function shouldUseNativeCustomTransport(client: LLMClient): boolean {
+  return client.provider === "openai" && client.service === "custom";
+}
+
+function buildCustomHeaders(client: LLMClient): Record<string, string> {
+  return {
+    Authorization: `Bearer ${client._apiKey ?? ""}`,
+    "Content-Type": "application/json",
+    ...(client._piModel?.headers ?? {}),
+  };
+}
+
+function joinSystemPrompt(messages: ReadonlyArray<LLMMessage>): string | undefined {
+  const systemParts = messages
+    .filter((message) => message.role === "system" && message.content.trim().length > 0)
+    .map((message) => message.content.trim());
+  return systemParts.length > 0 ? systemParts.join("\n\n") : undefined;
+}
+
+function buildChatMessages(messages: ReadonlyArray<LLMMessage>): Array<{ role: string; content: string }> {
+  return messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+}
+
+function buildResponsesInput(messages: ReadonlyArray<LLMMessage>): Array<{ role: string; content: Array<{ type: "input_text"; text: string }> }> {
+  return messages
+    .filter((message) => message.role !== "system")
+    .map((message) => ({
+      role: message.role,
+      content: [{ type: "input_text", text: message.content }],
+    }));
+}
+
+async function readErrorResponse(res: Response): Promise<string> {
+  const text = await res.text().catch(() => "");
+  try {
+    const json = JSON.parse(text) as { error?: { message?: string } | string; detail?: string };
+    if (typeof json.error === "string" && json.error) return `${res.status} ${json.error}`;
+    if (json.error && typeof json.error === "object" && typeof json.error.message === "string") {
+      return `${res.status} ${json.error.message}`;
+    }
+    if (typeof json.detail === "string" && json.detail) return `${res.status} ${json.detail}`;
+  } catch {
+    // fall through
+  }
+  return `${res.status} ${text || res.statusText}`.trim();
+}
+
+type ParsedSseEvent = {
+  readonly event?: string;
+  readonly data?: string;
+};
+
+function parseSseEvents(buffer: string): { readonly events: ParsedSseEvent[]; readonly rest: string } {
+  const chunks = buffer.split(/\n\n/);
+  const rest = chunks.pop() ?? "";
+  const events: ParsedSseEvent[] = [];
+
+  for (const chunk of chunks) {
+    const lines = chunk.split(/\r?\n/);
+    let eventName: string | undefined;
+    const dataLines: string[] = [];
+    for (const line of lines) {
+      if (line.startsWith("event:")) {
+        eventName = line.slice("event:".length).trim();
+      } else if (line.startsWith("data:")) {
+        dataLines.push(line.slice("data:".length).trimStart());
+      }
+    }
+    if (eventName || dataLines.length > 0) {
+      events.push({
+        ...(eventName ? { event: eventName } : {}),
+        ...(dataLines.length > 0 ? { data: dataLines.join("\n") } : {}),
+      });
+    }
+  }
+
+  return { events, rest };
+}
+
+function extractChatContent(json: any): string {
+  const content = json?.choices?.[0]?.message?.content;
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((item) => typeof item?.text === "string" ? item.text : typeof item?.content === "string" ? item.content : "")
+      .join("");
+  }
+  return "";
+}
+
+function extractResponsesContent(json: any): string {
+  const output = Array.isArray(json?.output) ? json.output : [];
+  return output
+    .flatMap((item: any) => Array.isArray(item?.content) ? item.content : [])
+    .map((part: any) => {
+      if (typeof part?.text === "string") return part.text;
+      if (typeof part?.content === "string") return part.content;
+      if (typeof part?.output_text === "string") return part.output_text;
+      return "";
+    })
+    .join("");
+}
+
+async function chatCompletionViaCustomOpenAICompatible(
+  client: LLMClient,
+  model: string,
+  messages: ReadonlyArray<LLMMessage>,
+  resolved: { readonly temperature: number; readonly maxTokens: number; readonly extra: Record<string, unknown> },
+  onStreamProgress?: OnStreamProgress,
+  onTextDelta?: (text: string) => void,
+): Promise<LLMResponse> {
+  const baseUrl = client._piModel?.baseUrl ?? "";
+  const headers = buildCustomHeaders(client);
+  const errorCtx = { baseUrl, model };
+  const monitor = createStreamMonitor(onStreamProgress);
+  const extra = stripReservedKeys(resolved.extra);
+
+  if (client.apiFormat === "responses") {
+    const payload: Record<string, unknown> = {
+      model,
+      input: buildResponsesInput(messages),
+      stream: client.stream,
+      store: false,
+      max_output_tokens: resolved.maxTokens,
+      temperature: resolved.temperature,
+      ...extra,
+    };
+    const instructions = joinSystemPrompt(messages);
+    if (instructions) payload.instructions = instructions;
+
+    const response = await fetch(`${baseUrl.replace(/\/$/, "")}/responses`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      throw wrapLLMError(new Error(await readErrorResponse(response)), errorCtx);
+    }
+
+    if (!client.stream) {
+      const json = await response.json() as any;
+      const content = extractResponsesContent(json);
+      if (!content) {
+        throw wrapLLMError(new Error("LLM returned empty response"), errorCtx);
+      }
+      return {
+        content,
+        usage: {
+          promptTokens: json?.usage?.input_tokens ?? 0,
+          completionTokens: json?.usage?.output_tokens ?? 0,
+          totalTokens: json?.usage?.total_tokens ?? 0,
+        },
+      };
+    }
+
+    const reader = response.body?.getReader();
+    if (!reader) throw wrapLLMError(new Error("Streaming body unavailable"), errorCtx);
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let content = "";
+    let usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
+    try {
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const parsed = parseSseEvents(buffer);
+        buffer = parsed.rest;
+        for (const event of parsed.events) {
+          if (!event.data) continue;
+          const json = JSON.parse(event.data);
+          if (json.type === "response.output_text.delta" && typeof json.delta === "string") {
+            content += json.delta;
+            monitor.onChunk(json.delta);
+            onTextDelta?.(json.delta);
+          }
+          if (json.type === "response.completed") {
+            usage = {
+              promptTokens: json.response?.usage?.input_tokens ?? 0,
+              completionTokens: json.response?.usage?.output_tokens ?? 0,
+              totalTokens: json.response?.usage?.total_tokens ?? 0,
+            };
+            if (!content) {
+              content = extractResponsesContent(json.response);
+            }
+          }
+        }
+      }
+    } finally {
+      monitor.stop();
+    }
+
+    if (!content) {
+      throw wrapLLMError(new Error("LLM returned empty response from stream"), errorCtx);
+    }
+    return { content, usage };
+  }
+
+  const payload: Record<string, unknown> = {
+    model,
+    messages: [
+      ...messages
+        .filter((message) => message.role === "system")
+        .map((message) => ({ role: "system", content: message.content })),
+      ...buildChatMessages(messages),
+    ],
+    stream: client.stream,
+    temperature: resolved.temperature,
+    max_tokens: resolved.maxTokens,
+    ...extra,
+  };
+  if (client.stream) {
+    payload.stream_options = { include_usage: true };
+  }
+
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/chat/completions`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    throw wrapLLMError(new Error(await readErrorResponse(response)), errorCtx);
+  }
+
+  if (!client.stream) {
+    const json = await response.json() as any;
+    const content = extractChatContent(json);
+    if (!content) {
+      throw wrapLLMError(new Error("LLM returned empty response"), errorCtx);
+    }
+    return {
+      content,
+      usage: {
+        promptTokens: json?.usage?.prompt_tokens ?? 0,
+        completionTokens: json?.usage?.completion_tokens ?? 0,
+        totalTokens: json?.usage?.total_tokens ?? 0,
+      },
+    };
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw wrapLLMError(new Error("Streaming body unavailable"), errorCtx);
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = parseSseEvents(buffer);
+      buffer = parsed.rest;
+      for (const event of parsed.events) {
+        if (!event.data || event.data === "[DONE]") continue;
+        const json = JSON.parse(event.data);
+        const delta = json?.choices?.[0]?.delta?.content;
+        if (typeof delta === "string") {
+          content += delta;
+          monitor.onChunk(delta);
+          onTextDelta?.(delta);
+        }
+        if (json?.usage) {
+          usage = {
+            promptTokens: json.usage.prompt_tokens ?? usage.promptTokens,
+            completionTokens: json.usage.completion_tokens ?? usage.completionTokens,
+            totalTokens: json.usage.total_tokens ?? usage.totalTokens,
+          };
+        }
+      }
+    }
+  } finally {
+    monitor.stop();
+  }
+
+  if (!content) {
+    throw wrapLLMError(new Error("LLM returned empty response from stream"), errorCtx);
+  }
+  return { content, usage };
+}
+
 // === Simple Chat (used by all agents via BaseAgent.chat()) ===
 
 export async function chatCompletion(
@@ -334,6 +624,9 @@ export async function chatCompletion(
   const errorCtx = { baseUrl: client._piModel?.baseUrl ?? "(unknown)", model };
 
   try {
+    if (shouldUseNativeCustomTransport(client)) {
+      return await chatCompletionViaCustomOpenAICompatible(client, model, messages, resolved, onStreamProgress, onTextDelta);
+    }
     return await chatCompletionViaPiAi(client, model, messages, resolved, onStreamProgress, onTextDelta);
   } catch (error) {
     // Stream interrupted but partial content is usable — return truncated response

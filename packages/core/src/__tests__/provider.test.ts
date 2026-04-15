@@ -110,6 +110,7 @@ const MOCK_PI_MODEL: Model<Api> = {
 function makeClient(temperature = 0.7, extra: Partial<LLMClient> = {}): LLMClient {
   return {
     provider: "openai",
+    service: "openai",
     apiFormat: "chat",
     stream: true,
     _piModel: MOCK_PI_MODEL,
@@ -255,6 +256,35 @@ describe("chatCompletion via pi-ai", () => {
     expect(result.content).toBe("offline hello");
     expect(mockCompleteSimple).toHaveBeenCalledOnce();
     expect(mockStreamSimple).not.toHaveBeenCalled();
+  });
+
+  it("uses native fetch transport for custom openai-compatible chat", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "你好！" } }],
+        usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeClient(0.7, {
+      service: "custom",
+      stream: false,
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        provider: "openai",
+        baseUrl: "https://gateway.example/v1",
+      },
+    });
+    const result = await chatCompletion(client, "gpt-5.4", [{ role: "user", content: "nihao" }]);
+
+    expect(result.content).toBe("你好！");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(mockCompleteSimple).not.toHaveBeenCalled();
+    expect(mockStreamSimple).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
   });
 });
 
