@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildDoctorModelCandidates } from "../commands/doctor.js";
+import { buildDoctorModelCandidates, resolveDoctorModelsBaseUrl } from "../commands/doctor.js";
 
 describe("doctor model candidate probing", () => {
   it("keeps the configured model first, then tries discovered models without duplicates", () => {
@@ -21,5 +21,15 @@ describe("doctor model candidate probing", () => {
     expect(candidates).toContain("gpt-5.4");
     expect(candidates).toContain("MiniMax-M2.7");
     expect(candidates).toContain("gemini-2.5-flash");
+  });
+
+  it("uses the service-specific models endpoint when the preset defines one", () => {
+    const modelsBaseUrl = resolveDoctorModelsBaseUrl(
+      "bailian",
+      "https://dashscope.aliyuncs.com/apps/anthropic",
+      (service) => service === "bailian" ? "https://dashscope.aliyuncs.com/compatible-mode/v1" : undefined,
+    );
+
+    expect(modelsBaseUrl).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1");
   });
 });

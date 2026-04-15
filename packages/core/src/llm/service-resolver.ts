@@ -1,6 +1,6 @@
 import { getModel } from "@mariozechner/pi-ai";
 import type { Model, Api } from "@mariozechner/pi-ai";
-import { resolveServicePreset, SERVICE_TO_PI_PROVIDER } from "./service-presets.js";
+import { resolveServicePiProvider, resolveServicePreset } from "./service-presets.js";
 import { getServiceApiKey } from "./secrets.js";
 
 export interface ResolvedModel {
@@ -29,7 +29,7 @@ export async function resolveServiceModel(
   // Determine pi-ai provider
   const baseService = service.startsWith("custom:") ? "custom" : service;
   const preset = resolveServicePreset(baseService);
-  const piProvider = SERVICE_TO_PI_PROVIDER[baseService] ?? "openai";
+  const piProvider = resolveServicePiProvider(baseService) ?? "openai";
   const apiType = service.startsWith("custom:")
     ? (customApiFormat === "responses" ? "openai-responses" : "openai-completions")
     : (preset?.api ?? "openai-completions");

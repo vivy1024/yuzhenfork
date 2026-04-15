@@ -31,6 +31,46 @@ const resolveServiceModelMock = vi.fn();
 const loadSecretsMock = vi.fn();
 const saveSecretsMock = vi.fn();
 const getServiceApiKeyMock = vi.fn();
+type ServicePresetMock = {
+  providerFamily: "openai" | "anthropic";
+  baseUrl: string;
+  modelsBaseUrl: string;
+  knownModels: string[];
+};
+const SERVICE_PRESETS_MOCK: Record<string, ServicePresetMock> = {
+  openai: { providerFamily: "openai", baseUrl: "https://api.openai.com/v1", modelsBaseUrl: "https://api.openai.com/v1", knownModels: [] as string[] },
+  anthropic: { providerFamily: "anthropic", baseUrl: "https://api.anthropic.com", modelsBaseUrl: "https://api.anthropic.com", knownModels: [] as string[] },
+  minimax: { providerFamily: "anthropic", baseUrl: "https://api.minimaxi.com/anthropic", modelsBaseUrl: "https://api.minimaxi.com/anthropic", knownModels: [] as string[] },
+  bailian: { providerFamily: "anthropic", baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic", modelsBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", knownModels: [] as string[] },
+  custom: { providerFamily: "openai", baseUrl: "", modelsBaseUrl: "", knownModels: [] as string[] },
+};
+const resolveServicePresetMock = vi.fn((service: string) => SERVICE_PRESETS_MOCK[service]);
+const resolveServiceProviderFamilyMock = vi.fn((service: string) => resolveServicePresetMock(service)?.providerFamily);
+const resolveServiceModelsBaseUrlMock = vi.fn((service: string) => {
+  const preset = SERVICE_PRESETS_MOCK[service];
+  return preset?.modelsBaseUrl ?? preset?.baseUrl;
+});
+const listModelsForServiceMock = vi.fn(async (service: string, apiKey?: string) => {
+  const preset = resolveServicePresetMock(service);
+  if (!preset || service === "custom") return [];
+  if (preset.knownModels.length > 0) {
+    return preset.knownModels.map((id) => ({ id, name: id, reasoning: false, contextWindow: 0 }));
+  }
+  const modelsBaseUrl = resolveServiceModelsBaseUrlMock(service);
+  if (!apiKey || !modelsBaseUrl) return [];
+  const res = await fetch(`${modelsBaseUrl.replace(/\/$/, "")}/models`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) return [];
+  const json = await res.json() as { data?: Array<{ id: string }> };
+  return (json.data ?? []).map((model) => ({
+    id: model.id,
+    name: model.id,
+    reasoning: false,
+    contextWindow: 0,
+  }));
+});
 
 const logger = {
   child: () => logger,
@@ -127,10 +167,14 @@ vi.mock("@actalk/inkos-core", () => {
     loadBookSession: loadBookSessionMock,
     persistBookSession: persistBookSessionMock,
     appendBookSessionMessage: appendBookSessionMessageMock,
+    resolveServicePreset: resolveServicePresetMock,
+    resolveServiceProviderFamily: resolveServiceProviderFamilyMock,
+    resolveServiceModelsBaseUrl: resolveServiceModelsBaseUrlMock,
     resolveServiceModel: resolveServiceModelMock,
     loadSecrets: loadSecretsMock,
     saveSecrets: saveSecretsMock,
     getServiceApiKey: getServiceApiKeyMock,
+    listModelsForService: listModelsForServiceMock,
     GLOBAL_ENV_PATH: join(tmpdir(), "inkos-global.env"),
   };
 });
@@ -290,6 +334,10 @@ describe("createStudioServer daemon lifecycle", () => {
     loadSecretsMock.mockReset();
     saveSecretsMock.mockReset();
     getServiceApiKeyMock.mockReset();
+    resolveServicePresetMock.mockClear();
+    resolveServiceProviderFamilyMock.mockClear();
+    resolveServiceModelsBaseUrlMock.mockClear();
+    listModelsForServiceMock.mockClear();
     // Default BookSession for agent tests
     const defaultBookSession = {
       sessionId: "agent-session-1",
@@ -817,6 +865,113 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(response.json()).resolves.toMatchObject({
       models: [{ id: "MiniMax-M2.7", name: "MiniMax-M2.7" }],
     });
+  });
+
+  it("uses the MiniMax preset provider family during service probe", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "minimax", apiFormat: "chat", stream: false },
+        ],
+        defaultModel: "MiniMax-M2.7",
+      },
+    }, null, 2), "utf-8");
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => "404 page not found",
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
+    createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
+    chatCompletionMock.mockImplementation(async (client: any, model: string) => {
+      if (client.provider === "anthropic" && client.baseUrl === "https://api.minimaxi.com/anthropic" && model === "MiniMax-M2.7") {
+        return {
+          content: "pong",
+          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        };
+      }
+      throw new Error(`unexpected probe route: ${client.provider} ${client.baseUrl} ${model}`);
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/minimax/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: "sk-minimax",
+        apiFormat: "chat",
+        stream: false,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      selectedModel: "MiniMax-M2.7",
+      detected: {
+        apiFormat: "chat",
+        stream: false,
+        baseUrl: "https://api.minimaxi.com/anthropic",
+      },
+    });
+  });
+
+  it("uses the preset models baseUrl when listing Bailian models", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "bailian", apiFormat: "chat", stream: false },
+        ],
+        defaultModel: "qwen-max",
+      },
+    }, null, 2), "utf-8");
+    getServiceApiKeyMock.mockResolvedValue("sk-bailian");
+
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "https://dashscope.aliyuncs.com/compatible-mode/v1/models") {
+        return {
+          ok: true,
+          json: async () => ({ data: [{ id: "qwen-max" }] }),
+          text: async (): Promise<string> => "",
+        };
+      }
+      return {
+        ok: false,
+        status: 404,
+        text: async () => "404 page not found",
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+    createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
+    chatCompletionMock.mockImplementation(async (client: any, model: string) => {
+      if (client.provider === "anthropic" && client.baseUrl === "https://dashscope.aliyuncs.com/apps/anthropic" && model === "qwen-max") {
+        return {
+          content: "pong",
+          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        };
+      }
+      throw new Error(`unexpected bailian route: ${client.provider} ${client.baseUrl} ${model}`);
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/bailian/models");
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      models: [{ id: "qwen-max", name: "qwen-max" }],
+    });
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
+      expect.any(Object),
+    );
   });
 
   it("returns stored service secret for detail page rehydration", async () => {

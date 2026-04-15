@@ -60,11 +60,22 @@ export function buildDoctorModelCandidates(
   return candidates;
 }
 
-async function fetchDoctorModels(
+export function resolveDoctorModelsBaseUrl(
+  service: string | undefined,
   baseUrl: string,
+  resolveServiceModelsBaseUrl: (service: string) => string | undefined,
+): string {
+  if (!service || service.length === 0) {
+    return baseUrl;
+  }
+  return resolveServiceModelsBaseUrl(service) ?? baseUrl;
+}
+
+async function fetchDoctorModels(
+  modelsBaseUrl: string,
   apiKey: string,
 ): Promise<Array<{ id: string; name: string }>> {
-  const modelsUrl = baseUrl.replace(/\/$/, "") + "/models";
+  const modelsUrl = modelsBaseUrl.replace(/\/$/, "") + "/models";
   try {
     const res = await fetch(modelsUrl, {
       headers: { Authorization: `Bearer ${apiKey}` },
@@ -219,7 +230,7 @@ export const doctorCommand = new Command("doctor")
 
     // 6. API connectivity test
     try {
-      const { createLLMClient, chatCompletion, LLMConfigSchema, isApiKeyOptionalForEndpoint } = await import("@actalk/inkos-core");
+      const { createLLMClient, chatCompletion, LLMConfigSchema, isApiKeyOptionalForEndpoint, resolveServiceModelsBaseUrl } = await import("@actalk/inkos-core");
       const { loadConfig } = await import("../utils.js");
 
       let llmConfig;
@@ -263,10 +274,15 @@ export const doctorCommand = new Command("doctor")
         let connected = false;
         let detectedDetail = "";
         let lastError = "Unknown error";
-        const discoveredModels = (llmConfig.provider === "openai" && llmConfig.apiKey && llmConfig.baseUrl)
-          ? await fetchDoctorModels(llmConfig.baseUrl, llmConfig.apiKey)
+        const modelsBaseUrl = resolveDoctorModelsBaseUrl(
+          typeof llmConfig.service === "string" ? llmConfig.service : undefined,
+          llmConfig.baseUrl,
+          resolveServiceModelsBaseUrl,
+        );
+        const discoveredModels = (llmConfig.apiKey && modelsBaseUrl)
+          ? await fetchDoctorModels(modelsBaseUrl, llmConfig.apiKey)
           : [];
-        const modelCandidates = llmConfig.provider === "openai"
+        const modelCandidates = (llmConfig.provider === "openai" || discoveredModels.length > 0)
           ? buildDoctorModelCandidates(llmConfig.model, discoveredModels)
           : [llmConfig.model];
         const plans = llmConfig.provider === "openai"
