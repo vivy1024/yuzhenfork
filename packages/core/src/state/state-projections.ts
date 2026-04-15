@@ -7,14 +7,21 @@ import {
   localizeHookPayoffTiming,
   resolveHookPayoffTiming,
 } from "../utils/hook-lifecycle.js";
+import {
+  computeHookDiagnostics,
+  renderHookDiagnosticMarker,
+} from "../utils/hook-stale-detection.js";
 
 export function renderHooksProjection(
   state: HooksState,
   language: "zh" | "en" = "zh",
+  options?: { readonly currentChapter?: number },
 ): string {
   const title = language === "en" ? "# Pending Hooks" : "# 伏笔池";
   // Phase 7: depends_on / pays_off_in_arc / core_hook are visible columns,
   // so writer and reviewer both see the causal chain and planned payoff arc.
+  // stale / blocked diagnostic flags are appended to the status cell, so the
+  // table width stays fixed at 11 columns.
   const headers = language === "en"
     ? [
       "| hook_id | start_chapter | type | status | last_advanced_chapter | expected_payoff | payoff_timing | depends_on | pays_off_in_arc | core_hook | notes |",
@@ -25,27 +32,39 @@ export function renderHooksProjection(
       "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
     ];
 
+  const currentChapter = options?.currentChapter;
+  const diagnostics = typeof currentChapter === "number"
+    ? computeHookDiagnostics({ hooks: state.hooks, currentChapter })
+    : null;
+
   const rows = [...state.hooks]
     .sort((left, right) => (
       left.startChapter - right.startChapter
       || left.lastAdvancedChapter - right.lastAdvancedChapter
       || left.hookId.localeCompare(right.hookId)
     ))
-    .map((hook) => `| ${
-      [
-        hook.hookId,
-        hook.startChapter,
-        hook.type,
-        hook.status,
-        hook.lastAdvancedChapter,
-        hook.expectedPayoff,
-        localizeHookPayoffTiming(resolveHookPayoffTiming(hook), language),
-        renderDependsOnCell(hook.dependsOn ?? [], language),
-        hook.paysOffInArc ?? "",
-        renderCoreHookCell(hook.coreHook === true, language),
-        hook.notes,
-      ].map(escapeTableCell).join(" | ")
-    } |`);
+    .map((hook) => {
+      const diag = diagnostics?.get(hook.hookId);
+      const marker = diag ? renderHookDiagnosticMarker(diag, language) : "";
+      const statusCell = marker
+        ? `${hook.status} (${marker})`
+        : hook.status;
+      return `| ${
+        [
+          hook.hookId,
+          hook.startChapter,
+          hook.type,
+          statusCell,
+          hook.lastAdvancedChapter,
+          hook.expectedPayoff,
+          localizeHookPayoffTiming(resolveHookPayoffTiming(hook), language),
+          renderDependsOnCell(hook.dependsOn ?? [], language),
+          hook.paysOffInArc ?? "",
+          renderCoreHookCell(hook.coreHook === true, language),
+          hook.notes,
+        ].map(escapeTableCell).join(" | ")
+      } |`;
+    });
 
   return [title, "", ...headers, ...rows, ""].join("\n");
 }
