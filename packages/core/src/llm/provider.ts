@@ -308,7 +308,7 @@ function wrapLLMError(error: unknown, context?: { readonly baseUrl?: string; rea
 }
 
 function shouldUseNativeCustomTransport(client: LLMClient): boolean {
-  return client.provider === "openai" && client.service === "custom";
+  return client.service === "custom" && (client.provider === "openai" || client.provider === "anthropic");
 }
 
 function buildCustomHeaders(client: LLMClient): Record<string, string> {
@@ -329,6 +329,15 @@ function joinSystemPrompt(messages: ReadonlyArray<LLMMessage>): string | undefin
 function buildChatMessages(messages: ReadonlyArray<LLMMessage>): Array<{ role: string; content: string }> {
   return messages
     .filter((message) => message.role !== "system")
+    .map((message) => ({
+      role: message.role,
+      content: message.content,
+    }));
+}
+
+function buildAnthropicMessages(messages: ReadonlyArray<LLMMessage>): Array<{ role: "user" | "assistant"; content: string }> {
+  return messages
+    .filter((message): message is Readonly<LLMMessage> & { role: "user" | "assistant" } => message.role === "user" || message.role === "assistant")
     .map((message) => ({
       role: message.role,
       content: message.content,
@@ -415,6 +424,114 @@ function extractResponsesContent(json: any): string {
     .join("");
 }
 
+function extractAnthropicContent(json: any): string {
+  const content = Array.isArray(json?.content) ? json.content : [];
+  return content
+    .map((part: any) => typeof part?.text === "string" ? part.text : "")
+    .join("");
+}
+
+async function chatCompletionViaCustomAnthropicCompatible(
+  client: LLMClient,
+  model: string,
+  messages: ReadonlyArray<LLMMessage>,
+  resolved: { readonly temperature: number; readonly maxTokens: number; readonly extra: Record<string, unknown> },
+  onStreamProgress?: OnStreamProgress,
+  onTextDelta?: (text: string) => void,
+): Promise<LLMResponse> {
+  const baseUrl = client._piModel?.baseUrl ?? "";
+  const errorCtx = { baseUrl, model };
+  const monitor = createStreamMonitor(onStreamProgress);
+  const extra = stripReservedKeys(resolved.extra);
+  const payload: Record<string, unknown> = {
+    model,
+    messages: buildAnthropicMessages(messages),
+    stream: client.stream,
+    max_tokens: resolved.maxTokens,
+    temperature: resolved.temperature,
+    ...extra,
+  };
+  const system = joinSystemPrompt(messages);
+  if (system) payload.system = system;
+
+  const response = await fetch(`${baseUrl.replace(/\/$/, "")}/messages`, {
+    method: "POST",
+    headers: {
+      "x-api-key": client._apiKey ?? "",
+      "anthropic-version": "2023-06-01",
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${client._apiKey ?? ""}`,
+      ...(client._piModel?.headers ?? {}),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    throw wrapLLMError(new Error(await readErrorResponse(response)), errorCtx);
+  }
+
+  if (!client.stream) {
+    const json = await response.json() as any;
+    const content = extractAnthropicContent(json);
+    if (!content) {
+      throw wrapLLMError(new Error("LLM returned empty response"), errorCtx);
+    }
+    return {
+      content,
+      usage: {
+        promptTokens: json?.usage?.input_tokens ?? 0,
+        completionTokens: json?.usage?.output_tokens ?? 0,
+        totalTokens: (json?.usage?.input_tokens ?? 0) + (json?.usage?.output_tokens ?? 0),
+      },
+    };
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw wrapLLMError(new Error("Streaming body unavailable"), errorCtx);
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+  let usage = { promptTokens: 0, completionTokens: 0, totalTokens: 0 };
+
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const parsed = parseSseEvents(buffer);
+      buffer = parsed.rest;
+      for (const event of parsed.events) {
+        if (!event.data) continue;
+        const json = JSON.parse(event.data);
+        if (json.type === "message_start" && json.message?.usage) {
+          usage.promptTokens = json.message.usage.input_tokens ?? usage.promptTokens;
+        }
+        if (json.type === "content_block_delta" && json.delta?.type === "text_delta" && typeof json.delta.text === "string") {
+          content += json.delta.text;
+          monitor.onChunk(json.delta.text);
+          onTextDelta?.(json.delta.text);
+        }
+        if (json.type === "message_delta" && json.usage) {
+          usage.completionTokens = json.usage.output_tokens ?? usage.completionTokens;
+        }
+        if (json.type === "message_stop") {
+          usage.totalTokens = usage.promptTokens + usage.completionTokens;
+        }
+      }
+    }
+  } finally {
+    monitor.stop();
+  }
+
+  if (!content) {
+    throw wrapLLMError(new Error("LLM returned empty response from stream"), errorCtx);
+  }
+  if (!usage.totalTokens) {
+    usage.totalTokens = usage.promptTokens + usage.completionTokens;
+  }
+  return { content, usage };
+}
+
 async function chatCompletionViaCustomOpenAICompatible(
   client: LLMClient,
   model: string,
@@ -423,6 +540,9 @@ async function chatCompletionViaCustomOpenAICompatible(
   onStreamProgress?: OnStreamProgress,
   onTextDelta?: (text: string) => void,
 ): Promise<LLMResponse> {
+  if (client.provider === "anthropic") {
+    return chatCompletionViaCustomAnthropicCompatible(client, model, messages, resolved, onStreamProgress, onTextDelta);
+  }
   const baseUrl = client._piModel?.baseUrl ?? "";
   const headers = buildCustomHeaders(client);
   const errorCtx = { baseUrl, model };
