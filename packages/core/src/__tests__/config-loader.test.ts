@@ -128,7 +128,7 @@ describe("loadProjectConfig local provider auth", () => {
       language: "zh",
       llm: {
         services: [
-          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9 },
+          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9, apiFormat: "responses", stream: false },
         ],
         defaultModel: "corp-chat",
       },
@@ -149,6 +149,8 @@ describe("loadProjectConfig local provider auth", () => {
     expect(config.llm.model).toBe("corp-chat");
     expect(config.llm.apiKey).toBe("sk-corp");
     expect(config.llm.temperature).toBe(0.9);
+    expect(config.llm.apiFormat).toBe("responses");
+    expect(config.llm.stream).toBe(false);
   });
 
   it("keeps Studio config active when llm.configSource is studio", async () => {

@@ -120,6 +120,8 @@ interface ServiceConfigEntry {
   baseUrl?: string;
   temperature?: number;
   maxTokens?: number;
+  apiFormat?: "chat" | "responses";
+  stream?: boolean;
 }
 
 type LLMConfigSource = "env" | "studio";
@@ -160,6 +162,8 @@ function normalizeServiceEntry(serviceId: string, value: Record<string, unknown>
       ...(typeof value.baseUrl === "string" && value.baseUrl.length > 0 ? { baseUrl: value.baseUrl } : {}),
       ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
       ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+      ...(value.apiFormat === "chat" || value.apiFormat === "responses" ? { apiFormat: value.apiFormat } : {}),
+      ...(typeof value.stream === "boolean" ? { stream: value.stream } : {}),
     };
   }
 
@@ -170,6 +174,8 @@ function normalizeServiceEntry(serviceId: string, value: Record<string, unknown>
       ...(typeof value.baseUrl === "string" && value.baseUrl.length > 0 ? { baseUrl: value.baseUrl } : {}),
       ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
       ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+      ...(value.apiFormat === "chat" || value.apiFormat === "responses" ? { apiFormat: value.apiFormat } : {}),
+      ...(typeof value.stream === "boolean" ? { stream: value.stream } : {}),
     };
   }
 
@@ -177,6 +183,8 @@ function normalizeServiceEntry(serviceId: string, value: Record<string, unknown>
     service: serviceId,
     ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
     ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+    ...(value.apiFormat === "chat" || value.apiFormat === "responses" ? { apiFormat: value.apiFormat } : {}),
+    ...(typeof value.stream === "boolean" ? { stream: value.stream } : {}),
   };
 }
 
@@ -194,6 +202,8 @@ function normalizeServiceConfig(raw: unknown): ServiceConfigEntry[] {
         ...(typeof entry.baseUrl === "string" && entry.baseUrl.length > 0 ? { baseUrl: entry.baseUrl } : {}),
         ...(typeof entry.temperature === "number" ? { temperature: entry.temperature } : {}),
         ...(typeof entry.maxTokens === "number" ? { maxTokens: entry.maxTokens } : {}),
+        ...(entry.apiFormat === "chat" || entry.apiFormat === "responses" ? { apiFormat: entry.apiFormat } : {}),
+        ...(typeof entry.stream === "boolean" ? { stream: entry.stream } : {}),
       }));
   }
 
@@ -284,6 +294,16 @@ async function resolveConfiguredServiceBaseUrl(root: string, serviceId: string, 
     const services = normalizeServiceConfig((config.llm as Record<string, unknown> | undefined)?.services);
     const matched = services.find((entry) => serviceConfigKey(entry) === serviceId);
     return matched?.baseUrl;
+  } catch {
+    return undefined;
+  }
+}
+
+async function resolveConfiguredServiceEntry(root: string, serviceId: string): Promise<ServiceConfigEntry | undefined> {
+  try {
+    const config = await loadRawConfig(root);
+    const services = normalizeServiceConfig((config.llm as Record<string, unknown> | undefined)?.services);
+    return services.find((entry) => serviceConfigKey(entry) === serviceId);
   } catch {
     return undefined;
   }
@@ -1061,11 +1081,13 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       if (reqService && reqModel) {
         // 1. Frontend explicitly selected a service+model — fail loudly if no key
         try {
+          const configuredEntry = await resolveConfiguredServiceEntry(root, reqService);
           const resolved = await resolveServiceModel(
             reqService,
             reqModel,
             root,
             await resolveConfiguredServiceBaseUrl(root, reqService),
+            configuredEntry?.apiFormat,
           );
           resolvedModel = resolved.model;
           resolvedApiKey = resolved.apiKey;
@@ -1094,6 +1116,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
               defaultModel,
               root,
               firstService.baseUrl,
+              firstService.apiFormat,
             );
             resolvedModel = resolved.model;
             resolvedApiKey = resolved.apiKey;
@@ -1109,11 +1132,13 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             try {
               const models = await listModelsForService(svcName, svcData.apiKey);
               if (models.length > 0) {
+                const configuredEntry = await resolveConfiguredServiceEntry(root, svcName);
                 const resolved = await resolveServiceModel(
                   svcName,
                   models[0].id,
                   root,
                   await resolveConfiguredServiceBaseUrl(root, svcName),
+                  configuredEntry?.apiFormat,
                 );
                 resolvedModel = resolved.model;
                 resolvedApiKey = resolved.apiKey;
@@ -1134,6 +1159,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
       const model = resolvedModel!;
       const agentApiKey = resolvedApiKey;
+      const configuredEntry = reqService ? await resolveConfiguredServiceEntry(root, reqService) : undefined;
 
       // Create pipeline with resolved model (so sub_agent tools use the frontend-selected model)
       // Don't spread config.llm — its baseUrl/provider belong to the old service.
@@ -1141,10 +1167,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       const pipelineClient = (reqService && reqModel && resolvedApiKey)
         ? createLLMClient({
             ...config.llm,
-            service: reqService,
+            service: configuredEntry?.service ?? reqService,
             model: reqModel,
             apiKey: resolvedApiKey,
-            baseUrl: "",  // let createLLMClient resolve from service preset
+            ...(configuredEntry?.apiFormat ? { apiFormat: configuredEntry.apiFormat } : {}),
+            ...(configuredEntry?.stream !== undefined ? { stream: configuredEntry.stream } : {}),
+            baseUrl: configuredEntry?.baseUrl ?? "",
           } as any)
         : client;
       const pipeline = new PipelineRunner(await buildPipelineConfig({

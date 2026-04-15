@@ -55,6 +55,8 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   const [baseUrl, setBaseUrl] = useState("");
   const [temperature, setTemperature] = useState("0.7");
   const [maxTokens, setMaxTokens] = useState("4096");
+  const [apiFormat, setApiFormat] = useState<"chat" | "responses">("chat");
+  const [stream, setStream] = useState(true);
 
   // -- Unified connection status --
   const [status, setStatus] = useState<ConnectionStatus>({ state: "idle" });
@@ -78,6 +80,8 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
         }
         if (typeof matched.temperature === "number") setTemperature(String(matched.temperature));
         if (typeof matched.maxTokens === "number") setMaxTokens(String(matched.maxTokens));
+        if (matched.apiFormat === "chat" || matched.apiFormat === "responses") setApiFormat(matched.apiFormat);
+        if (typeof matched.stream === "boolean") setStream(matched.stream);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -172,6 +176,8 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
               service: isCustom ? "custom" : serviceId,
               temperature: parseFloat(temperature),
               maxTokens: parseInt(maxTokens, 10),
+              apiFormat,
+              stream,
               ...(isCustom ? { name: resolvedCustomName, baseUrl: baseUrl.trim() } : {}),
             },
           ],
@@ -226,7 +232,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
       <div className="space-y-5">
         {/* Custom fields */}
         {isCustom && (
-          <div className="grid grid-cols-2 gap-4">
+        <div className="grid grid-cols-2 gap-4">
             <Field label="服务名称">
               <input type="text" value={customName} onChange={(e) => setCustomName(e.target.value)}
                 placeholder="例如：本地 Ollama" className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm" />
@@ -275,6 +281,30 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
           {status.state === "saved" && (
             <span className="text-xs text-emerald-500">已保存</span>
           )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-4">
+          <Field label="协议类型">
+            <select
+              value={apiFormat}
+              onChange={(e) => setApiFormat(e.target.value as "chat" | "responses")}
+              className="w-full rounded-lg border border-border/60 bg-background px-3 py-2 text-sm"
+            >
+              <option value="chat">Chat / Completions</option>
+              <option value="responses">Responses</option>
+            </select>
+          </Field>
+
+          <Field label="流式响应">
+            <label className="flex h-10 items-center gap-2 rounded-lg border border-border/60 bg-background px-3 text-sm">
+              <input
+                type="checkbox"
+                checked={stream}
+                onChange={(e) => setStream(e.target.checked)}
+              />
+              <span>{stream ? "开启" : "关闭"}</span>
+            </label>
+          </Field>
         </div>
 
         {/* Models */}

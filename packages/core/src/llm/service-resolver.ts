@@ -16,6 +16,7 @@ export async function resolveServiceModel(
   modelId: string,
   projectRoot: string,
   customBaseUrl?: string,
+  customApiFormat?: "chat" | "responses",
 ): Promise<ResolvedModel> {
   // Resolve API key
   const apiKey = await getServiceApiKey(projectRoot, service);
@@ -35,7 +36,9 @@ export async function resolveServiceModel(
 
   if (!model) {
     // Construct a Model object from service preset for models not in pi-ai's registry
-    const apiType = preset?.api ?? "openai-completions";
+    const apiType = service.startsWith("custom:")
+      ? (customApiFormat === "responses" ? "openai-responses" : "openai-completions")
+      : (preset?.api ?? "openai-completions");
     const baseUrl = customBaseUrl ?? preset?.baseUrl ?? "";
     if (!baseUrl) {
       throw new Error(

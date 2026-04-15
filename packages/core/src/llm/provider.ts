@@ -2,6 +2,8 @@ import type { LLMConfig } from "../models/project.js";
 import {
   streamSimple as piStreamSimple,
   stream as piStream,
+  completeSimple as piCompleteSimple,
+  complete as piComplete,
 } from "@mariozechner/pi-ai";
 import type {
   Api as PiApi,
@@ -138,7 +140,7 @@ export function createLLMClient(config: LLMConfig): LLMClient {
   // --- Build pi-ai Model object ---
   const serviceName = config.service ?? "custom";
   const preset = resolveServicePreset(serviceName);
-  const piApi = (preset?.api ?? "openai-completions") as PiApi;
+  const piApi = resolvePiApi(serviceName, config.apiFormat, preset?.api) as PiApi;
   const baseUrl = config.baseUrl || preset?.baseUrl || "";
   const extraHeaders = config.headers ?? parseEnvHeaders();
 
@@ -165,6 +167,17 @@ export function createLLMClient(config: LLMConfig): LLMClient {
     _apiKey: config.apiKey,
     defaults,
   };
+}
+
+function resolvePiApi(
+  serviceName: string,
+  apiFormat: LLMConfig["apiFormat"] | undefined,
+  presetApi: PiApi | undefined,
+): PiApi {
+  if (serviceName === "custom") {
+    return apiFormat === "responses" ? "openai-responses" : "openai-completions";
+  }
+  return (presetApi ?? "openai-completions") as PiApi;
 }
 
 function parseEnvHeaders(): Record<string, string> | undefined {
@@ -475,6 +488,27 @@ async function chatCompletionViaPiAi(
     headers: piModel.headers,
   };
 
+  if (!client.stream) {
+    const response = await piCompleteSimple(piModel, context, streamOpts);
+    const content = response.content
+      .filter((block): block is { type: "text"; text: string } => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+    if (!content) {
+      const diag = `usage=${response.usage.input}+${response.usage.output}`;
+      console.warn(`[inkos] LLM 非流式响应无文本内容 (${diag})`);
+      throw new Error(`LLM returned empty response (${diag})`);
+    }
+    return {
+      content,
+      usage: {
+        promptTokens: response.usage.input,
+        completionTokens: response.usage.output,
+        totalTokens: response.usage.totalTokens,
+      },
+    };
+  }
+
   const eventStream = piStreamSimple(piModel, context, streamOpts);
   const chunks: string[] = [];
   const monitor = createStreamMonitor(onStreamProgress);
@@ -493,7 +527,6 @@ async function chatCompletionViaPiAi(
         inputTokens = msg.usage.input;
         outputTokens = msg.usage.output;
         if (event.type === "error" && msg.errorMessage) {
-          // Check if we have partial content worth salvaging
           const partial = chunks.join("");
           if (partial.length >= MIN_SALVAGEABLE_CHARS) {
             throw new PartialResponseError(partial, new Error(msg.errorMessage));
@@ -547,6 +580,22 @@ async function chatWithToolsViaPiAi(
     apiKey: client._apiKey,
     headers: piModel.headers,
   };
+
+  if (!client.stream) {
+    const response = await piComplete(piModel, context, streamOpts);
+    const content = response.content
+      .filter((block): block is { type: "text"; text: string } => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+    const toolCalls = response.content
+      .filter((block): block is PiToolCall => block.type === "toolCall")
+      .map((block) => ({
+        id: block.id,
+        name: block.name,
+        arguments: JSON.stringify(block.arguments),
+      }));
+    return { content, toolCalls };
+  }
 
   const eventStream = piStream(piModel, context, streamOpts);
   let content = "";

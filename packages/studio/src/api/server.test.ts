@@ -520,8 +520,8 @@ describe("createStudioServer daemon lifecycle", () => {
       ...projectConfig,
       llm: {
         services: [
-          { service: "moonshot", temperature: 1, maxTokens: 4096 },
-          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9 },
+          { service: "moonshot", temperature: 1, maxTokens: 4096, apiFormat: "chat", stream: true },
+          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9, apiFormat: "responses", stream: false },
         ],
         defaultModel: "kimi-k2.5",
       },
@@ -538,6 +538,8 @@ describe("createStudioServer daemon lifecycle", () => {
           moonshot: {
             temperature: 0.5,
             maxTokens: 2048,
+            apiFormat: "responses",
+            stream: false,
           },
         },
       }),
@@ -547,8 +549,8 @@ describe("createStudioServer daemon lifecycle", () => {
 
     const raw = JSON.parse(await readFile(join(root, "inkos.json"), "utf-8"));
     expect(raw.llm.services).toEqual([
-      { service: "moonshot", temperature: 0.5, maxTokens: 2048 },
-      { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9 },
+      { service: "moonshot", temperature: 0.5, maxTokens: 2048, apiFormat: "responses", stream: false },
+      { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9, apiFormat: "responses", stream: false },
     ]);
   });
 

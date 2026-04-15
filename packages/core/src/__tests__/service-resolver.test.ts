@@ -119,4 +119,24 @@ describe("resolveServiceModel", () => {
     expect(result.apiKey).toBe("sk-corp");
     expect(result.model.id).toBe("gpt-4o");
   });
+
+  it("resolves custom service with responses api format", async () => {
+    await mkdir(join(root, ".inkos"), { recursive: true });
+    await writeFile(
+      join(root, ".inkos", "secrets.json"),
+      JSON.stringify({ services: { "custom:内网GPT": { apiKey: "sk-corp" } } }),
+    );
+
+    const result = await resolveServiceModel(
+      "custom:内网GPT",
+      "gpt-5.4",
+      root,
+      "https://llm.internal.corp/v1",
+      "responses",
+    );
+
+    expect(result.apiKey).toBe("sk-corp");
+    expect(result.model.id).toBe("gpt-5.4");
+    expect(result.model.api).toBe("openai-responses");
+  });
 });

@@ -14,6 +14,8 @@ interface ServiceConfigEntry {
   readonly baseUrl?: string;
   readonly temperature?: number;
   readonly maxTokens?: number;
+  readonly apiFormat?: "chat" | "responses";
+  readonly stream?: boolean;
 }
 
 type LLMConfigSource = "env" | "studio";
@@ -115,6 +117,14 @@ export async function loadProjectConfig(
         llm.maxTokens = selectedEntry.maxTokens;
       }
 
+      if (selectedEntry.apiFormat !== undefined) {
+        llm.apiFormat = selectedEntry.apiFormat;
+      }
+
+      if (selectedEntry.stream !== undefined) {
+        llm.stream = selectedEntry.stream;
+      }
+
       if (selectedServiceId && (configSource !== "env" || !env.INKOS_LLM_API_KEY)) {
         const secretApiKey = await getServiceApiKey(root, selectedServiceId);
         if (secretApiKey) {
@@ -201,6 +211,8 @@ function normalizeServiceEntries(raw: unknown): ServiceConfigEntry[] {
         ...(typeof entry.baseUrl === "string" && entry.baseUrl.length > 0 ? { baseUrl: entry.baseUrl } : {}),
         ...(typeof entry.temperature === "number" ? { temperature: entry.temperature } : {}),
         ...(typeof entry.maxTokens === "number" ? { maxTokens: entry.maxTokens } : {}),
+        ...(entry.apiFormat === "chat" || entry.apiFormat === "responses" ? { apiFormat: entry.apiFormat } : {}),
+        ...(typeof entry.stream === "boolean" ? { stream: entry.stream } : {}),
       }));
   }
 
@@ -221,6 +233,8 @@ function normalizeServiceEntryFromPatch(serviceId: string, value: Record<string,
       ...(typeof value.baseUrl === "string" && value.baseUrl.length > 0 ? { baseUrl: value.baseUrl } : {}),
       ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
       ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+      ...(value.apiFormat === "chat" || value.apiFormat === "responses" ? { apiFormat: value.apiFormat } : {}),
+      ...(typeof value.stream === "boolean" ? { stream: value.stream } : {}),
     };
   }
 
@@ -231,6 +245,8 @@ function normalizeServiceEntryFromPatch(serviceId: string, value: Record<string,
       ...(typeof value.baseUrl === "string" && value.baseUrl.length > 0 ? { baseUrl: value.baseUrl } : {}),
       ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
       ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+      ...(value.apiFormat === "chat" || value.apiFormat === "responses" ? { apiFormat: value.apiFormat } : {}),
+      ...(typeof value.stream === "boolean" ? { stream: value.stream } : {}),
     };
   }
 
@@ -238,6 +254,8 @@ function normalizeServiceEntryFromPatch(serviceId: string, value: Record<string,
     service: serviceId,
     ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
     ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+    ...(value.apiFormat === "chat" || value.apiFormat === "responses" ? { apiFormat: value.apiFormat } : {}),
+    ...(typeof value.stream === "boolean" ? { stream: value.stream } : {}),
   };
 }
 

@@ -10,12 +10,16 @@ import {
 // We intercept streamSimple so tests don't hit the network.
 
 const mockStreamSimple = vi.fn();
+const mockCompleteSimple = vi.fn();
+const mockComplete = vi.fn();
 
 vi.mock("@mariozechner/pi-ai", async (importOriginal) => {
   const original = await importOriginal<typeof import("@mariozechner/pi-ai")>();
   return {
     ...original,
     streamSimple: (...args: unknown[]) => mockStreamSimple(...args),
+    completeSimple: (...args: unknown[]) => mockCompleteSimple(...args),
+    complete: (...args: unknown[]) => mockComplete(...args),
   };
 });
 
@@ -135,6 +139,8 @@ async function captureError(task: Promise<unknown>): Promise<Error> {
 describe("chatCompletion via pi-ai", () => {
   beforeEach(() => {
     mockStreamSimple.mockReset();
+    mockCompleteSimple.mockReset();
+    mockComplete.mockReset();
   });
 
   it("returns text content from a successful stream", async () => {
@@ -238,6 +244,17 @@ describe("chatCompletion via pi-ai", () => {
     });
 
     expect(deltas).toEqual(["a", "b", "c"]);
+  });
+
+  it("uses completeSimple when client.stream is false", async () => {
+    mockCompleteSimple.mockResolvedValue(makeAssistantMessage("offline hello"));
+
+    const client = makeClient(0.7, { stream: false });
+    const result = await chatCompletion(client, "test-model", [{ role: "user", content: "hi" }]);
+
+    expect(result.content).toBe("offline hello");
+    expect(mockCompleteSimple).toHaveBeenCalledOnce();
+    expect(mockStreamSimple).not.toHaveBeenCalled();
   });
 });
 
