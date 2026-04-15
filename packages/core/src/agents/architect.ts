@@ -305,20 +305,25 @@ enableFullCastTracking: false
 
 === SECTION: pending_hooks ===
 
-初始伏笔池（Markdown表格）：
-| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 备注 |
+初始伏笔池（Markdown表格），Phase 7 扩展列：
+| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 上游依赖 | 回收卷 | 核心 | 半衰期 | 备注 |
 
 伏笔表规则：
 - 第5列必须是纯数字章节号，不能写自然语言描述
 - 建书阶段所有伏笔都还没正式推进，所以第5列统一填 0
 - 第7列必须填写：立即 / 近期 / 中程 / 慢烧 / 终局 之一
-- 初始线索放备注，不放第 5 列
+- 第8列「上游依赖」：列出必须在本伏笔之前种下/回收的上游 hook_id，格式如 [H003, H007]；若无依赖填「无」
+- 第9列「回收卷」：用自然语言写该伏笔计划在哪一卷哪一段回收（例："第2卷中段"、"终卷终章前"）。不强制解析为章号
+- 第10列「核心」：是否主线承重伏笔 true / false。主线承重伏笔一本书最多 3-7 条（主谜团、身世、核心承诺），其余次要伏笔填 false
+- 第11列「半衰期」：可选，整数章数。若不填自动按回收节奏推导（立即/近期 = 10、中程 = 30、慢烧/终局 = 80）
+- 初始线索放备注列，不放第5列
 
 ## 最后强调
 - 符合${book.platform}平台口味、${gp.name}题材特征
 - 主角人设鲜明、行为边界清晰
 - 伏笔前后呼应、配角有独立动机不是工具人
-- **story_frame / volume_map / rhythm_principles / roles 必须是散文密度，不要退化成 bullet**`;
+- **story_frame / volume_map / rhythm_principles / roles 必须是散文密度，不要退化成 bullet**
+- **pending_hooks 表必须包含 Phase 7 扩展列——depends_on 标出因果链、pays_off_in_arc 锁定回收大致位置、core_hook 标记主线承重伏笔（3-7 条）、half_life 仅给重点伏笔设置**`;
   }
 
   private buildEnglishFoundationPrompt(
@@ -504,20 +509,25 @@ Initial state card (chapter 0) as a Markdown table:
 
 === SECTION: pending_hooks ===
 
-Initial hook pool (Markdown table):
-| hook_id | start_chapter | type | status | last_advanced_chapter | expected_payoff | payoff_timing | notes |
+Initial hook pool (Markdown table), Phase 7 extended columns:
+| hook_id | start_chapter | type | status | last_advanced_chapter | expected_payoff | payoff_timing | depends_on | pays_off_in_arc | core_hook | half_life | notes |
 
 Rules:
 - Column 5 is a pure chapter number, not narrative description
 - At book creation all planned hooks have last_advanced_chapter = 0
 - Column 7 must be: immediate / near-term / mid-arc / slow-burn / endgame
+- Column 8 (depends_on): upstream hook ids that must be planted / paid off before this one fires, formatted [H003, H007]; write "none" if no upstream
+- Column 9 (pays_off_in_arc): free-form prose on where this hook is scheduled to pay off (e.g. "mid of volume 2", "right before the finale"). NOT parsed into chapter numbers
+- Column 10 (core_hook): true / false. Core hooks are main-line load-bearing (central mystery, identity, key promise). A book typically has 3-7 cores; everything else is false
+- Column 11 (half_life): optional integer chapters. If blank, derived from payoff_timing (immediate/near-term = 10, mid-arc = 30, slow-burn/endgame = 80)
 - Put initial signal text in notes, not column 5
 
 ## Final emphasis
 - Fit ${book.platform} platform taste and ${gp.name} genre traits
 - Protagonist persona clear with sharp behavioral boundaries
 - Hooks planted with payoff promises; supporting characters have independent motivation
-- **story_frame / volume_map / rhythm_principles / roles must be prose density — no bullet-list degradation**`;
+- **story_frame / volume_map / rhythm_principles / roles must be prose density — no bullet-list degradation**
+- **pending_hooks table MUST carry Phase 7 extended columns — depends_on spells out the causal chain, pays_off_in_arc locks the approximate payoff location, core_hook marks main-line load-bearing hooks (3-7 per book), half_life only on priority hooks**`;
   }
 
   // -------------------------------------------------------------------------
@@ -979,18 +989,32 @@ ${trimmed}\n`;
       const seedNote = normalizedProgress === 0 && this.hasNarrativeProgress(rawProgress)
         ? (language === "zh" ? `初始线索：${rawProgress}` : `initial signal: ${rawProgress}`)
         : "";
-      const notes = this.mergeHookNotes(row[6] ?? "", seedNote, language);
 
-      return {
+      const phase7 = row.length >= 12;
+      const phase6 = row.length >= 8;
+      const noteCellIndex = phase7 ? 11 : phase6 ? 7 : 6;
+      const notes = this.mergeHookNotes(row[noteCellIndex] ?? "", seedNote, language);
+
+      const base: Record<string, unknown> = {
         hookId: row[0] || `hook-${index + 1}`,
         startChapter: this.parseHookChapterNumber(row[1]),
         type: row[2] ?? "",
         status: row[3] ?? "open",
         lastAdvancedChapter: normalizedProgress,
         expectedPayoff: row[5] ?? "",
-        payoffTiming: row.length >= 8 ? row[6] ?? "" : "",
-        notes: row.length >= 8 ? this.mergeHookNotes(row[7] ?? "", seedNote, language) : notes,
+        payoffTiming: phase6 ? row[6] ?? "" : "",
+        notes,
       };
+
+      if (phase7) {
+        base.dependsOn = this.parseDependsOnCell(row[7] ?? "");
+        base.paysOffInArc = (row[8] ?? "").trim();
+        base.coreHook = this.parseBooleanCell(row[9]);
+        const halfLife = this.parseOptionalInt(row[10]);
+        if (halfLife !== undefined) base.halfLifeChapters = halfLife;
+      }
+
+      return base as unknown as Parameters<typeof renderHookSnapshot>[0][number];
     });
 
     return renderHookSnapshot(normalizedHooks, language);
@@ -1000,6 +1024,33 @@ ${trimmed}\n`;
     if (!value) return 0;
     const match = value.match(/\d+/);
     return match ? parseInt(match[0], 10) : 0;
+  }
+
+  private parseDependsOnCell(value: string): ReadonlyArray<string> {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    const lower = trimmed.toLowerCase();
+    if (lower === "none" || lower === "n/a" || lower === "-" || trimmed === "无") return [];
+    const stripped = trimmed.replace(/^[\[\(]\s*/, "").replace(/\s*[\]\)]$/, "");
+    return stripped
+      .split(/[,，、\/]+/)
+      .map((item) => item.trim().replace(/^\*\*(.+)\*\*$/, "$1").trim())
+      .filter((item) => item.length > 0);
+  }
+
+  private parseBooleanCell(value: string | undefined): boolean {
+    const normalized = (value ?? "").trim().toLowerCase();
+    if (!normalized) return false;
+    return /^(true|yes|y|是|核心|core|1|✓|✔)$/.test(normalized);
+  }
+
+  private parseOptionalInt(value: string | undefined): number | undefined {
+    const normalized = (value ?? "").trim();
+    if (!normalized) return undefined;
+    const match = normalized.match(/\d+/);
+    if (!match) return undefined;
+    const parsed = parseInt(match[0], 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
   }
 
   private hasNarrativeProgress(value: string | undefined): boolean {

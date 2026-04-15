@@ -34,6 +34,14 @@ export const HookRecordSchema = z.object({
   expectedPayoff: z.string().default(""),
   payoffTiming: HookPayoffTimingSchema.optional(),
   notes: z.string().default(""),
+  // Phase 7 — hook causality / promotion metadata.
+  // All optional so hooks parsed from pre-Phase-7 markdown still validate
+  // and so callers constructing HookRecord inline can omit them.
+  dependsOn: z.array(z.string().min(1)).optional(),
+  paysOffInArc: z.string().optional(),
+  coreHook: z.boolean().optional(),
+  halfLifeChapters: z.number().int().positive().optional(),
+  advancedCount: z.number().int().min(0).optional(),
 });
 
 export type HookRecord = z.infer<typeof HookRecordSchema>;

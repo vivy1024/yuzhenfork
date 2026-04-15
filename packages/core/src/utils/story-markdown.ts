@@ -226,11 +226,21 @@ export function normalizeHookId(value: string | undefined): string {
 }
 
 function parsePendingHookRow(row: ReadonlyArray<string | undefined>): StoredHook {
+  // Row shapes by length:
+  //   7 (legacy pre-timing): id, ch, type, status, last_adv, expected, notes
+  //   8 (Phase 5/6):          id, ch, type, status, last_adv, expected, timing, notes
+  //  12 (Phase 7 extended):   id, ch, type, status, last_adv, expected, timing,
+  //                           depends_on, pays_off_in_arc, core_hook, half_life, notes
+  const phase7 = row.length >= 12;
   const legacyShape = row.length < 8;
   const payoffTiming = legacyShape ? undefined : normalizeHookPayoffTiming(row[6]);
-  const notes = legacyShape ? (row[6] ?? "") : (row[7] ?? "");
+  const notes = phase7
+    ? (row[11] ?? "")
+    : legacyShape
+      ? (row[6] ?? "")
+      : (row[7] ?? "");
 
-  return {
+  const base = {
     hookId: normalizeHookId(row[0]),
     startChapter: parseStrictChapterInteger(row[1]),
     type: row[2] ?? "",
@@ -240,6 +250,45 @@ function parsePendingHookRow(row: ReadonlyArray<string | undefined>): StoredHook
     payoffTiming,
     notes,
   };
+
+  if (!phase7) return base;
+
+  return {
+    ...base,
+    dependsOn: parseDependsOn(row[7] ?? ""),
+    paysOffInArc: (row[8] ?? "").trim(),
+    coreHook: parseBooleanCell(row[9]),
+    halfLifeChapters: parseOptionalInt(row[10]),
+  };
+}
+
+function parseDependsOn(cell: string): ReadonlyArray<string> {
+  const trimmed = cell.trim();
+  if (!trimmed) return [];
+  const lower = trimmed.toLowerCase();
+  if (lower === "none" || lower === "n/a" || lower === "-" || trimmed === "无") return [];
+
+  // Accept [H01, H02] or H01, H02 or H01/H02.
+  const stripped = trimmed.replace(/^[\[\(]\s*/, "").replace(/\s*[\]\)]$/, "");
+  return stripped
+    .split(/[,，、\/]+/)
+    .map((item) => normalizeHookId(item))
+    .filter((item) => item.length > 0);
+}
+
+function parseBooleanCell(cell: string | undefined): boolean {
+  const normalized = (cell ?? "").trim().toLowerCase();
+  if (!normalized) return false;
+  return /^(true|yes|y|是|核心|core|1|✓|✔)$/.test(normalized);
+}
+
+function parseOptionalInt(cell: string | undefined): number | undefined {
+  const normalized = (cell ?? "").trim();
+  if (!normalized) return undefined;
+  const match = normalized.match(/\d+/);
+  if (!match) return undefined;
+  const value = parseInt(match[0], 10);
+  return Number.isFinite(value) && value > 0 ? value : undefined;
 }
 
 function escapeTableCell(value: string | number): string {

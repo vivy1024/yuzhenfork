@@ -54,6 +54,12 @@ export interface StoredHook {
   readonly expectedPayoff: string;
   readonly payoffTiming?: string;
   readonly notes: string;
+  // Phase 7 — hook causality / promotion metadata.
+  readonly dependsOn?: ReadonlyArray<string>;
+  readonly paysOffInArc?: string;
+  readonly coreHook?: boolean;
+  readonly halfLifeChapters?: number;
+  readonly advancedCount?: number;
 }
 
 export class MemoryDB {
