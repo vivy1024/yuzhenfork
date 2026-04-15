@@ -21,6 +21,8 @@ import {
   runAgentSession,
   buildAgentSystemPrompt,
   resolveServicePreset,
+  resolveServiceProviderFamily,
+  resolveServiceModelsBaseUrl,
   resolveServiceModel,
   loadSecrets,
   saveSecrets,
@@ -378,10 +380,14 @@ function buildModelCandidates(args: {
 }
 
 async function fetchModelsFromServiceBaseUrl(
+  serviceId: string,
   baseUrl: string,
   apiKey: string,
 ): Promise<{ models: Array<{ id: string; name: string }>; error?: string }> {
-  const modelsUrl = baseUrl.replace(/\/$/, "") + "/models";
+  const modelsBaseUrl = isCustomServiceId(serviceId)
+    ? baseUrl
+    : resolveServiceModelsBaseUrl(serviceId) ?? baseUrl;
+  const modelsUrl = modelsBaseUrl.replace(/\/$/, "") + "/models";
   try {
     const res = await fetch(modelsUrl, {
       headers: { Authorization: `Bearer ${apiKey}` },
@@ -421,7 +427,8 @@ async function probeServiceCapabilities(args: {
       ? envConfig.global.model
       : null;
 
-  const modelsResponse = await fetchModelsFromServiceBaseUrl(args.baseUrl, args.apiKey);
+  const baseService = isCustomServiceId(args.service) ? "custom" : args.service;
+  const modelsResponse = await fetchModelsFromServiceBaseUrl(baseService, args.baseUrl, args.apiKey);
   const discoveredModels = modelsResponse.models;
   const modelCandidates = buildModelCandidates({
     preferredModel: args.preferredModel,
@@ -443,8 +450,8 @@ async function probeServiceCapabilities(args: {
   for (const model of modelCandidates) {
     for (const plan of buildProbePlans(args.preferredApiFormat, args.preferredStream)) {
       const client = createLLMClient({
-        provider: args.service === "anthropic" ? "anthropic" : "openai",
-        service: isCustomServiceId(args.service) ? "custom" : args.service,
+        provider: resolveServiceProviderFamily(baseService) ?? "openai",
+        service: baseService,
         configSource: "studio",
         baseUrl: args.baseUrl,
         apiKey: args.apiKey.trim(),

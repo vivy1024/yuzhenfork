@@ -11,13 +11,13 @@ const KNOWN_MODELS = new Set(["gpt-4o", "kimi-k2.5", "MiniMax-M2.7"]);
 vi.mock("@mariozechner/pi-ai", () => ({
   getModel: vi.fn((provider: string, modelId: string) => {
     if (!KNOWN_MODELS.has(modelId)) return undefined;
-    if (modelId === "MiniMax-M2.7") {
+    if (modelId === "MiniMax-M2.7" && provider === "anthropic") {
       return {
         id: modelId,
         name: modelId,
         api: "anthropic-messages",
-        provider: "minimax",
-        baseUrl: "https://api.minimax.io/anthropic",
+        provider: "anthropic",
+        baseUrl: "https://api.minimaxi.com/anthropic",
         reasoning: true,
         input: ["text"],
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
@@ -154,7 +154,7 @@ describe("resolveServiceModel", () => {
     expect(result.model.api).toBe("openai-responses");
   });
 
-  it("overrides MiniMax pi-ai metadata with our preset baseUrl and api", async () => {
+  it("resolves MiniMax using the preset provider family and anthropic endpoint", async () => {
     await mkdir(join(root, ".inkos"), { recursive: true });
     await writeFile(
       join(root, ".inkos", "secrets.json"),
@@ -165,7 +165,8 @@ describe("resolveServiceModel", () => {
 
     expect(result.apiKey).toBe("sk-minimax");
     expect(result.model.baseUrl).toBe("https://api.minimaxi.com/anthropic");
-    expect(result.model.api).toBe("openai-completions");
+    expect(result.model.api).toBe("anthropic-messages");
+    expect(result.model.provider).toBe("anthropic");
     expect(result.model.reasoning).toBe(true);
     expect(result.model.contextWindow).toBe(204800);
     expect(result.model.maxTokens).toBe(131072);

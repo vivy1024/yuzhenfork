@@ -3,7 +3,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { ProjectConfigSchema, type ProjectConfig } from "../models/project.js";
 import { getServiceApiKey } from "../llm/secrets.js";
-import { resolveServicePreset } from "../llm/service-presets.js";
+import { resolveServicePreset, resolveServiceProviderFamily } from "../llm/service-presets.js";
 
 export const GLOBAL_CONFIG_DIR = join(homedir(), ".inkos");
 export const GLOBAL_ENV_PATH = join(GLOBAL_CONFIG_DIR, ".env");
@@ -280,9 +280,8 @@ function serviceEntryKey(entry: ServiceConfigEntry): string {
 }
 
 function deriveProviderFromService(service: string): "anthropic" | "openai" | "custom" {
-  if (service === "anthropic") return "anthropic";
   if (service === "custom") return "custom";
-  return "openai";
+  return resolveServiceProviderFamily(service) ?? "openai";
 }
 
 function isPrivateIpv4(hostname: string): boolean {

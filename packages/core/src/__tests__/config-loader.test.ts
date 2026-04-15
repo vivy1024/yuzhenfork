@@ -115,6 +115,41 @@ describe("loadProjectConfig local provider auth", () => {
     expect(config.llm.maxTokens).toBe(4096);
   });
 
+  it("derives provider/baseUrl from the MiniMax preset single source of truth", async () => {
+    root = await mkdtemp(join(tmpdir(), "inkos-config-loader-minimax-"));
+    for (const key of ENV_KEYS) {
+      previousEnv.set(key, process.env[key]);
+      process.env[key] = "";
+    }
+
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      name: "minimax-project",
+      version: "0.1.0",
+      language: "zh",
+      llm: {
+        services: [
+          { service: "minimax", temperature: 0.9, maxTokens: 4096 },
+        ],
+        defaultModel: "MiniMax-M2.7",
+      },
+      notify: [],
+    }, null, 2), "utf-8");
+    await mkdir(join(root, ".inkos"), { recursive: true });
+    await writeFile(
+      join(root, ".inkos", "secrets.json"),
+      JSON.stringify({ services: { minimax: { apiKey: "sk-minimax" } } }, null, 2),
+      "utf-8",
+    );
+
+    const config = await loadProjectConfig(root);
+
+    expect(config.llm.service).toBe("minimax");
+    expect(config.llm.provider).toBe("anthropic");
+    expect(config.llm.baseUrl).toBe("https://api.minimaxi.com/anthropic");
+    expect(config.llm.model).toBe("MiniMax-M2.7");
+    expect(config.llm.apiKey).toBe("sk-minimax");
+  });
+
   it("loads custom service config using custom secret key and entry baseUrl", async () => {
     root = await mkdtemp(join(tmpdir(), "inkos-config-loader-custom-"));
     for (const key of ENV_KEYS) {
