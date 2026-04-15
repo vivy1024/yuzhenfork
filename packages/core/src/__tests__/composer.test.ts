@@ -133,11 +133,22 @@ describe("ComposerAgent", () => {
       plan,
     });
 
-    expect(result.ruleStack.sections.hard).toContain("story_bible");
+    // Phase hotfix 6: section names track Phase 5 authoritative paths.
+    expect(result.ruleStack.sections.hard).toContain("story_frame");
+    expect(result.ruleStack.sections.hard).toContain("roles");
     expect(result.ruleStack.sections.soft).toContain("author_intent");
+    expect(result.ruleStack.sections.soft).toContain("volume_map");
     expect(result.ruleStack.sections.diagnostic).toContain("anti_ai_checks");
-    // activeOverrides dropped with ChapterConflict removal (Phase 1 transitional)
-    expect(result.ruleStack.activeOverrides).toEqual([]);
+    // activeOverrides now derived from the plan: 1 mustAvoid + 2 styleEmphasis.
+    expect(result.ruleStack.activeOverrides.length).toBeGreaterThan(0);
+    const reasons = result.ruleStack.activeOverrides.map((o) => o.reason);
+    expect(reasons).toContain("Do not reveal the mastermind.");
+    expect(reasons).toContain("character conflict");
+    expect(reasons).toContain("tight POV");
+    // All overrides target the current chapter.
+    for (const override of result.ruleStack.activeOverrides) {
+      expect(override.target).toContain("chapter:4");
+    }
   });
 
   it("writes trace output describing planner inputs and selected sources", async () => {
