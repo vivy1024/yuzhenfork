@@ -1378,6 +1378,16 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
       broadcast("agent:complete", { instruction, activeBookId });
 
+      // If a sub_agent created a new book during this session, broadcast book:created
+      // so the sidebar refreshes.
+      if (!activeBookId && collectedToolExecs.some((t) => t.agent === "architect" && t.status === "completed")) {
+        const books = await state.listBooks();
+        const latestBook = books.at(-1);
+        if (latestBook) {
+          broadcast("book:created", { bookId: latestBook });
+        }
+      }
+
       return c.json({
         response: result.responseText,
         session: { sessionId: bookSession.sessionId },
