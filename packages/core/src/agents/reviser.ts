@@ -41,7 +41,7 @@ export interface ReviseOutput {
   };
 }
 
-type AutoOutputMode = "patch-only" | "allow-full";
+type AutoOutputMode = "patch-only" | "rewrite-only" | "allow-full";
 
 function buildTieredIssueList(
   issues: ReadonlyArray<AuditIssue>,
@@ -200,8 +200,9 @@ export class ReviserAgent extends BaseAgent {
         })
       : characterMatrix;
 
+    const autoOutputMode = mode === "auto" ? resolveAutoOutputMode(issues) : "allow-full";
     const systemPrompt = mode === "auto"
-      ? this.buildAutoSystemPrompt({ langPrefix, gp, protagonistBlock, numericalRule, lengthGuardrail, resolvedLanguage, lengthSpec: options?.lengthSpec })
+      ? this.buildAutoSystemPrompt({ langPrefix, gp, protagonistBlock, numericalRule, lengthGuardrail, resolvedLanguage, lengthSpec: options?.lengthSpec, autoOutputMode })
       : this.buildLegacySystemPrompt({ langPrefix, gp, protagonistBlock, numericalRule, lengthGuardrail, mode, resolvedLanguage });
 
     const ledgerBlock = gp.numericalSystem
@@ -275,7 +276,7 @@ ${chapterContent}`;
       gp,
       mode,
       chapterContent,
-      mode === "auto" ? resolveAutoOutputMode(issues) : "allow-full",
+      autoOutputMode,
     );
     const mergedOutput = governedMode
       ? {
@@ -321,7 +322,8 @@ ${chapterContent}`;
       updatedHooks: extract("UPDATED_HOOKS") || "(伏笔池未更新)",
     });
 
-    // Auto mode: only allow REVISED_CONTENT for whole-chapter issue sets.
+    // Auto mode: route by issue type — structural issues require REVISED_CONTENT,
+    // local-only issues only accept PATCHES, mixed sets accept either.
     if (mode === "auto") {
       if (autoOutputMode === "patch-only") {
         const patchesRaw = extract("PATCHES");
@@ -334,6 +336,16 @@ ${chapterContent}`;
             }
           }
         }
+        return makeResult(originalChapter, false);
+      }
+
+      if (autoOutputMode === "rewrite-only") {
+        const revisedContent = extract("REVISED_CONTENT");
+        if (revisedContent) {
+          return makeResult(revisedContent, true);
+        }
+        // No rewrite produced — don't fall back to patches; structural issues
+        // cannot be safely patched. Return original unchanged.
         return makeResult(originalChapter, false);
       }
 
@@ -375,8 +387,9 @@ ${chapterContent}`;
     lengthGuardrail: string;
     resolvedLanguage: "zh" | "en";
     lengthSpec?: LengthSpec;
+    autoOutputMode: AutoOutputMode;
   }): string {
-    const { langPrefix, gp, protagonistBlock, numericalRule, resolvedLanguage, lengthSpec } = params;
+    const { langPrefix, gp, protagonistBlock, numericalRule, resolvedLanguage, lengthSpec, autoOutputMode } = params;
     // lengthGuardrail intentionally not used in auto mode — length constraint is embedded in REVISED_CONTENT description
     const en = resolvedLanguage === "en";
     const ledgerSection = gp.numericalSystem
@@ -388,8 +401,19 @@ ${chapterContent}`;
           : `\n  硬性约束：重写后的章节必须控制在 ${lengthSpec.softMin}-${lengthSpec.softMax} 字以内（目标 ${lengthSpec.target} 字，±25%）。这是不可突破的底线。`)
       : "";
 
+    const routingDirectiveEn = autoOutputMode === "rewrite-only"
+      ? "\n\nROUTING: The reviewer's blocking issues are structural / semantic (character collapse, mainline drift, missing payoff, timeline break, unpaid hook, memo drift, etc.). You MUST output REVISED_CONTENT — do not emit PATCHES, they cannot fix this class of problem. If you cannot safely rewrite, say so in FIXED_ISSUES and leave REVISED_CONTENT empty."
+      : autoOutputMode === "patch-only"
+        ? "\n\nROUTING: The reviewer's blocking issues are local (wording, paragraph shape, fatigue word, information boundary, knowledge pollution). You MUST output PATCHES only — do not rewrite the whole chapter. If patches are not possible, leave PATCHES empty."
+        : "";
+    const routingDirectiveZh = autoOutputMode === "rewrite-only"
+      ? "\n\n分流指令：reviewer 报告的阻塞问题属于结构/语义错（人设崩、主线偏、爽点缺、时间线错、伏笔未收、memo 偏离等）。你必须输出 REVISED_CONTENT——禁止输出 PATCHES，这类问题不能靠补丁修复。如果无法安全重写，在 FIXED_ISSUES 里说明并留空 REVISED_CONTENT。"
+      : autoOutputMode === "patch-only"
+        ? "\n\n分流指令：reviewer 报告的阻塞问题属于局部错（措辞、段落形状、疲劳词、信息越界、知识污染）。你必须只输出 PATCHES——不要整章改写。如果做不出补丁，留空 PATCHES。"
+        : "";
+
     return en
-      ? `${langPrefix}You are a professional ${gp.name} web-fiction revision editor. Fix the chapter according to the review notes.${protagonistBlock}
+      ? `${langPrefix}You are a professional ${gp.name} web-fiction revision editor. Fix the chapter according to the review notes.${protagonistBlock}${routingDirectiveEn}
 
 PATCHES and REVISED_CONTENT serve different problems — choose by problem type, not preference:
 
@@ -437,7 +461,7 @@ REPLACEMENT_TEXT:
 ${ledgerSection}
 === UPDATED_HOOKS ===
 (Full updated hooks board)`
-      : `${langPrefix}你是一位专业的${gp.name}网络小说修稿编辑。你的任务是根据审稿意见对章节进行修正。${protagonistBlock}
+      : `${langPrefix}你是一位专业的${gp.name}网络小说修稿编辑。你的任务是根据审稿意见对章节进行修正。${protagonistBlock}${routingDirectiveZh}
 
 PATCHES 和 REVISED_CONTENT 分别处理不同类型的问题——按问题类型选择，不是按偏好：
 
@@ -591,27 +615,74 @@ ${overrides}\n`;
   }
 }
 
+// Local-only categories: reviser produces line/paragraph patches. Fixing these
+// with a full rewrite risks introducing new issues, so we force patch-only.
+const LOCAL_ONLY_PATTERNS: ReadonlyArray<RegExp> = [
+  /Paragraph uniformity|段落等长/i,
+  /Hedge density|套话密度/i,
+  /Formulaic transitions|公式化转折/i,
+  /List-like structure|列表式结构/i,
+  /Cross-chapter repetition|跨章重复/i,
+  /AI-tell word density/i,
+  /Fatigue word|高疲劳词/i,
+  /Information Boundary Check|信息越界/i,
+  /Knowledge Base Pollution|知识库污染/i,
+];
+
+// Structural/semantic categories: character collapse, mainline drift, conflict
+// absence, timeline breaks, unpaid hooks, memo drift. These cannot be patched;
+// the reviser must rewrite the chapter in full.
+const STRUCTURAL_PATTERNS: ReadonlyArray<RegExp> = [
+  /OOC|人设|Character Fidelity|Character Matrix|Character.*Consistency/i,
+  /Mainline.*Drift|主线偏离|Outline Drift|大纲偏离|Chapter Memo Drift|章节备忘偏离/i,
+  /Conflict|冲突乏力|Payoff Dilution|爽点虚化/i,
+  /Timeline|时间线/i,
+  /Hook Check|伏笔检查|Hook.*Debt|伏笔.*债|未兑现/i,
+  /Power Scaling|战力崩坏|金手指/i,
+  /Pacing|节奏/i,
+  /POV Consistency|视角/i,
+  /Subplot Stagnation|支线停滞|Arc Flatline|弧线平坦/i,
+  /Relationship Dynamics|关系动态|情感表达/i,
+  /Incentive Chain|利益链/i,
+  /Canon Event|正典|Mainline Canon/i,
+];
+
 function resolveAutoOutputMode(issues: ReadonlyArray<AuditIssue>): AutoOutputMode {
   if (issues.length === 0) {
     return "allow-full";
   }
 
-  const localOnlyPatterns: ReadonlyArray<RegExp> = [
-    /Paragraph uniformity|段落等长/i,
-    /Hedge density|套话密度/i,
-    /Formulaic transitions|公式化转折/i,
-    /List-like structure|列表式结构/i,
-    /Cross-chapter repetition|跨章重复/i,
-    /AI-tell word density/i,
-    /Fatigue word|高疲劳词/i,
-    /Information Boundary Check|信息越界/i,
-    /Knowledge Base Pollution|知识库污染/i,
-  ];
-
-  const isLocalOnly = issues.every((issue) => {
+  const isStructural = (issue: AuditIssue): boolean => {
     const text = `${issue.category} ${issue.description}`;
-    return localOnlyPatterns.some((pattern) => pattern.test(text));
-  });
+    return STRUCTURAL_PATTERNS.some((pattern) => pattern.test(text));
+  };
+  const isLocal = (issue: AuditIssue): boolean => {
+    const text = `${issue.category} ${issue.description}`;
+    return LOCAL_ONLY_PATTERNS.some((pattern) => pattern.test(text));
+  };
 
-  return isLocalOnly ? "patch-only" : "allow-full";
+  // Count blocking (critical + warning) structural vs local issues. Info-level
+  // findings are reviewer hints for the Polisher — they do not drive routing.
+  const blocking = issues.filter((issue) => issue.severity !== "info");
+  if (blocking.length === 0) {
+    return "patch-only"; // only hints / info — at most local polish
+  }
+
+  const structuralCount = blocking.filter(isStructural).length;
+  const localOnlyCount = blocking.filter(isLocal).length;
+
+  // Any structural issue forces a rewrite — patches cannot fix character
+  // collapse, mainline drift, missing payoff, or timeline breaks.
+  if (structuralCount > 0) {
+    return "rewrite-only";
+  }
+
+  // All blocking issues are in the local-only list → safe to patch.
+  if (localOnlyCount === blocking.length) {
+    return "patch-only";
+  }
+
+  // Mixed / unknown blocking issue set — let the reviser pick (usually ends
+  // up rewriting when critical, patching when warning).
+  return "allow-full";
 }
