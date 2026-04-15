@@ -19,9 +19,12 @@ import {
   persistBookSession,
   appendBookSessionMessage,
   runAgentSession,
+  resolveServicePreset,
   resolveServiceModel,
   loadSecrets,
   saveSecrets,
+  getServiceApiKey,
+  listModelsForService,
   type ResolvedModel,
   type PipelineConfig,
   type ProjectConfig,
@@ -110,9 +113,110 @@ type EventHandler = (event: string, data: unknown) => void;
 const subscribers = new Set<EventHandler>();
 const bookCreateStatus = new Map<string, { status: "creating" | "error"; error?: string }>();
 
+interface ServiceConfigEntry {
+  service: string;
+  name?: string;
+  baseUrl?: string;
+  temperature?: number;
+  maxTokens?: number;
+}
+
 function broadcast(event: string, data: unknown): void {
   for (const handler of subscribers) {
     handler(event, data);
+  }
+}
+
+function isCustomServiceId(serviceId: string): boolean {
+  return serviceId === "custom" || serviceId.startsWith("custom:");
+}
+
+function serviceConfigKey(entry: ServiceConfigEntry): string {
+  return entry.service === "custom" ? `custom:${entry.name ?? "Custom"}` : entry.service;
+}
+
+function normalizeServiceEntry(serviceId: string, value: Record<string, unknown>): ServiceConfigEntry {
+  if (serviceId.startsWith("custom:")) {
+    return {
+      service: "custom",
+      name: decodeURIComponent(serviceId.slice("custom:".length)),
+      ...(typeof value.baseUrl === "string" && value.baseUrl.length > 0 ? { baseUrl: value.baseUrl } : {}),
+      ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
+      ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+    };
+  }
+
+  if (serviceId === "custom") {
+    return {
+      service: "custom",
+      ...(typeof value.name === "string" && value.name.length > 0 ? { name: value.name } : {}),
+      ...(typeof value.baseUrl === "string" && value.baseUrl.length > 0 ? { baseUrl: value.baseUrl } : {}),
+      ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
+      ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+    };
+  }
+
+  return {
+    service: serviceId,
+    ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
+    ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+  };
+}
+
+function normalizeServiceConfig(raw: unknown): ServiceConfigEntry[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+      .map((entry) => ({
+        service: typeof entry.service === "string" && entry.service.length > 0 ? entry.service : "custom",
+        ...(typeof entry.name === "string" && entry.name.length > 0 ? { name: entry.name } : {}),
+        ...(typeof entry.baseUrl === "string" && entry.baseUrl.length > 0 ? { baseUrl: entry.baseUrl } : {}),
+        ...(typeof entry.temperature === "number" ? { temperature: entry.temperature } : {}),
+        ...(typeof entry.maxTokens === "number" ? { maxTokens: entry.maxTokens } : {}),
+      }));
+  }
+
+  if (raw && typeof raw === "object") {
+    return Object.entries(raw as Record<string, unknown>)
+      .filter(([, value]) => value && typeof value === "object")
+      .map(([serviceId, value]) => normalizeServiceEntry(serviceId, value as Record<string, unknown>));
+  }
+
+  return [];
+}
+
+function mergeServiceConfig(existing: ServiceConfigEntry[], updates: ServiceConfigEntry[]): ServiceConfigEntry[] {
+  const merged = new Map(existing.map((entry) => [serviceConfigKey(entry), entry]));
+  for (const update of updates) {
+    merged.set(serviceConfigKey(update), update);
+  }
+  return [...merged.values()];
+}
+
+async function loadRawConfig(root: string): Promise<Record<string, unknown>> {
+  const configPath = join(root, "inkos.json");
+  const raw = await readFile(configPath, "utf-8");
+  return JSON.parse(raw) as Record<string, unknown>;
+}
+
+async function saveRawConfig(root: string, config: Record<string, unknown>): Promise<void> {
+  await writeFile(join(root, "inkos.json"), JSON.stringify(config, null, 2), "utf-8");
+}
+
+async function resolveConfiguredServiceBaseUrl(root: string, serviceId: string, inlineBaseUrl?: string): Promise<string | undefined> {
+  if (inlineBaseUrl?.trim()) return inlineBaseUrl.trim();
+
+  if (!isCustomServiceId(serviceId)) {
+    return resolveServicePreset(serviceId)?.baseUrl;
+  }
+
+  try {
+    const config = await loadRawConfig(root);
+    const services = normalizeServiceConfig((config.llm as Record<string, unknown> | undefined)?.services);
+    const matched = services.find((entry) => serviceConfigKey(entry) === serviceId);
+    return matched?.baseUrl;
+  } catch {
+    return undefined;
   }
 }
 
@@ -507,7 +611,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   // --- Model discovery ---
 
   app.get("/api/v1/services", async (c) => {
-    const { resolveServicePreset } = await import("@actalk/inkos-core");
     const secrets = await loadSecrets(root);
 
     const SERVICE_KEYS = [
@@ -527,10 +630,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
     // Add custom services from inkos.json
     try {
-      const configPath = join(root, "inkos.json");
-      const raw = await readFile(configPath, "utf-8");
-      const config = JSON.parse(raw);
-      for (const svc of config.llm?.services ?? []) {
+      const config = await loadRawConfig(root);
+      for (const svc of normalizeServiceConfig((config.llm as Record<string, unknown> | undefined)?.services)) {
         if (svc.service === "custom") {
           const secretKey = `custom:${svc.name}`;
           services.push({
@@ -546,43 +647,42 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   });
 
   app.get("/api/v1/services/config", async (c) => {
-    const configPath = join(root, "inkos.json");
-    const raw = await readFile(configPath, "utf-8");
-    const config = JSON.parse(raw);
-    const services = config.llm?.services ?? [];
-    return c.json({ services, defaultModel: config.llm?.defaultModel ?? null });
+    const config = await loadRawConfig(root);
+    const llm = (config.llm as Record<string, unknown> | undefined) ?? {};
+    const services = normalizeServiceConfig(llm.services);
+    return c.json({ services, defaultModel: llm.defaultModel ?? null });
   });
 
   app.put("/api/v1/services/config", async (c) => {
-    const body = await c.req.json<{ services: any[]; defaultModel?: string }>();
-    const configPath = join(root, "inkos.json");
-    const raw = await readFile(configPath, "utf-8");
-    const config = JSON.parse(raw);
+    const body = await c.req.json<{ services: unknown; defaultModel?: string }>();
+    const config = await loadRawConfig(root);
     config.llm = config.llm ?? {};
-    config.llm.services = body.services;
+    const llm = config.llm as Record<string, unknown>;
+    const existingServices = normalizeServiceConfig(llm.services);
+    const incomingServices = normalizeServiceConfig(body.services);
+    llm.services = mergeServiceConfig(existingServices, incomingServices);
     if (body.defaultModel !== undefined) {
-      config.llm.defaultModel = body.defaultModel;
+      llm.defaultModel = body.defaultModel;
     }
-    await writeFile(configPath, JSON.stringify(config, null, 2), "utf-8");
+    await saveRawConfig(root, config);
     return c.json({ ok: true });
   });
 
   app.post("/api/v1/services/:service/test", async (c) => {
-    const { resolveServicePreset } = await import("@actalk/inkos-core");
     const service = c.req.param("service");
-    const { apiKey } = await c.req.json<{ apiKey: string }>();
+    const { apiKey, baseUrl } = await c.req.json<{ apiKey: string; baseUrl?: string }>();
 
     if (!apiKey?.trim()) {
       return c.json({ ok: false, error: "API Key 不能为空" }, 400);
     }
 
-    const preset = resolveServicePreset(service);
-    if (!preset?.baseUrl) {
+    const resolvedBaseUrl = await resolveConfiguredServiceBaseUrl(root, service, baseUrl);
+    if (!resolvedBaseUrl) {
       return c.json({ ok: false, error: `未知服务商: ${service}` }, 400);
     }
 
     // Call the real /models API — no fallback
-    const modelsUrl = preset.baseUrl.replace(/\/$/, "") + "/models";
+    const modelsUrl = resolvedBaseUrl.replace(/\/$/, "") + "/models";
     try {
       const res = await fetch(modelsUrl, {
         headers: { Authorization: `Bearer ${apiKey.trim()}` },
@@ -627,20 +727,19 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   });
 
   app.get("/api/v1/services/:service/models", async (c) => {
-    const { resolveServicePreset, getServiceApiKey } = await import("@actalk/inkos-core");
     const service = c.req.param("service");
     const apiKey = c.req.query("apiKey") || await getServiceApiKey(root, service);
 
     // No key = no models (don't fallback to built-in list)
     if (!apiKey) return c.json({ models: [] });
 
-    const preset = resolveServicePreset(service);
-    if (!preset?.baseUrl) return c.json({ models: [] });
+    const resolvedBaseUrl = await resolveConfiguredServiceBaseUrl(root, service);
+    if (!resolvedBaseUrl) return c.json({ models: [] });
 
     // Call real API only
     let models: Array<{ id: string; name: string }> = [];
     try {
-      const modelsUrl = preset.baseUrl.replace(/\/$/, "") + "/models";
+      const modelsUrl = resolvedBaseUrl.replace(/\/$/, "") + "/models";
       const res = await fetch(modelsUrl, {
         headers: { Authorization: `Bearer ${apiKey}` },
         signal: AbortSignal.timeout(10_000),
@@ -882,7 +981,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       if (reqService && reqModel) {
         // 1. Frontend explicitly selected a service+model — fail loudly if no key
         try {
-          const resolved = await resolveServiceModel(reqService, reqModel, root);
+          const resolved = await resolveServiceModel(
+            reqService,
+            reqModel,
+            root,
+            await resolveConfiguredServiceBaseUrl(root, reqService),
+          );
           resolvedModel = resolved.model;
           resolvedApiKey = resolved.apiKey;
         } catch (e: any) {
@@ -901,11 +1005,16 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         // 2. Try defaultModel from new config format
         const rawConfig = config.llm as unknown as Record<string, unknown>;
         const defaultModel = rawConfig.defaultModel as string | undefined;
-        const servicesArr = Array.isArray(rawConfig.services) ? rawConfig.services : [];
-        const firstService = (servicesArr as Array<{ service: string }>)[0];
+        const servicesArr = normalizeServiceConfig(rawConfig.services);
+        const firstService = servicesArr[0];
         if (firstService?.service && defaultModel) {
           try {
-            const resolved = await resolveServiceModel(firstService.service, defaultModel, root);
+            const resolved = await resolveServiceModel(
+              serviceConfigKey(firstService),
+              defaultModel,
+              root,
+              firstService.baseUrl,
+            );
             resolvedModel = resolved.model;
             resolvedApiKey = resolved.apiKey;
           } catch { /* fall through */ }
@@ -916,12 +1025,16 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         // 3. Try first connected service from secrets
         const secrets = await loadSecrets(root);
         for (const [svcName, svcData] of Object.entries(secrets.services)) {
-          if (svcData?.apiKey && !svcName.startsWith("custom:")) {
+          if (svcData?.apiKey) {
             try {
-              const { listModelsForService: listModels } = await import("@actalk/inkos-core");
-              const models = await listModels(svcName, svcData.apiKey);
+              const models = await listModelsForService(svcName, svcData.apiKey);
               if (models.length > 0) {
-                const resolved = await resolveServiceModel(svcName, models[0].id, root);
+                const resolved = await resolveServiceModel(
+                  svcName,
+                  models[0].id,
+                  root,
+                  await resolveConfiguredServiceBaseUrl(root, svcName),
+                );
                 resolvedModel = resolved.model;
                 resolvedApiKey = resolved.apiKey;
                 break;

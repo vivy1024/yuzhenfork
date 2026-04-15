@@ -44,7 +44,8 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   useEffect(() => { void fetchServices(); }, [fetchServices]);
 
   const svc = services.find((s) => s.service === serviceId);
-  const isCustom = serviceId === "custom";
+  const isCustom = serviceId === "custom" || serviceId.startsWith("custom:");
+  const persistedCustomName = serviceId.startsWith("custom:") ? decodeURIComponent(serviceId.slice("custom:".length)) : "";
 
   // -- Local form state --
   const [apiKey, setApiKey] = useState("");
@@ -56,6 +57,30 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
 
   // -- Unified connection status --
   const [status, setStatus] = useState<ConnectionStatus>({ state: "idle" });
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchJson<{ services: Array<Record<string, unknown>> }>("/services/config")
+      .then((data) => {
+        if (cancelled) return;
+        const matched = (data.services ?? []).find((entry) => {
+          if (typeof entry.service !== "string") return false;
+          if (serviceId.startsWith("custom:")) {
+            return entry.service === "custom" && `custom:${String(entry.name ?? "")}` === serviceId;
+          }
+          return entry.service === serviceId;
+        });
+        if (!matched) return;
+        if (isCustom) {
+          setCustomName(String(matched.name ?? persistedCustomName));
+          setBaseUrl(String(matched.baseUrl ?? ""));
+        }
+        if (typeof matched.temperature === "number") setTemperature(String(matched.temperature));
+        if (typeof matched.maxTokens === "number") setMaxTokens(String(matched.maxTokens));
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [isCustom, persistedCustomName, serviceId]);
 
   // Load models on mount if connected
   useEffect(() => {
@@ -72,7 +97,9 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     }
   }, [svc?.connected, serviceId]);
 
-  const label = isCustom ? (customName || "自定义服务") : (svc?.label ?? serviceId);
+  const resolvedCustomName = persistedCustomName || customName.trim() || "Custom";
+  const effectiveServiceId = isCustom ? `custom:${resolvedCustomName}` : serviceId;
+  const label = isCustom ? (customName || persistedCustomName || "自定义服务") : (svc?.label ?? serviceId);
 
   if (loading) return <DetailSkeleton />;
 
@@ -88,20 +115,31 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
       setStatus({ state: "error", message: "请先输入 API Key" });
       return;
     }
+    if (isCustom && !baseUrl.trim()) {
+      setStatus({ state: "error", message: "请先填写 Base URL" });
+      return;
+    }
     setApiKey(trimmedKey);
     setStatus({ state: "testing" });
     try {
       const result = await fetchJson<{ ok: boolean; models?: ModelInfo[]; modelCount?: number; error?: string }>(
-        `/services/${encodeURIComponent(serviceId)}/test`,
-        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ apiKey: trimmedKey }) },
+        `/services/${encodeURIComponent(effectiveServiceId)}/test`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            apiKey: trimmedKey,
+            ...(isCustom ? { baseUrl: baseUrl.trim() } : {}),
+          }),
+        },
       );
       if (result.ok) {
         const models = result.models ?? [];
         setStatus({ state: "connected", models });
-        setStoreModels(serviceId, models); // Write to global store
+        setStoreModels(effectiveServiceId, models); // Write to global store
       } else {
         setStatus({ state: "error", message: result.error ?? "连接失败" });
-        clearStoreModels(serviceId);
+        clearStoreModels(effectiveServiceId);
       }
     } catch (e) {
       setStatus({ state: "error", message: e instanceof Error ? e.message : "连接失败" });
@@ -111,10 +149,14 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   const handleSave = async () => {
     const trimmedKey = apiKey.trim();
     setApiKey(trimmedKey);
+    if (isCustom && !baseUrl.trim()) {
+      setStatus({ state: "error", message: "请先填写 Base URL" });
+      return;
+    }
     setStatus({ state: "saving" });
     try {
       // Save key (empty = delete)
-      await fetchJson(`/services/${encodeURIComponent(serviceId)}/secret`, {
+      await fetchJson(`/services/${encodeURIComponent(effectiveServiceId)}/secret`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: trimmedKey }),
@@ -124,13 +166,14 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          services: {
-            [serviceId]: {
+          services: [
+            {
+              service: isCustom ? "custom" : serviceId,
               temperature: parseFloat(temperature),
               maxTokens: parseInt(maxTokens, 10),
-              ...(isCustom ? { name: customName, baseUrl } : {}),
+              ...(isCustom ? { name: resolvedCustomName, baseUrl: baseUrl.trim() } : {}),
             },
-          },
+          ],
         }),
       });
       setStatus({ state: "saved" });
@@ -139,19 +182,19 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
       setTimeout(() => {
         if (trimmedKey) {
           setStatus({ state: "testing" });
-          fetchJson<{ models: ModelInfo[] }>(`/services/${encodeURIComponent(serviceId)}/models`)
+          fetchJson<{ models: ModelInfo[] }>(`/services/${encodeURIComponent(effectiveServiceId)}/models`)
             .then((data) => {
               const m = data.models ?? [];
               if (m.length > 0) {
                 setStatus({ state: "connected", models: m });
-                setStoreModels(serviceId, m); // Cache for chat picker
+                setStoreModels(effectiveServiceId, m); // Cache for chat picker
               } else {
                 setStatus({ state: "idle" });
               }
             })
             .catch(() => setStatus({ state: "idle" }));
         } else {
-          clearStoreModels(serviceId);
+          clearStoreModels(effectiveServiceId);
           setStatus({ state: "idle" });
         }
       }, 1500);

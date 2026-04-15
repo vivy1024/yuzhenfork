@@ -514,6 +514,93 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
+  it("merges service config patches instead of overwriting existing services", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "moonshot", temperature: 1, maxTokens: 4096 },
+          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9 },
+        ],
+        defaultModel: "kimi-k2.5",
+      },
+    }, null, 2), "utf-8");
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const save = await app.request("http://localhost/api/v1/services/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        services: {
+          moonshot: {
+            temperature: 0.5,
+            maxTokens: 2048,
+          },
+        },
+      }),
+    });
+
+    expect(save.status).toBe(200);
+
+    const raw = JSON.parse(await readFile(join(root, "inkos.json"), "utf-8"));
+    expect(raw.llm.services).toEqual([
+      { service: "moonshot", temperature: 0.5, maxTokens: 2048 },
+      { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9 },
+    ]);
+  });
+
+  it("tests and lists models for custom services using baseUrl and stored config", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1" },
+        ],
+        defaultModel: "corp-chat",
+      },
+    }, null, 2), "utf-8");
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        "custom:内网GPT": { apiKey: "sk-corp" },
+      },
+    });
+    getServiceApiKeyMock.mockResolvedValue("sk-corp");
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [{ id: "corp-chat" }] }),
+        text: async () => "",
+      })
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ data: [{ id: "corp-chat" }] }),
+      });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const testResponse = await app.request("http://localhost/api/v1/services/custom%3A%E5%86%85%E7%BD%91GPT/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: "sk-corp", baseUrl: "https://llm.internal.corp/v1" }),
+    });
+    expect(testResponse.status).toBe(200);
+    await expect(testResponse.json()).resolves.toMatchObject({
+      ok: true,
+      models: [{ id: "corp-chat", name: "corp-chat" }],
+    });
+
+    const modelsResponse = await app.request("http://localhost/api/v1/services/custom%3A%E5%86%85%E7%BD%91GPT/models");
+    expect(modelsResponse.status).toBe(200);
+    await expect(modelsResponse.json()).resolves.toMatchObject({
+      models: [{ id: "corp-chat", name: "corp-chat" }],
+    });
+  });
+
   it("rejects create requests when a complete book with the same id already exists", async () => {
     await mkdir(join(root, "books", "existing-book", "story"), { recursive: true });
     await writeFile(join(root, "books", "existing-book", "book.json"), JSON.stringify({ id: "existing-book" }), "utf-8");

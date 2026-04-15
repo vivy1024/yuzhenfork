@@ -2,9 +2,19 @@ import { readFile, access } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { ProjectConfigSchema, type ProjectConfig } from "../models/project.js";
+import { getServiceApiKey } from "../llm/secrets.js";
+import { resolveServicePreset } from "../llm/service-presets.js";
 
 export const GLOBAL_CONFIG_DIR = join(homedir(), ".inkos");
 export const GLOBAL_ENV_PATH = join(GLOBAL_CONFIG_DIR, ".env");
+
+interface ServiceConfigEntry {
+  readonly service: string;
+  readonly name?: string;
+  readonly baseUrl?: string;
+  readonly temperature?: number;
+  readonly maxTokens?: number;
+}
 
 export function isApiKeyOptionalForEndpoint(params: {
   readonly provider?: string | undefined;
@@ -70,6 +80,46 @@ export async function loadProjectConfig(
   // .env overrides inkos.json for LLM settings
   const env = process.env;
   const llm = (config.llm ?? {}) as Record<string, unknown>;
+
+  const normalizedServices = normalizeServiceEntries(llm.services);
+  if (normalizedServices.length > 0) {
+    llm.services = normalizedServices;
+
+    const selectedEntry = selectServiceEntry(normalizedServices, llm.service);
+    const selectedServiceId = selectedEntry ? serviceEntryKey(selectedEntry) : undefined;
+
+    if (selectedEntry) {
+      llm.service = selectedEntry.service;
+
+      if (!(typeof llm.model === "string" && llm.model.length > 0) && typeof llm.defaultModel === "string" && llm.defaultModel.length > 0) {
+        llm.model = llm.defaultModel;
+      }
+
+      if (!(typeof llm.baseUrl === "string" && llm.baseUrl.length > 0)) {
+        llm.baseUrl = selectedEntry.baseUrl ?? resolveServicePreset(selectedEntry.service)?.baseUrl ?? "";
+      }
+
+      if (!(typeof llm.provider === "string" && llm.provider.length > 0)) {
+        llm.provider = deriveProviderFromService(selectedEntry.service);
+      }
+
+      if (llm.temperature === undefined && selectedEntry.temperature !== undefined) {
+        llm.temperature = selectedEntry.temperature;
+      }
+
+      if (llm.maxTokens === undefined && selectedEntry.maxTokens !== undefined) {
+        llm.maxTokens = selectedEntry.maxTokens;
+      }
+
+      if (selectedServiceId && !env.INKOS_LLM_API_KEY) {
+        const secretApiKey = await getServiceApiKey(root, selectedServiceId);
+        if (secretApiKey) {
+          llm.apiKey = secretApiKey;
+        }
+      }
+    }
+  }
+
   if (env.INKOS_LLM_PROVIDER) llm.provider = env.INKOS_LLM_PROVIDER;
   if (env.INKOS_LLM_BASE_URL) llm.baseUrl = env.INKOS_LLM_BASE_URL;
   if (env.INKOS_LLM_MODEL) llm.model = env.INKOS_LLM_MODEL;
@@ -101,7 +151,7 @@ export async function loadProjectConfig(
   if (env.INKOS_DEFAULT_LANGUAGE) config.language = env.INKOS_DEFAULT_LANGUAGE;
 
   // API key ONLY from env — never stored in inkos.json
-  const apiKey = env.INKOS_LLM_API_KEY;
+  const apiKey = env.INKOS_LLM_API_KEY || (typeof llm.apiKey === "string" ? llm.apiKey : "");
   const provider = typeof llm.provider === "string" ? llm.provider : undefined;
   const baseUrl = typeof llm.baseUrl === "string" ? llm.baseUrl : undefined;
   const apiKeyOptional = isApiKeyOptionalForEndpoint({ provider, baseUrl });
@@ -125,6 +175,76 @@ export async function loadProjectConfig(
   llm.apiKey = apiKey ?? "";
 
   return ProjectConfigSchema.parse(config);
+}
+
+function normalizeServiceEntries(raw: unknown): ServiceConfigEntry[] {
+  if (Array.isArray(raw)) {
+    return raw
+      .filter((entry): entry is Record<string, unknown> => Boolean(entry) && typeof entry === "object")
+      .map((entry) => ({
+        service: typeof entry.service === "string" && entry.service.length > 0 ? entry.service : "custom",
+        ...(typeof entry.name === "string" && entry.name.length > 0 ? { name: entry.name } : {}),
+        ...(typeof entry.baseUrl === "string" && entry.baseUrl.length > 0 ? { baseUrl: entry.baseUrl } : {}),
+        ...(typeof entry.temperature === "number" ? { temperature: entry.temperature } : {}),
+        ...(typeof entry.maxTokens === "number" ? { maxTokens: entry.maxTokens } : {}),
+      }));
+  }
+
+  if (raw && typeof raw === "object") {
+    return Object.entries(raw as Record<string, unknown>)
+      .filter(([, value]) => value && typeof value === "object")
+      .map(([serviceId, value]) => normalizeServiceEntryFromPatch(serviceId, value as Record<string, unknown>));
+  }
+
+  return [];
+}
+
+function normalizeServiceEntryFromPatch(serviceId: string, value: Record<string, unknown>): ServiceConfigEntry {
+  if (serviceId.startsWith("custom:")) {
+    return {
+      service: "custom",
+      name: decodeURIComponent(serviceId.slice("custom:".length)),
+      ...(typeof value.baseUrl === "string" && value.baseUrl.length > 0 ? { baseUrl: value.baseUrl } : {}),
+      ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
+      ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+    };
+  }
+
+  if (serviceId === "custom") {
+    return {
+      service: "custom",
+      ...(typeof value.name === "string" && value.name.length > 0 ? { name: value.name } : {}),
+      ...(typeof value.baseUrl === "string" && value.baseUrl.length > 0 ? { baseUrl: value.baseUrl } : {}),
+      ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
+      ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+    };
+  }
+
+  return {
+    service: serviceId,
+    ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
+    ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
+  };
+}
+
+function selectServiceEntry(
+  services: readonly ServiceConfigEntry[],
+  configuredService: unknown,
+): ServiceConfigEntry | undefined {
+  if (typeof configuredService === "string" && configuredService.length > 0) {
+    return services.find((entry) => entry.service === configuredService || serviceEntryKey(entry) === configuredService) ?? services[0];
+  }
+  return services[0];
+}
+
+function serviceEntryKey(entry: ServiceConfigEntry): string {
+  return entry.service === "custom" ? `custom:${entry.name ?? "Custom"}` : entry.service;
+}
+
+function deriveProviderFromService(service: string): "anthropic" | "openai" | "custom" {
+  if (service === "anthropic") return "anthropic";
+  if (service === "custom") return "custom";
+  return "openai";
 }
 
 function isPrivateIpv4(hostname: string): boolean {

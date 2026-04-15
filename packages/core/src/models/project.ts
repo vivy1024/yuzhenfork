@@ -1,5 +1,13 @@
 import { z } from "zod";
 
+const LLMServiceEntrySchema = z.object({
+  service: z.string().min(1),
+  name: z.string().min(1).optional(),
+  baseUrl: z.string().url().optional(),
+  temperature: z.number().min(0).max(2).optional(),
+  maxTokens: z.number().int().min(1).optional(),
+});
+
 export const LLMConfigSchema = z.object({
   provider: z.enum(["anthropic", "openai", "custom"]),
   service: z.string().default("custom"),
@@ -13,6 +21,8 @@ export const LLMConfigSchema = z.object({
   headers: z.record(z.string()).optional(),
   apiFormat: z.enum(["chat", "responses"]).default("chat"),
   stream: z.boolean().default(true),
+  services: z.array(LLMServiceEntrySchema).optional(),
+  defaultModel: z.string().min(1).optional(),
 });
 
 export type LLMConfig = z.infer<typeof LLMConfigSchema>;
