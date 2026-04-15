@@ -30,34 +30,33 @@ export async function resolveServiceModel(
   const baseService = service.startsWith("custom:") ? "custom" : service;
   const preset = resolveServicePreset(baseService);
   const piProvider = SERVICE_TO_PI_PROVIDER[baseService] ?? "openai";
+  const apiType = service.startsWith("custom:")
+    ? (customApiFormat === "responses" ? "openai-responses" : "openai-completions")
+    : (preset?.api ?? "openai-completions");
+  const configuredBaseUrl = customBaseUrl ?? preset?.baseUrl ?? "";
 
   // Get pi-ai Model — may return undefined for model IDs not in the built-in registry
-  let model = getModel(piProvider as any, modelId as any) as Model<Api> | undefined;
+  const piModel = getModel(piProvider as any, modelId as any) as Model<Api> | undefined;
+  const effectiveBaseUrl = configuredBaseUrl || piModel?.baseUrl || "";
 
-  if (!model) {
-    // Construct a Model object from service preset for models not in pi-ai's registry
-    const apiType = service.startsWith("custom:")
-      ? (customApiFormat === "responses" ? "openai-responses" : "openai-completions")
-      : (preset?.api ?? "openai-completions");
-    const baseUrl = customBaseUrl ?? preset?.baseUrl ?? "";
-    if (!baseUrl) {
-      throw new Error(
-        `Cannot resolve model "${modelId}" for service "${service}": no baseUrl available.`,
-      );
-    }
-    model = {
-      id: modelId,
-      name: modelId,
-      api: apiType as Api,
-      provider: piProvider,
-      baseUrl,
-      reasoning: false,
-      input: ["text"] as ("text" | "image")[],
-      cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-      contextWindow: 0,
-      maxTokens: 16384,
-    };
+  if (!effectiveBaseUrl) {
+    throw new Error(
+      `Cannot resolve model "${modelId}" for service "${service}": no baseUrl available.`,
+    );
   }
+
+  const model: Model<Api> = {
+    id: modelId,
+    name: piModel?.name ?? modelId,
+    api: apiType as Api,
+    provider: piProvider,
+    baseUrl: effectiveBaseUrl,
+    reasoning: piModel?.reasoning ?? false,
+    input: piModel?.input ?? ["text"] as ("text" | "image")[],
+    cost: piModel?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: piModel?.contextWindow ?? 0,
+    maxTokens: piModel?.maxTokens ?? 16384,
+  };
 
   return {
     model,
