@@ -1,6 +1,7 @@
 import type { StateCreator } from "zustand";
 import type { ChatStore, MessageActions, AgentResponse, SessionMessage, Message, MessagePart, ToolExecution, PipelineStage } from "../../types";
 import { fetchJson } from "../../../../hooks/use-api";
+import { shouldRefreshSidebarForTool } from "../../message-policy";
 
 function extractErrorMessage(error: string | { code?: string; message?: string }): string {
   if (typeof error === "string") return error;
@@ -347,7 +348,9 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
           return { messages: replaceLast(msgs, { ...stream, ...flat, parts }) };
         });
 
-        get().bumpBookDataVersion();
+        if (shouldRefreshSidebarForTool(d.tool)) {
+          get().bumpBookDataVersion();
+        }
       } catch { /* ignore */ }
     });
 
