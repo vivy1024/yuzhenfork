@@ -164,7 +164,7 @@ describe("resolveServiceModel", () => {
     const result = await resolveServiceModel("minimax", "MiniMax-M2.7", root);
 
     expect(result.apiKey).toBe("sk-minimax");
-    expect(result.model.baseUrl).toBe("https://api.minimax.io/v1");
+    expect(result.model.baseUrl).toBe("https://api.minimaxi.com/v1");
     expect(result.model.api).toBe("openai-completions");
     expect(result.model.reasoning).toBe(true);
     expect(result.model.contextWindow).toBe(204800);
