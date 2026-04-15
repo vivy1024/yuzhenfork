@@ -127,13 +127,13 @@ async function collectSelectedContext(
       ),
       maybeContextSource(
         storyDir,
-        "story_bible.md",
+        "outline/story_frame.md",
         "Preserve canon constraints referenced by the active chapter brief or hard constraints.",
         retrievalHints,
       ),
       maybeContextSource(
         storyDir,
-        "volume_outline.md",
+        "outline/volume_map.md",
         "Anchor the default planning node for this chapter.",
         plan.intent.outlineNode ? [plan.intent.outlineNode] : [],
       ),
@@ -371,14 +371,36 @@ async function maybeContextSource(
   preferredExcerpts: ReadonlyArray<string> = [],
 ): Promise<ContextPackage["selectedContext"][number] | null> {
     const path = join(storyDir, fileName);
-    const content = await readFileOrDefault(path);
+    let content = await readFileOrDefault(path);
+    let resolvedFileName = fileName;
+
+    if ((!content || content === "(文件尚未创建)")) {
+      // Phase 5 back-compat: the new outline/ files may be absent on legacy
+      // books. Fall back to the deprecated paths transparently.
+      const legacyFallback = outlineFallback(fileName);
+      if (legacyFallback) {
+        const legacyPath = join(storyDir, legacyFallback);
+        const legacyContent = await readFileOrDefault(legacyPath);
+        if (legacyContent && legacyContent !== "(文件尚未创建)") {
+          content = legacyContent;
+          resolvedFileName = legacyFallback;
+        }
+      }
+    }
+
     if (!content || content === "(文件尚未创建)") return null;
 
     return {
-      source: `story/${fileName}`,
+      source: `story/${resolvedFileName}`,
       reason,
       excerpt: pickExcerpt(content, preferredExcerpts),
     };
+}
+
+function outlineFallback(fileName: string): string | null {
+    if (fileName === "outline/story_frame.md") return "story_bible.md";
+    if (fileName === "outline/volume_map.md") return "volume_outline.md";
+    return null;
 }
 
 function pickExcerpt(content: string, preferredExcerpts: ReadonlyArray<string>): string | undefined {

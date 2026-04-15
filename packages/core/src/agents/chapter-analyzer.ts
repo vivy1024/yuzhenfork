@@ -14,6 +14,11 @@ import { countChapterLength, resolveLengthCountingMode } from "../utils/length-m
 import { retrieveMemorySelection } from "../utils/memory-retrieval.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  readStoryFrame,
+  readVolumeMap,
+  readCharacterContext,
+} from "../utils/outline-paths.js";
 
 export interface AnalyzeChapterInput {
   readonly book: BookConfig;
@@ -39,7 +44,9 @@ export class ChapterAnalyzerAgent extends BaseAgent {
       await readGenreProfile(this.ctx.projectRoot, book.genre);
     const resolvedLanguage = book.language ?? genreProfile.language;
 
-    // Read current truth files (same set as writer.ts)
+    // Read current truth files (same set as writer.ts). Phase 5: prefer the
+    // new prose outline (story_frame / volume_map) and roles/ directory.
+    const placeholder = this.missingFilePlaceholder(resolvedLanguage);
     const [
       currentState, ledger, hooks,
       subplotBoard, emotionalArcs, characterMatrix,
@@ -50,9 +57,9 @@ export class ChapterAnalyzerAgent extends BaseAgent {
       this.readFileOrDefault(join(bookDir, "story/pending_hooks.md"), resolvedLanguage),
       this.readFileOrDefault(join(bookDir, "story/subplot_board.md"), resolvedLanguage),
       this.readFileOrDefault(join(bookDir, "story/emotional_arcs.md"), resolvedLanguage),
-      this.readFileOrDefault(join(bookDir, "story/character_matrix.md"), resolvedLanguage),
-      this.readFileOrDefault(join(bookDir, "story/story_bible.md"), resolvedLanguage),
-      this.readFileOrDefault(join(bookDir, "story/volume_outline.md"), resolvedLanguage),
+      readCharacterContext(bookDir, placeholder),
+      readStoryFrame(bookDir, placeholder),
+      readVolumeMap(bookDir, placeholder),
     ]);
     const parsedBookRules = await readBookRules(bookDir);
     const bookRulesBody = parsedBookRules?.body ?? "";

@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { parseMarkdownTableRows } from "../utils/story-markdown.js";
+import { readCharacterContext } from "../utils/outline-paths.js";
 
 async function readOrEmpty(path: string): Promise<string> {
   try {
@@ -10,8 +11,14 @@ async function readOrEmpty(path: string): Promise<string> {
   }
 }
 
+/**
+ * Phase 5: prefer roles/ directory; fall back to legacy character_matrix.md.
+ * storyDir is <bookDir>/story, so the caller indirectly points us at bookDir
+ * via dirname().
+ */
 export async function readCharacterMatrix(storyDir: string): Promise<string> {
-  return readOrEmpty(join(storyDir, "character_matrix.md"));
+  const bookDir = dirname(storyDir);
+  return readCharacterContext(bookDir, "");
 }
 
 export async function readSubplotBoard(storyDir: string): Promise<string> {

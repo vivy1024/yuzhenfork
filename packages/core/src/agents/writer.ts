@@ -42,6 +42,11 @@ import {
 } from "../utils/narrative-control.js";
 import { readFile, writeFile, mkdir, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  readStoryFrame,
+  readVolumeMap,
+  readCharacterContext,
+} from "../utils/outline-paths.js";
 
 export interface WriteChapterInput {
   readonly book: BookConfig;
@@ -124,13 +129,14 @@ export class WriterAgent extends BaseAgent {
   async writeChapter(input: WriteChapterInput): Promise<WriteChapterOutput> {
     const { book, bookDir, chapterNumber } = input;
 
+    const placeholder = "(文件尚未创建)";
     const [
       storyBible, volumeOutline, styleGuide, currentState, ledger, hooks,
       chapterSummaries, subplotBoard, emotionalArcs, characterMatrix, styleProfileRaw,
       parentCanon, fanficCanonRaw,
     ] = await Promise.all([
-        this.readFileOrDefault(join(bookDir, "story/story_bible.md")),
-        this.readFileOrDefault(join(bookDir, "story/volume_outline.md")),
+        readStoryFrame(bookDir, placeholder),
+        readVolumeMap(bookDir, placeholder),
         this.readFileOrDefault(join(bookDir, "story/style_guide.md")),
         this.readFileOrDefault(join(bookDir, "story/current_state.md")),
         this.readFileOrDefault(join(bookDir, "story/particle_ledger.md")),
@@ -138,7 +144,7 @@ export class WriterAgent extends BaseAgent {
         this.readFileOrDefault(join(bookDir, "story/chapter_summaries.md")),
         this.readFileOrDefault(join(bookDir, "story/subplot_board.md")),
         this.readFileOrDefault(join(bookDir, "story/emotional_arcs.md")),
-        this.readFileOrDefault(join(bookDir, "story/character_matrix.md")),
+        readCharacterContext(bookDir, placeholder),
         this.readFileOrDefault(join(bookDir, "story/style_profile.json")),
         this.readFileOrDefault(join(bookDir, "story/parent_canon.md")),
         this.readFileOrDefault(join(bookDir, "story/fanfic_canon.md")),
@@ -437,8 +443,8 @@ export class WriterAgent extends BaseAgent {
       this.readFileOrDefault(join(input.bookDir, "story/chapter_summaries.md")),
       this.readFileOrDefault(join(input.bookDir, "story/subplot_board.md")),
       this.readFileOrDefault(join(input.bookDir, "story/emotional_arcs.md")),
-      this.readFileOrDefault(join(input.bookDir, "story/character_matrix.md")),
-      this.readFileOrDefault(join(input.bookDir, "story/volume_outline.md")),
+      readCharacterContext(input.bookDir, "(文件尚未创建)"),
+      readVolumeMap(input.bookDir, "(文件尚未创建)"),
     ]);
 
     const { profile: genreProfile } = await readGenreProfile(this.ctx.projectRoot, input.book.genre);

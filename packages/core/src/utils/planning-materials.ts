@@ -6,6 +6,7 @@ import {
   retrieveMemorySelection,
   type MemorySelection,
 } from "./memory-retrieval.js";
+import { readStoryFrame, readVolumeMap } from "./outline-paths.js";
 
 export interface PlanningSeedMaterials {
   readonly storyDir: string;
@@ -76,12 +77,14 @@ export async function loadPlanningSeedMaterials(params: {
   const sourcePaths = {
     authorIntent: join(storyDir, "author_intent.md"),
     currentFocus: join(storyDir, "current_focus.md"),
-    storyBible: join(storyDir, "story_bible.md"),
-    volumeOutline: join(storyDir, "volume_outline.md"),
     chapterSummaries: join(storyDir, "chapter_summaries.md"),
     bookRules: join(storyDir, "book_rules.md"),
     currentState: join(storyDir, "current_state.md"),
   } as const;
+
+  // Phase 5: prefer the new prose outline files (outline/story_frame.md +
+  // outline/volume_map.md). Fall back to the legacy files transparently.
+  const placeholder = "(文件尚未创建)";
 
   const [
     authorIntent,
@@ -95,8 +98,8 @@ export async function loadPlanningSeedMaterials(params: {
   ] = await Promise.all([
     readFileOrDefault(sourcePaths.authorIntent),
     readFileOrDefault(sourcePaths.currentFocus),
-    readFileOrDefault(sourcePaths.storyBible),
-    readFileOrDefault(sourcePaths.volumeOutline),
+    readStoryFrame(params.bookDir, placeholder),
+    readVolumeMap(params.bookDir, placeholder),
     readFileOrDefault(sourcePaths.chapterSummaries),
     readFileOrDefault(sourcePaths.bookRules),
     readFileOrDefault(sourcePaths.currentState),
@@ -151,8 +154,8 @@ export async function gatherPlanningMaterials(params: {
     plannerInputs: [
       join(seed.storyDir, "author_intent.md"),
       join(seed.storyDir, "current_focus.md"),
-      join(seed.storyDir, "story_bible.md"),
-      join(seed.storyDir, "volume_outline.md"),
+      join(seed.storyDir, "outline", "story_frame.md"),
+      join(seed.storyDir, "outline", "volume_map.md"),
       join(seed.storyDir, "chapter_summaries.md"),
       join(seed.storyDir, "book_rules.md"),
       join(seed.storyDir, "current_state.md"),

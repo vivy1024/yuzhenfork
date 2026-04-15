@@ -22,6 +22,11 @@ import {
 } from "../utils/narrative-control.js";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  readStoryFrame,
+  readVolumeMap,
+  readCharacterContext,
+} from "../utils/outline-paths.js";
 
 export type ReviseMode = "auto" | "polish" | "rewrite" | "rework" | "anti-detect" | "spot-fix";
 
@@ -128,9 +133,9 @@ export class ReviserAgent extends BaseAgent {
       this.readFileSafe(join(bookDir, "story/particle_ledger.md")),
       this.readFileSafe(join(bookDir, "story/pending_hooks.md")),
       this.readFileSafe(join(bookDir, "story/style_guide.md")),
-      this.readFileSafe(join(bookDir, "story/volume_outline.md")),
-      this.readFileSafe(join(bookDir, "story/story_bible.md")),
-      this.readFileSafe(join(bookDir, "story/character_matrix.md")),
+      readVolumeMap(bookDir, "(文件不存在)"),
+      readStoryFrame(bookDir, "(文件不存在)"),
+      readCharacterContext(bookDir, "(文件不存在)"),
       this.readFileSafe(join(bookDir, "story/chapter_summaries.md")),
       this.readFileSafe(join(bookDir, "story/parent_canon.md")),
       this.readFileSafe(join(bookDir, "story/fanfic_canon.md")),

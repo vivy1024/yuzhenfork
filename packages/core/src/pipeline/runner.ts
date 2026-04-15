@@ -1100,13 +1100,20 @@ export class PipelineRunner {
       }
     };
 
+    // Phase 5: prefer the new prose outline files; fall back to legacy paths.
+    const readOutline = async (newRel: string, legacyRel: string): Promise<string> => {
+      const preferred = await readSafe(join(storyDir, newRel));
+      if (preferred.trim() && preferred !== "(文件不存在)") return preferred;
+      return readSafe(join(storyDir, legacyRel));
+    };
+
     const [currentState, particleLedger, pendingHooks, storyBible, volumeOutline, bookRules] =
       await Promise.all([
         readSafe(join(storyDir, "current_state.md")),
         readSafe(join(storyDir, "particle_ledger.md")),
         readSafe(join(storyDir, "pending_hooks.md")),
-        readSafe(join(storyDir, "story_bible.md")),
-        readSafe(join(storyDir, "volume_outline.md")),
+        readOutline("outline/story_frame.md", "story_bible.md"),
+        readOutline("outline/volume_map.md", "volume_outline.md"),
         readSafe(join(storyDir, "book_rules.md")),
       ]);
 
@@ -1721,9 +1728,16 @@ export class PipelineRunner {
 
     const parentBook = await this.state.loadBookConfig(parentBookId);
 
+    // Phase 5: parent book may be on the new prose layout; prefer outline/.
+    const readParentOutline = async (newRel: string, legacyRel: string): Promise<string> => {
+      const preferred = await readSafe(join(parentDir, "story", newRel));
+      if (preferred.trim() && preferred !== "(无)") return preferred;
+      return readSafe(join(parentDir, "story", legacyRel));
+    };
+
     const [storyBible, currentState, ledger, hooks, summaries, subplots, emotions, matrix] =
       await Promise.all([
-        readSafe(join(parentDir, "story/story_bible.md")),
+        readParentOutline("outline/story_frame.md", "story_bible.md"),
         readSafe(join(parentDir, "story/current_state.md")),
         readSafe(join(parentDir, "story/particle_ledger.md")),
         readSafe(join(parentDir, "story/pending_hooks.md")),

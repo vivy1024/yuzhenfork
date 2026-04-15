@@ -8,6 +8,7 @@ import { getFanficDimensionConfig, FANFIC_DIMENSIONS } from "./fanfic-dimensions
 import { readFile, readdir } from "node:fs/promises";
 import { filterHooks, filterSummaries, filterSubplots, filterEmotionalArcs, filterCharacterMatrix } from "../utils/context-filter.js";
 import { buildGovernedMemoryEvidenceBlocks } from "../utils/governed-context.js";
+import { readVolumeMap, readCharacterContext } from "../utils/outline-paths.js";
 import { join } from "node:path";
 
 export interface AuditResult {
@@ -365,11 +366,11 @@ export class ContinuityAuditor extends BaseAgent {
         this.readFileSafe(join(bookDir, "story/style_guide.md")),
         this.readFileSafe(join(bookDir, "story/subplot_board.md")),
         this.readFileSafe(join(bookDir, "story/emotional_arcs.md")),
-        this.readFileSafe(join(bookDir, "story/character_matrix.md")),
+        readCharacterContext(bookDir, "(文件不存在)"),
         this.readFileSafe(join(bookDir, "story/chapter_summaries.md")),
         this.readFileSafe(join(bookDir, "story/parent_canon.md")),
         this.readFileSafe(join(bookDir, "story/fanfic_canon.md")),
-        this.readFileSafe(join(bookDir, "story/volume_outline.md")),
+        readVolumeMap(bookDir, "(文件不存在)"),
       ]);
     const currentState = options?.truthFileOverrides?.currentState ?? diskCurrentState;
     const ledger = options?.truthFileOverrides?.ledger ?? diskLedger;
