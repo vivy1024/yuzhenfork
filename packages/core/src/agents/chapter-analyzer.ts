@@ -18,6 +18,7 @@ import {
   readStoryFrame,
   readVolumeMap,
   readCharacterContext,
+  readCurrentStateWithFallback,
 } from "../utils/outline-paths.js";
 
 export interface AnalyzeChapterInput {
@@ -52,7 +53,9 @@ export class ChapterAnalyzerAgent extends BaseAgent {
       subplotBoard, emotionalArcs, characterMatrix,
       storyBible, volumeOutline,
     ] = await Promise.all([
-      this.readFileOrDefault(join(bookDir, "story/current_state.md"), resolvedLanguage),
+      // Phase 5 consolidation: derive initial state from roles + seed hooks
+      // when current_state.md is still the architect seed placeholder.
+      readCurrentStateWithFallback(bookDir, placeholder),
       this.readFileOrDefault(join(bookDir, "story/particle_ledger.md"), resolvedLanguage),
       this.readFileOrDefault(join(bookDir, "story/pending_hooks.md"), resolvedLanguage),
       this.readFileOrDefault(join(bookDir, "story/subplot_board.md"), resolvedLanguage),

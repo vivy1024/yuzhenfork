@@ -26,6 +26,7 @@ import {
   readStoryFrame,
   readVolumeMap,
   readCharacterContext,
+  readCurrentStateWithFallback,
 } from "../utils/outline-paths.js";
 
 export type ReviseMode = "auto" | "polish" | "rewrite" | "rework" | "anti-detect" | "spot-fix";
@@ -129,7 +130,9 @@ export class ReviserAgent extends BaseAgent {
     },
   ): Promise<ReviseOutput> {
     const [currentState, ledger, hooks, styleGuideRaw, volumeOutline, storyBible, characterMatrix, chapterSummaries, parentCanon, fanficCanon] = await Promise.all([
-      this.readFileSafe(join(bookDir, "story/current_state.md")),
+      // Phase 5 consolidation: derive initial state from roles + seed hooks
+      // when current_state.md is still the architect seed placeholder.
+      readCurrentStateWithFallback(bookDir, "(文件不存在)"),
       this.readFileSafe(join(bookDir, "story/particle_ledger.md")),
       this.readFileSafe(join(bookDir, "story/pending_hooks.md")),
       this.readFileSafe(join(bookDir, "story/style_guide.md")),

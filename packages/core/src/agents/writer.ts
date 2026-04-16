@@ -46,6 +46,7 @@ import {
   readStoryFrame,
   readVolumeMap,
   readCharacterContext,
+  readCurrentStateWithFallback,
 } from "../utils/outline-paths.js";
 
 export interface WriteChapterInput {
@@ -138,7 +139,11 @@ export class WriterAgent extends BaseAgent {
         readStoryFrame(bookDir, placeholder),
         readVolumeMap(bookDir, placeholder),
         this.readFileOrDefault(join(bookDir, "story/style_guide.md")),
-        this.readFileOrDefault(join(bookDir, "story/current_state.md")),
+        // Phase 5 consolidation: architect no longer emits an initial current_state
+        // section. When the file is only a seed placeholder, derive initial state
+        // from roles/*.Current_State + pending_hooks startChapter=0 rows so the
+        // writer still sees substantive content instead of a runtime-append note.
+        readCurrentStateWithFallback(bookDir, placeholder),
         this.readFileOrDefault(join(bookDir, "story/particle_ledger.md")),
         this.readFileOrDefault(join(bookDir, "story/pending_hooks.md")),
         this.readFileOrDefault(join(bookDir, "story/chapter_summaries.md")),
@@ -437,7 +442,8 @@ export class WriterAgent extends BaseAgent {
       characterMatrix,
       volumeOutline,
     ] = await Promise.all([
-      this.readFileOrDefault(join(input.bookDir, "story/current_state.md")),
+      // Phase 5 consolidation fallback: derive initial state when only seed on disk.
+      readCurrentStateWithFallback(input.bookDir, "(文件尚未创建)"),
       this.readFileOrDefault(join(input.bookDir, "story/particle_ledger.md")),
       this.readFileOrDefault(join(input.bookDir, "story/pending_hooks.md")),
       this.readFileOrDefault(join(input.bookDir, "story/chapter_summaries.md")),

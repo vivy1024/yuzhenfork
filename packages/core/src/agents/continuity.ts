@@ -8,7 +8,11 @@ import { getFanficDimensionConfig, FANFIC_DIMENSIONS } from "./fanfic-dimensions
 import { readFile, readdir } from "node:fs/promises";
 import { filterHooks, filterSummaries, filterSubplots, filterEmotionalArcs, filterCharacterMatrix } from "../utils/context-filter.js";
 import { buildGovernedMemoryEvidenceBlocks } from "../utils/governed-context.js";
-import { readVolumeMap, readCharacterContext } from "../utils/outline-paths.js";
+import {
+  readVolumeMap,
+  readCharacterContext,
+  readCurrentStateWithFallback,
+} from "../utils/outline-paths.js";
 import { join } from "node:path";
 
 export interface AuditResult {
@@ -385,7 +389,9 @@ export class ContinuityAuditor extends BaseAgent {
   ): Promise<AuditResult> {
     const [diskCurrentState, diskLedger, diskHooks, styleGuideRaw, subplotBoard, emotionalArcs, characterMatrix, chapterSummaries, parentCanon, fanficCanon, volumeOutline] =
       await Promise.all([
-        this.readFileSafe(join(bookDir, "story/current_state.md")),
+        // Phase 5 consolidation: derive initial state from roles + seed hooks
+        // when current_state.md is still the architect seed placeholder.
+        readCurrentStateWithFallback(bookDir, "(文件不存在)"),
         this.readFileSafe(join(bookDir, "story/particle_ledger.md")),
         this.readFileSafe(join(bookDir, "story/pending_hooks.md")),
         this.readFileSafe(join(bookDir, "story/style_guide.md")),

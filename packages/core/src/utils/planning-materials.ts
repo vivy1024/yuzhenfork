@@ -6,7 +6,11 @@ import {
   retrieveMemorySelection,
   type MemorySelection,
 } from "./memory-retrieval.js";
-import { readStoryFrame, readVolumeMap } from "./outline-paths.js";
+import {
+  readStoryFrame,
+  readVolumeMap,
+  readCurrentStateWithFallback,
+} from "./outline-paths.js";
 
 export interface PlanningSeedMaterials {
   readonly storyDir: string;
@@ -102,7 +106,9 @@ export async function loadPlanningSeedMaterials(params: {
     readVolumeMap(params.bookDir, placeholder),
     readFileOrDefault(sourcePaths.chapterSummaries),
     readFileOrDefault(sourcePaths.bookRules),
-    readFileOrDefault(sourcePaths.currentState),
+    // Phase 5 consolidation: derive initial state from roles + pending_hooks
+    // seed rows when current_state.md is still just the architect's placeholder.
+    readCurrentStateWithFallback(params.bookDir, placeholder),
     readPreviousEndingExcerpt(params.bookDir, params.chapterNumber),
   ]);
 
