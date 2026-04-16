@@ -133,6 +133,7 @@ export {
   processProjectInteractionRequest,
 } from "./interaction/project-control.js";
 export { createInteractionToolsFromDeps } from "./interaction/project-tools.js";
+export { buildExportArtifact, writeExportArtifact } from "./interaction/export-artifact.js";
 export {
   normalizeTruthFileName,
   classifyTruthAuthority,

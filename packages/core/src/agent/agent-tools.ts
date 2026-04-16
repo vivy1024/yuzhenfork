@@ -6,6 +6,7 @@ import { readFile, writeFile, readdir, stat } from "node:fs/promises";
 import { join, normalize, resolve } from "node:path";
 import { StateManager } from "../state/manager.js";
 import { createInteractionToolsFromDeps } from "../interaction/project-tools.js";
+import { writeExportArtifact } from "../interaction/export-artifact.js";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -60,7 +61,11 @@ const SubAgentParams = Type.Object({
   bookId: Type.Optional(Type.String({ description: "Book ID — required for all agents except architect" })),
 });
 
-export function createSubAgentTool(pipeline: PipelineRunner, activeBookId: string | null): AgentTool<typeof SubAgentParams> {
+export function createSubAgentTool(
+  pipeline: PipelineRunner,
+  activeBookId: string | null,
+  projectRoot?: string,
+): AgentTool<typeof SubAgentParams> {
   return {
     name: "sub_agent",
     description:
@@ -138,7 +143,22 @@ export function createSubAgentTool(pipeline: PipelineRunner, activeBookId: strin
           }
 
           case "exporter": {
-            return textResult("Export is not yet implemented. Coming soon.");
+            if (!bookId) return textResult("Error: bookId is required for the exporter agent.");
+            if (!projectRoot) return textResult("Error: exporter requires projectRoot.");
+            const inferredFormat = /epub/i.test(instruction)
+              ? "epub"
+              : /markdown|\bmd\b/i.test(instruction)
+                ? "md"
+                : "txt";
+            const approvedOnly = /approved|已通过|通过章节/.test(instruction);
+            const state = new StateManager(projectRoot);
+            const result = await writeExportArtifact(state, bookId, {
+              format: inferredFormat,
+              approvedOnly,
+            });
+            return textResult(
+              `Exported "${bookId}": ${result.chaptersExported} chapters, ${result.totalWords} words → ${result.outputPath}`,
+            );
           }
 
           default:

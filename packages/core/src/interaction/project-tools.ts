@@ -15,6 +15,7 @@ import { chatCompletion, chatWithTools } from "../index.js";
 import { executeEditTransaction } from "./edit-controller.js";
 import type { InteractionRuntimeTools } from "./runtime.js";
 import type { BookCreationDraft } from "./session.js";
+import { writeExportArtifact } from "./export-artifact.js";
 
 type PipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft"> & {
   readonly initBook?: (
@@ -124,69 +125,7 @@ async function exportBookToPath(state: StateLike, bookId: string, options: {
   readonly approvedOnly?: boolean;
   readonly outputPath?: string;
 }) {
-  const format = options.format ?? "txt";
-  const index = await state.loadChapterIndex(bookId);
-  const book = await state.loadBookConfig(bookId);
-  const chapters = options.approvedOnly
-    ? index.filter((chapter) => chapter.status === "approved")
-    : index;
-
-  if (chapters.length === 0) {
-    throw new Error("No chapters to export.");
-  }
-
-  const bookDir = state.bookDir(bookId);
-  const chaptersDir = join(bookDir, "chapters");
-  const projectRoot = dirname(dirname(bookDir));
-  const outputPath = options.outputPath ?? join(projectRoot, `${bookId}_export.${format}`);
-  const chapterFiles = buildChapterFileLookup(await readdir(chaptersDir));
-
-  if (format === "epub") {
-    const sections: string[] = [
-      "<!DOCTYPE html>",
-      `<html><head><meta charset="utf-8"><title>${book.title}</title><style>body{font-family:serif;max-width:40em;margin:auto;padding:2em;line-height:1.8}h2{margin-top:3em}</style></head><body>`,
-      `<h1>${book.title}</h1>`,
-    ];
-
-    for (const chapter of chapters) {
-      const match = chapterFiles.get(chapter.number);
-      if (!match) {
-        continue;
-      }
-      const markdown = await readFile(join(chaptersDir, match), "utf-8");
-      const title = markdown.match(/^#\s+(.+)/m)?.[1] ?? match.replace(/\.md$/, "");
-      const htmlBody = markdown
-        .split("\n")
-        .filter((line) => !line.startsWith("#"))
-        .map((line) => line.trim() ? `<p>${line}</p>` : "")
-        .join("\n");
-      sections.push(`<h2>${title}</h2>`);
-      sections.push(htmlBody);
-    }
-    sections.push("</body></html>");
-    await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, sections.join("\n"), "utf-8");
-  } else {
-    const parts: string[] = [];
-    parts.push(format === "md" ? `# ${book.title}\n\n---\n` : `${book.title}\n\n`);
-    for (const chapter of chapters) {
-      const match = chapterFiles.get(chapter.number);
-      if (!match) {
-        continue;
-      }
-      parts.push(await readFile(join(chaptersDir, match), "utf-8"));
-      parts.push("\n\n");
-    }
-    await mkdir(dirname(outputPath), { recursive: true });
-    await writeFile(outputPath, parts.join(format === "md" ? "\n---\n\n" : "\n"), "utf-8");
-  }
-
-  return {
-    outputPath,
-    chaptersExported: chapters.length,
-    totalWords: chapters.reduce((sum, chapter) => sum + chapter.wordCount, 0),
-    format,
-  };
+  return writeExportArtifact(state, bookId, options);
 }
 
 function mapStageMessageToStatus(message: string): InteractionEvent["status"] | undefined {
