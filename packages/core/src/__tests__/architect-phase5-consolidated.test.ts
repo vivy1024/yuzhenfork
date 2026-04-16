@@ -10,32 +10,34 @@ import {
 import type { BookConfig } from "../models/book.js";
 
 // ---------------------------------------------------------------------------
-// Phase 5 consolidation invariants (7 sections → 6 sections after fix).
+// Phase 5 consolidation invariants (7 sections → 5 sections).
 //
-// Originally the consolidation dropped output from 7 sections to 5, but code
-// review found two small losses:
-//   - rhythm principles were forced 100% book-specific, universal rules had
-//     nowhere to live
-//   - current_state was deleted entirely, leaving non-character / non-hook
-//     env/era/macro anchors homeless
+// A brief side-trip restored current_state as a 6th "narrow env/era" section,
+// but the bench run showed the LLM emits an empty block for 3 out of 3 books
+// (修仙/玄幻/系统 genres have no real year; urban/period genres already weave
+// the era into world-tonal-ground naturally). The section is back to optional:
+// architect may omit it entirely, writeFoundationFiles still seeds
+// current_state.md with a placeholder so the consolidator has a file to
+// append to.
 //
-// Post-fix layout is 6 required sections. These tests lock in the contract so
-// future edits can't silently regress back to the 7-section layout that was
-// causing gpt-5.4 to drop tail sections, NOR over-collapse back to 5:
+// These tests lock in the 5-section contract so future edits can't silently
+// regress back to the 7-section layout that was causing gpt-5.4 to drop tail
+// sections:
 //
-//   1. The architect prompt advertises exactly 6 SECTION headers.
+//   1. The architect prompt advertises exactly 5 SECTION headers — no
+//      current_state, no rhythm_principles.
 //   2. The prompt FORBIDS duplication of protagonist-arc across story_frame
-//      and roles, and forbids re-emitting rhythm_principles.
-//   3. It carries explicit per-section budget markers, including
-//      current_state 500-800 chars.
-//   4. current_state section IS REQUIRED in architect output (narrow scope:
-//      env/era/macro prose only, not character status, not hooks).
+//      and roles, and forbids re-emitting rhythm_principles / current_state.
+//   3. It carries explicit per-section budget markers (NO current_state
+//      budget entry).
+//   4. current_state section is NOT required in architect output — legacy
+//      outputs that still carry it are accepted.
 //   5. book_rules prompt tells the LLM "YAML only, no prose".
 //   6. rhythm principles prompt allows mix of universal + concrete (≥3
 //      concretized, rest may stay universal).
 //   7. Legacy 7-section outputs still parse (backward compat).
 //   8. writeFoundationFiles seeds current_state.md with a marker placeholder
-//      when architect produced an empty current_state block.
+//      when architect produced no initial state.
 //   9. readCurrentStateWithFallback derives a substitute block from
 //      roles/*.Current_State + pending_hooks startChapter=0 rows when the
 //      seed placeholder is still on disk.
@@ -103,7 +105,7 @@ const CONSOLIDATED_RESPONSE = [
   "卷一末：主角决定留下。",
   "## 卷尾必须发生的改变",
   "身份暴露。",
-  "## 节奏原则与本书具体化",
+  "## 节奏原则（具体化 + 通用）",
   "1. 高潮间距：每 8-10 章一个大高潮。",
   "2. 喘息频率：3 章高压后插 1 章喘息。",
   "3. 钩子密度：每章章末 1 个主钩。",
@@ -166,9 +168,6 @@ const CONSOLIDATED_RESPONSE = [
   "enableFullCastTracking: false",
   "---",
   "",
-  "=== SECTION: current_state ===",
-  "2003 年 8 月。非典刚结束，城市街头还留着消毒水和口罩的气味。经济复苏前夜——楼市尚未起飞，出租屋月租不过两三百。码头正在沉默地复工，装卸工人重新排起长队；区政府大楼外墙仍挂着红幅，写字楼里已经有人悄悄讨论来年的楼盘认购。",
-  "",
   "=== SECTION: pending_hooks ===",
   "| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 上游依赖 | 回收卷 | 核心 | 半衰期 | 备注 |",
   "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
@@ -176,8 +175,8 @@ const CONSOLIDATED_RESPONSE = [
   "| H02 | 0 | 初始世界 | 未开启 | 0 | 首卷中段 | 近期 | 无 | 第1卷中段 | 否 | 20 | 初始状态：体制已监视码头 |",
 ].join("\n");
 
-describe("Phase 5 consolidation — 7→6 sections, prompt contract", () => {
-  it("the zh prompt advertises exactly 6 SECTION headers (current_state restored, NO rhythm_principles)", async () => {
+describe("Phase 5 consolidation — 7→5 sections, prompt contract", () => {
+  it("the zh prompt advertises exactly 5 SECTION headers (NO current_state, NO rhythm_principles)", async () => {
     const agent = buildAgent();
     const chat = vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
       .mockResolvedValue({ content: CONSOLIDATED_RESPONSE, usage: ZERO_USAGE });
@@ -194,12 +193,14 @@ describe("Phase 5 consolidation — 7→6 sections, prompt contract", () => {
       "volume_map",
       "roles",
       "book_rules",
-      "current_state",
       "pending_hooks",
     ]);
     // rhythm_principles is explicitly NOT a standalone section — it still
     // lives inside the last paragraph of volume_map.
     expect(headers).not.toContain("rhythm_principles");
+    // current_state is no longer emitted by the architect either — era/setting
+    // context, when relevant, lives inside story_frame.世界观底色.
+    expect(headers).not.toContain("current_state");
   });
 
   it("the prompt forbids duplication across sections (dedup rule)", async () => {
@@ -216,9 +217,13 @@ describe("Phase 5 consolidation — 7→6 sections, prompt contract", () => {
     expect(system).toContain("世界铁律只写在 story_frame.世界观底色");
     // Rhythm principles: authoritative home is volume_map's closing paragraph
     expect(system).toContain("节奏原则只写在 volume_map 最后一段");
+    // Era/setting guidance: weave into story_frame.世界观底色 for year-anchored
+    // genres, omit entirely for others. NOT a separate current_state section.
+    expect(system).toContain("年代文");
+    expect(system).not.toContain("只写在 current_state");
   });
 
-  it("the prompt carries explicit per-section char budget markers (including current_state 500-800 chars)", async () => {
+  it("the prompt carries explicit per-section char budget markers (NO current_state budget)", async () => {
     const agent = buildAgent();
     const chat = vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
       .mockResolvedValue({ content: CONSOLIDATED_RESPONSE, usage: ZERO_USAGE });
@@ -230,8 +235,9 @@ describe("Phase 5 consolidation — 7→6 sections, prompt contract", () => {
     expect(system).toContain("volume_map ≤ 5000 chars");
     expect(system).toContain("roles 总 ≤ 8000 chars");
     expect(system).toContain("book_rules ≤ 500 chars");
-    expect(system).toContain("current_state 500-800 chars");
     expect(system).toContain("pending_hooks ≤ 2000 chars");
+    // current_state budget is gone — it's not a section any more.
+    expect(system).not.toContain("current_state 500-800 chars");
   });
 
   it("the rhythm principles prompt allows a mix of universal + concrete (≥3 concretized, rest may stay universal)", async () => {
@@ -252,7 +258,7 @@ describe("Phase 5 consolidation — 7→6 sections, prompt contract", () => {
     expect(system).toContain("具体化 + 通用混合是合法的");
   });
 
-  it("the English prompt also carries the 6-section / dedup / budget rules and rhythm universal allowance", async () => {
+  it("the English prompt also carries the 5-section / dedup / budget rules and rhythm universal allowance", async () => {
     const agent = buildAgent();
     const chat = vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
       .mockResolvedValue({ content: CONSOLIDATED_RESPONSE, usage: ZERO_USAGE });
@@ -268,11 +274,10 @@ describe("Phase 5 consolidation — 7→6 sections, prompt contract", () => {
       "volume_map",
       "roles",
       "book_rules",
-      "current_state",
       "pending_hooks",
     ]);
     expect(system).toContain("story_frame ≤ 3000 chars");
-    expect(system).toContain("current_state 500-800 chars");
+    expect(system).not.toContain("current_state 500-800 chars");
     expect(system).toContain("YAML only");
     // Rhythm universal allowance
     expect(system).toContain("At least 3 must be concretized for this book");
@@ -295,7 +300,7 @@ describe("Phase 5 consolidation — 7→6 sections, prompt contract", () => {
   });
 });
 
-describe("Phase 5 consolidation — parser requires 6-section output (current_state restored)", () => {
+describe("Phase 5 consolidation — parser accepts 5-section output (current_state is optional)", () => {
   let bookDir: string;
 
   beforeEach(async () => {
@@ -307,54 +312,23 @@ describe("Phase 5 consolidation — parser requires 6-section output (current_st
     vi.restoreAllMocks();
   });
 
-  it("rejects a response missing the current_state section (current_state is required again)", async () => {
+  it("accepts a response with no current_state section and seeds the placeholder on disk", async () => {
     const agent = buildAgent();
-    // Take the full consolidated response and drop the current_state section
-    const withoutCurrentState = CONSOLIDATED_RESPONSE.replace(
-      /=== SECTION: current_state ===[\s\S]*?(?==== SECTION: pending_hooks ===)/,
-      "",
-    );
-    vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
-      .mockResolvedValue({ content: withoutCurrentState, usage: ZERO_USAGE });
-
-    await expect(agent.generateFoundation(baseBook())).rejects.toThrow(/current_state/i);
-  });
-
-  it("accepts a response with a narrow current_state block and writes it to disk", async () => {
-    const agent = buildAgent();
+    // CONSOLIDATED_RESPONSE already omits current_state — feed it straight in.
     vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
       .mockResolvedValue({ content: CONSOLIDATED_RESPONSE, usage: ZERO_USAGE });
 
     const out = await agent.generateFoundation(baseBook());
     await agent.writeFoundationFiles(bookDir, out, false, "zh");
 
-    // Architect output carries the narrow env/era prose
-    expect(out.currentState).toContain("2003 年 8 月");
-    expect(out.currentState).toContain("经济复苏前夜");
-
-    // current_state.md on disk is the LLM's prose, NOT the seed placeholder.
-    const onDisk = await readFile(join(bookDir, "story/current_state.md"), "utf-8");
-    expect(isCurrentStateSeedPlaceholder(onDisk)).toBe(false);
-    expect(onDisk).toContain("2003 年 8 月");
-  });
-
-  it("falls back to the seed placeholder when the LLM emits an empty current_state block (back-compat)", async () => {
-    const emptyCurrentState = CONSOLIDATED_RESPONSE.replace(
-      /(=== SECTION: current_state ===\n)[\s\S]*?(?=\n=== SECTION: pending_hooks ===)/,
-      "$1\n",
-    );
-    const agent = buildAgent();
-    vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
-      .mockResolvedValue({ content: emptyCurrentState, usage: ZERO_USAGE });
-
-    const out = await agent.generateFoundation(baseBook());
-    await agent.writeFoundationFiles(bookDir, out, false, "zh");
-
-    // LLM emitted the header but no prose — parser accepts, writeFoundationFiles seeds.
+    // Architect output has empty currentState — there's no section to parse.
     expect(out.currentState.trim()).toBe("");
-    const seed = await readFile(join(bookDir, "story/current_state.md"), "utf-8");
-    expect(isCurrentStateSeedPlaceholder(seed)).toBe(true);
-    expect(seed).toContain("建书时占位");
+
+    // writeFoundationFiles still writes current_state.md, but as a seed
+    // placeholder the fallback reader can detect.
+    const onDisk = await readFile(join(bookDir, "story/current_state.md"), "utf-8");
+    expect(isCurrentStateSeedPlaceholder(onDisk)).toBe(true);
+    expect(onDisk).toContain("建书时占位");
   });
 
   it("preserves legacy 7-section input (current_state + rhythm_principles still present)", async () => {
@@ -428,16 +402,11 @@ describe("Phase 5 consolidation — readCurrentStateWithFallback derives initial
   });
 
   it("returns a derived block built from roles/*.Current_State + seed hooks when current_state.md is a seed placeholder", async () => {
-    // Simulate a pre-fix book (or an LLM that emitted an empty current_state
-    // block) — writeFoundationFiles falls back to the seed placeholder, which
-    // triggers the fallback reader.
-    const emptyCurrentState = CONSOLIDATED_RESPONSE.replace(
-      /(=== SECTION: current_state ===\n)[\s\S]*?(?=\n=== SECTION: pending_hooks ===)/,
-      "$1\n",
-    );
+    // CONSOLIDATED_RESPONSE emits no current_state section — writeFoundationFiles
+    // seeds the placeholder, which triggers the fallback reader.
     const agent = buildAgent();
     vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
-      .mockResolvedValue({ content: emptyCurrentState, usage: ZERO_USAGE });
+      .mockResolvedValue({ content: CONSOLIDATED_RESPONSE, usage: ZERO_USAGE });
 
     const out = await agent.generateFoundation(baseBook());
     await agent.writeFoundationFiles(bookDir, out, false, "zh");

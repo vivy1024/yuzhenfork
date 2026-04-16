@@ -264,7 +264,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   // Authoritative Phase 5 paths — prose outline + role sheets live under
   // dedicated subdirectories of story/. The full path (relative to story/) is
-  // matched literally here.
+  // matched literally here. `节奏原则.md` / `rhythm_principles.md` is optional
+  // after Phase 5 consolidation (rhythm lives in volume_map's closing paragraph);
+  // the entries stay whitelisted for legacy books and manual overrides.
   const TRUTH_OUTLINE_FILES = [
     "outline/story_frame.md",
     "outline/volume_map.md",

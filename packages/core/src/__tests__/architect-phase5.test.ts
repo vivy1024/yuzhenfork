@@ -255,7 +255,7 @@ describe("ArchitectAgent — Phase 5 prose output", () => {
     await expect(readFile(join(storyDir, "volume_outline.md"), "utf-8")).rejects.toThrow();
   });
 
-  it("still requires book_rules / roles / current_state / pending_hooks to be present", async () => {
+  it("still requires book_rules / roles / pending_hooks to be present (current_state is optional after consolidation)", async () => {
     const agent = buildAgent();
     vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
       .mockResolvedValue({
@@ -270,10 +270,17 @@ describe("ArchitectAgent — Phase 5 prose output", () => {
         usage: ZERO_USAGE,
       });
 
-    // book_rules + roles + current_state all missing — the error lists them.
+    // book_rules + roles both missing — the error message lists them.
     await expect(agent.generateFoundation(baseBook())).rejects.toThrow(/book_rules/i);
     await expect(agent.generateFoundation(baseBook())).rejects.toThrow(/roles/i);
-    await expect(agent.generateFoundation(baseBook())).rejects.toThrow(/current_state/i);
+    // current_state is NOT in the missing list — it's optional now.
+    try {
+      await agent.generateFoundation(baseBook());
+      throw new Error("should have rejected");
+    } catch (error) {
+      const message = (error as Error).message;
+      expect(message).not.toMatch(/current_state/i);
+    }
   });
 
   it("requires at least one of story_frame or legacy story_bible", async () => {
@@ -317,13 +324,131 @@ describe("ArchitectAgent — Phase 5 prose output", () => {
     expect(system).toContain("=== SECTION: story_frame ===");
     expect(system).toContain("=== SECTION: volume_map ===");
     // Phase 5 consolidation: rhythm_principles is merged into volume_map's
-    // closing paragraph and remains NOT a standalone SECTION header.
+    // closing paragraph and is NOT a standalone SECTION header.
     expect(system).not.toContain("=== SECTION: rhythm_principles ===");
-    // Post-consolidation-fix: current_state restored as a narrow 6th section
-    // (500-800 chars, env/era/macro prose only).
-    expect(system).toContain("=== SECTION: current_state ===");
+    // current_state is also no longer produced by the architect — era/setting
+    // anchors (when the genre pins to a real year) are woven into
+    // story_frame.世界观底色; other genres omit them entirely.
+    expect(system).not.toContain("=== SECTION: current_state ===");
     expect(system).toContain("=== SECTION: roles ===");
     expect(system).toContain("=== SECTION: book_rules ===");
     expect(system).toContain("=== SECTION: pending_hooks ===");
+  });
+});
+
+describe("writeFoundationFiles — rhythm file is skipped when rhythmPrinciples is empty", () => {
+  let bookDir: string;
+
+  beforeEach(async () => {
+    bookDir = await mkdtemp(join(tmpdir(), "inkos-phase5-rhythm-skip-"));
+  });
+
+  afterEach(async () => {
+    await rm(bookDir, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  it("does not write outline/节奏原则.md when the architect output carries no rhythm block", async () => {
+    // CONSOLIDATED_RESPONSE (trimmed) has rhythm merged into volume_map tail
+    // and no standalone rhythm_principles section — rhythmPrinciples ends up
+    // an empty string.
+    const noRhythmResponse = [
+      "=== SECTION: story_frame ===",
+      "## 主题与基调",
+      "一段主题散文。",
+      "## 核心冲突",
+      "主角 vs 体制。",
+      "## 世界观底色",
+      "湿冷的沿海城市。",
+      "## 终局方向",
+      "最后一个镜头。",
+      "",
+      "=== SECTION: volume_map ===",
+      "## 各卷主题与情绪曲线",
+      "三卷结构。",
+      "## 关键节点章",
+      "第 17 章回家。",
+      "## 卷间钩子",
+      "钩子 H01。",
+      "## 角色阶段性目标",
+      "卷一末：定调。",
+      "## 卷尾必须发生的改变",
+      "身份暴露。",
+      "## 节奏原则（具体化 + 通用）",
+      "1-6. 节奏 merged into volume_map tail.",
+      "",
+      "=== SECTION: roles ===",
+      "---ROLE---",
+      "tier: major",
+      "name: 林辞",
+      "---CONTENT---",
+      "## 核心标签",
+      "沉默",
+      "## 反差细节",
+      "罐头",
+      "## 人物小传",
+      "过往。",
+      "## 当前现状",
+      "账房。",
+      "## 关系网络",
+      "与沈默。",
+      "## 内在驱动",
+      "查真相。",
+      "## 成长弧光",
+      "从独到托。",
+      "",
+      "=== SECTION: book_rules ===",
+      "---",
+      "version: \"1.0\"",
+      "---",
+      "",
+      "=== SECTION: pending_hooks ===",
+      "| hook_id | 起始章节 | 类型 | 状态 | 最近推进 | 预期回收 | 回收节奏 | 备注 |",
+      "| --- | --- | --- | --- | --- | --- | --- | --- |",
+      "| H01 | 1 | 主线 | 未开启 | 0 | 终章 | 终局 | 笔记本 |",
+    ].join("\n");
+
+    const agent = buildAgent();
+    vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
+      .mockResolvedValue({ content: noRhythmResponse, usage: ZERO_USAGE });
+
+    const out = await agent.generateFoundation(baseBook());
+    expect((out.rhythmPrinciples ?? "").trim()).toBe("");
+
+    await agent.writeFoundationFiles(bookDir, out, false, "zh");
+
+    // No standalone rhythm file on disk — rhythm content lives in
+    // volume_map's closing paragraph.
+    await expect(
+      readFile(join(bookDir, "story/outline/节奏原则.md"), "utf-8"),
+    ).rejects.toThrow();
+
+    // But volume_map still exists and carries the rhythm tail.
+    const volumeMap = await readFile(
+      join(bookDir, "story/outline/volume_map.md"),
+      "utf-8",
+    );
+    expect(volumeMap).toContain("节奏原则（具体化 + 通用）");
+  });
+
+  it("still writes outline/rhythm_principles.md (en) when the architect emits a standalone block (legacy path)", async () => {
+    // Simulate a legacy-shaped output that DOES carry an explicit
+    // rhythm_principles section — writeFoundationFiles must still honour it
+    // for back-compat.
+    const withRhythmResponse = SAMPLE_RESPONSE;
+    const agent = buildAgent();
+    vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
+      .mockResolvedValue({ content: withRhythmResponse, usage: ZERO_USAGE });
+
+    const out = await agent.generateFoundation(baseBook());
+    expect((out.rhythmPrinciples ?? "").trim().length).toBeGreaterThan(0);
+
+    await agent.writeFoundationFiles(bookDir, out, false, "zh");
+
+    const rhythm = await readFile(
+      join(bookDir, "story/outline/节奏原则.md"),
+      "utf-8",
+    );
+    expect(rhythm).toContain("高潮间距");
   });
 });

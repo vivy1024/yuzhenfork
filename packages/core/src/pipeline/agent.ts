@@ -210,7 +210,7 @@ const TOOLS: ReadonlyArray<ToolDefinition> = [
       type: "object",
       properties: {
         bookId: { type: "string", description: "书籍ID" },
-        fileName: { type: "string", description: "文件名（如 outline/story_frame.md、outline/volume_map.md、outline/节奏原则.md、roles/主要角色/<name>.md、roles/次要角色/<name>.md、current_state.md、pending_hooks.md）" },
+        fileName: { type: "string", description: "文件名（如 outline/story_frame.md、outline/volume_map.md、outline/节奏原则.md（可选，Phase 5 后节奏原则合并到 volume_map 尾段，仅 legacy / 人工写入时出现）、roles/主要角色/<name>.md、roles/次要角色/<name>.md、current_state.md、pending_hooks.md）" },
         content: { type: "string", description: "新的完整文件内容" },
       },
       required: ["bookId", "fileName", "content"],
@@ -576,6 +576,11 @@ export async function executeAgentTool(
         "chapter_summaries.md", "subplot_board.md", "emotional_arcs.md",
         "character_matrix.md", "style_guide.md",
       ];
+      // outline/节奏原则.md (zh) / outline/rhythm_principles.md (en) are
+      // optional after Phase 5 consolidation — rhythm principles normally live
+      // in the last paragraph of volume_map and writeFoundationFiles skips the
+      // dedicated file when the block is empty. They remain whitelisted so
+      // legacy books and manual overrides keep working.
       const ALLOWED_OUTLINE_FILES = [
         "outline/story_frame.md", "outline/volume_map.md",
         "outline/节奏原则.md", "outline/rhythm_principles.md",
