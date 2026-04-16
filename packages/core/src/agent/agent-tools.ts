@@ -188,7 +188,128 @@ export function createSubAgentTool(
 }
 
 // ---------------------------------------------------------------------------
-// 2. Read Tool
+// 2. Deterministic writing tools
+// ---------------------------------------------------------------------------
+
+const ReviseChapterParams = Type.Object({
+  bookId: Type.Optional(Type.String({ description: "Book ID. Omit to use the active book." })),
+  chapterNumber: Type.Number({ description: "Chapter number to revise." }),
+  mode: Type.Optional(Type.Union([
+    Type.Literal("spot-fix"),
+    Type.Literal("polish"),
+    Type.Literal("rewrite"),
+    Type.Literal("rework"),
+    Type.Literal("anti-detect"),
+  ])),
+});
+
+export function createReviseChapterTool(
+  pipeline: PipelineRunner,
+  activeBookId: string | null,
+): AgentTool<typeof ReviseChapterParams> {
+  return {
+    name: "revise_chapter",
+    description: "Revise a specific chapter through the deterministic revision pipeline.",
+    label: "Revise Chapter",
+    parameters: ReviseChapterParams,
+    async execute(_toolCallId, params): Promise<AgentToolResult<undefined>> {
+      const bookId = resolveToolBookId("revise_chapter", params.bookId, activeBookId);
+      const mode = params.mode ?? DEFAULT_REVISE_MODE;
+      await pipeline.reviseDraft(bookId, params.chapterNumber, mode);
+      return textResult(`Revision (${mode}) complete for "${bookId}" chapter ${params.chapterNumber}.`);
+    },
+  };
+}
+
+const WriteTruthFileParams = Type.Object({
+  bookId: Type.Optional(Type.String({ description: "Book ID. Omit to use the active book." })),
+  fileName: Type.String({ description: "Truth file name under story/, e.g. story_bible.md or current_focus.md." }),
+  content: Type.String({ description: "Full replacement content for the truth file." }),
+});
+
+export function createWriteTruthFileTool(
+  pipeline: PipelineRunner,
+  projectRoot: string,
+  activeBookId: string | null,
+): AgentTool<typeof WriteTruthFileParams> {
+  const tools = createDeterministicInteractionTools(pipeline, projectRoot);
+  return {
+    name: "write_truth_file",
+    description: "Replace a truth/control file under story/ using deterministic project tools.",
+    label: "Write Truth File",
+    parameters: WriteTruthFileParams,
+    async execute(_toolCallId, params): Promise<AgentToolResult<undefined>> {
+      const bookId = resolveToolBookId("write_truth_file", params.bookId, activeBookId);
+      await tools.writeTruthFile(bookId, params.fileName, params.content);
+      return textResult(`Updated "${params.fileName}" for "${bookId}".`);
+    },
+  };
+}
+
+const RenameEntityParams = Type.Object({
+  bookId: Type.Optional(Type.String({ description: "Book ID. Omit to use the active book." })),
+  oldValue: Type.String({ description: "Current entity name." }),
+  newValue: Type.String({ description: "New entity name." }),
+});
+
+export function createRenameEntityTool(
+  pipeline: PipelineRunner,
+  projectRoot: string,
+  activeBookId: string | null,
+): AgentTool<typeof RenameEntityParams> {
+  const tools = createDeterministicInteractionTools(pipeline, projectRoot);
+  return {
+    name: "rename_entity",
+    description: "Rename an entity across truth files and chapters using deterministic edit control.",
+    label: "Rename Entity",
+    parameters: RenameEntityParams,
+    async execute(_toolCallId, params): Promise<AgentToolResult<undefined>> {
+      const bookId = resolveToolBookId("rename_entity", params.bookId, activeBookId);
+      const result = await tools.renameEntity(bookId, params.oldValue, params.newValue) as {
+        readonly __interaction?: { readonly responseText?: string };
+      };
+      const summary = result.__interaction?.responseText ?? `Renamed "${params.oldValue}" to "${params.newValue}" in "${bookId}".`;
+      return textResult(summary);
+    },
+  };
+}
+
+const PatchChapterTextParams = Type.Object({
+  bookId: Type.Optional(Type.String({ description: "Book ID. Omit to use the active book." })),
+  chapterNumber: Type.Number({ description: "Chapter number to patch." }),
+  targetText: Type.String({ description: "Exact text to replace." }),
+  replacementText: Type.String({ description: "Replacement text." }),
+});
+
+export function createPatchChapterTextTool(
+  pipeline: PipelineRunner,
+  projectRoot: string,
+  activeBookId: string | null,
+): AgentTool<typeof PatchChapterTextParams> {
+  const tools = createDeterministicInteractionTools(pipeline, projectRoot);
+  return {
+    name: "patch_chapter_text",
+    description: "Apply a deterministic local text patch to a chapter and mark it for review.",
+    label: "Patch Chapter",
+    parameters: PatchChapterTextParams,
+    async execute(_toolCallId, params): Promise<AgentToolResult<undefined>> {
+      const bookId = resolveToolBookId("patch_chapter_text", params.bookId, activeBookId);
+      const result = await tools.patchChapterText(
+        bookId,
+        params.chapterNumber,
+        params.targetText,
+        params.replacementText,
+      ) as {
+        readonly __interaction?: { readonly responseText?: string };
+      };
+      const summary = result.__interaction?.responseText ?? `Patched chapter ${params.chapterNumber} for "${bookId}".`;
+      return textResult(summary);
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 3. Read Tool
 // ---------------------------------------------------------------------------
 
 const ReadParams = Type.Object({

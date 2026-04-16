@@ -3,31 +3,18 @@ import { fetchJson } from "../hooks/use-api";
 import { useServiceStore } from "../store/service";
 import { Eye, EyeOff, Loader2, ArrowLeft } from "lucide-react";
 import { ServiceConfigSourceCard } from "../components/ServiceConfigSourceCard";
+import {
+  probeServiceForDetail,
+  rehydrateServiceConnectionStatus,
+  saveServiceConfigWithValidation,
+  type ServiceDetailConnectionStatus as ConnectionStatus,
+  type ServiceDetailDetectedConfig as DetectedConfig,
+  type ServiceDetailModelInfo as ModelInfo,
+} from "./service-detail-state";
 
 interface Nav {
   toServices: () => void;
 }
-
-interface ModelInfo {
-  readonly id: string;
-  readonly name?: string;
-}
-
-interface DetectedConfig {
-  readonly apiFormat?: "chat" | "responses";
-  readonly stream?: boolean;
-  readonly baseUrl?: string;
-  readonly modelsSource?: "api" | "fallback";
-}
-
-// Unified page state
-type ConnectionStatus =
-  | { state: "idle" }               // No action taken yet
-  | { state: "testing" }            // Test in progress
-  | { state: "connected"; models: ModelInfo[] }  // Test succeeded
-  | { state: "error"; message: string }          // Test failed
-  | { state: "saving" }             // Save in progress
-  | { state: "saved" }              // Save succeeded
 
 function DetailSkeleton() {
   return (
@@ -96,37 +83,50 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     return () => { cancelled = true; };
   }, [isCustom, persistedCustomName, serviceId]);
 
-  // Load models on mount if connected
-  useEffect(() => {
-    if (svc?.connected) {
-      setStatus({ state: "testing" });
-      fetchJson<{ models: ModelInfo[] }>(`/services/${encodeURIComponent(serviceId)}/models`)
-        .then((data) => {
-          const models = data.models ?? [];
-          setStatus(models.length > 0
-            ? { state: "connected", models }
-            : { state: "idle" });
-        })
-        .catch(() => setStatus({ state: "idle" }));
-    }
-  }, [svc?.connected, serviceId]);
-
   const resolvedCustomName = persistedCustomName || customName.trim() || "Custom";
   const effectiveServiceId = isCustom ? `custom:${resolvedCustomName}` : serviceId;
   const label = isCustom ? (customName || persistedCustomName || "自定义服务") : (svc?.label ?? serviceId);
 
   useEffect(() => {
     let cancelled = false;
-    void fetchJson<{ apiKey?: string }>(`/services/${encodeURIComponent(effectiveServiceId)}/secret`)
-      .then((data) => {
+    if (svc?.connected) {
+      setStatus({ state: "testing" });
+    }
+    void rehydrateServiceConnectionStatus({
+      effectiveServiceId,
+      shouldVerify: Boolean(svc?.connected),
+      isCustom,
+      baseUrl,
+      apiFormat,
+      stream,
+    })
+      .then((result) => {
         if (cancelled) return;
-        if (typeof data.apiKey === "string") {
-          setApiKey(data.apiKey);
+        setApiKey(result.apiKey);
+        setDetectedModel(result.detectedModel);
+        setDetectedConfig(result.detectedConfig);
+        setStatus(result.status);
+        if (result.status.state === "connected") {
+          setStoreModels(effectiveServiceId, result.status.models);
+        } else {
+          clearStoreModels(effectiveServiceId);
         }
       })
-      .catch(() => {});
+      .catch(() => {
+        if (cancelled) return;
+        setStatus({ state: "idle" });
+      });
     return () => { cancelled = true; };
-  }, [effectiveServiceId]);
+  }, [
+    apiFormat,
+    baseUrl,
+    clearStoreModels,
+    effectiveServiceId,
+    isCustom,
+    setStoreModels,
+    stream,
+    svc?.connected,
+  ]);
 
   if (loading) return <DetailSkeleton />;
 
@@ -149,26 +149,12 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     setApiKey(trimmedKey);
     setStatus({ state: "testing" });
     try {
-      const result = await fetchJson<{
-        ok: boolean;
-        models?: ModelInfo[];
-        modelCount?: number;
-        selectedModel?: string;
-        detected?: DetectedConfig;
-        error?: string;
-      }>(
-        `/services/${encodeURIComponent(effectiveServiceId)}/test`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            apiKey: trimmedKey,
-            apiFormat,
-            stream,
-            ...(isCustom ? { baseUrl: baseUrl.trim() } : {}),
-          }),
-        },
-      );
+      const result = await probeServiceForDetail(effectiveServiceId, {
+        apiKey: trimmedKey,
+        apiFormat,
+        stream,
+        ...(isCustom ? { baseUrl: baseUrl.trim() } : {}),
+      });
       if (result.ok) {
         const models = result.models ?? [];
         if (result.detected?.apiFormat) setApiFormat(result.detected.apiFormat);
@@ -196,68 +182,33 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     }
     setStatus({ state: "saving" });
     try {
-      // Save key (empty = delete)
-      await fetchJson(`/services/${encodeURIComponent(effectiveServiceId)}/secret`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ apiKey: trimmedKey }),
+      const result = await saveServiceConfigWithValidation({
+        effectiveServiceId,
+        serviceId,
+        isCustom,
+        resolvedCustomName,
+        apiKey: trimmedKey,
+        baseUrl,
+        apiFormat,
+        stream,
+        temperature,
+        maxTokens,
+        detectedModel,
       });
-      // Save config (temperature, maxTokens, etc.)
-      await fetchJson("/services/config", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          service: effectiveServiceId,
-          ...(detectedModel ? { defaultModel: detectedModel } : {}),
-          services: [
-            {
-              service: isCustom ? "custom" : serviceId,
-              temperature: parseFloat(temperature),
-              maxTokens: parseInt(maxTokens, 10),
-              apiFormat,
-              stream,
-              ...(isCustom ? { name: resolvedCustomName, baseUrl: baseUrl.trim() } : {}),
-            },
-          ],
-        }),
-      });
-      if (trimmedKey) {
-        try {
-          const result = await fetchJson<{
-            ok: boolean;
-            models?: ModelInfo[];
-            selectedModel?: string;
-            detected?: DetectedConfig;
-            error?: string;
-          }>(`/services/${encodeURIComponent(effectiveServiceId)}/test`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              apiKey: trimmedKey,
-              apiFormat,
-              stream,
-              ...(isCustom ? { baseUrl: baseUrl.trim() } : {}),
-            }),
-          });
-          if (result.ok && result.models) {
-            if (result.detected?.apiFormat) setApiFormat(result.detected.apiFormat);
-            if (typeof result.detected?.stream === "boolean") setStream(result.detected.stream);
-            if (isCustom && result.detected?.baseUrl) setBaseUrl(result.detected.baseUrl);
-            setDetectedModel(result.selectedModel ?? detectedModel);
-            setDetectedConfig(result.detected ?? detectedConfig);
-            setStoreModels(effectiveServiceId, result.models);
-            setStatus({ state: "connected", models: result.models });
-          } else {
-            setStatus({ state: "error", message: result.error ?? "连接失败" });
-          }
-        } catch (e) {
-          setStatus({ state: "error", message: e instanceof Error ? e.message : "连接失败" });
-        }
+      if (result.status.state === "connected") {
+        if (result.detectedConfig?.apiFormat) setApiFormat(result.detectedConfig.apiFormat);
+        if (typeof result.detectedConfig?.stream === "boolean") setStream(result.detectedConfig.stream);
+        if (isCustom && result.detectedConfig?.baseUrl) setBaseUrl(result.detectedConfig.baseUrl);
+        setDetectedModel(result.detectedModel);
+        setDetectedConfig(result.detectedConfig);
+        setStoreModels(effectiveServiceId, result.status.models);
+        setStatus(result.status);
       } else {
         clearStoreModels(effectiveServiceId);
-        setStatus({ state: "saved" });
+        setDetectedModel("");
+        setDetectedConfig(null);
+        setStatus(result.status);
       }
-
       await refreshServices();
       nav.toServices();
     } catch (e) {

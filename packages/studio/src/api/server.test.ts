@@ -867,6 +867,36 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
+  it("short-circuits service probe on 401/403 from /models", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => "Unauthorized",
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
+    createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/openai/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: "sk-invalid",
+        apiFormat: "responses",
+        stream: false,
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("401"),
+    });
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+  });
+
   it("uses the MiniMax preset provider family during service probe", async () => {
     await writeFile(join(root, "inkos.json"), JSON.stringify({
       ...projectConfig,

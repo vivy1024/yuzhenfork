@@ -384,7 +384,7 @@ async function fetchModelsFromServiceBaseUrl(
   serviceId: string,
   baseUrl: string,
   apiKey: string,
-): Promise<{ models: Array<{ id: string; name: string }>; error?: string }> {
+): Promise<{ models: Array<{ id: string; name: string }>; error?: string; authFailed?: boolean }> {
   const modelsBaseUrl = isCustomServiceId(serviceId)
     ? baseUrl
     : resolveServiceModelsBaseUrl(serviceId) ?? baseUrl;
@@ -396,7 +396,11 @@ async function fetchModelsFromServiceBaseUrl(
     });
     if (!res.ok) {
       const body = await res.text().catch(() => "");
-      return { models: [], error: `服务商返回 ${res.status}: ${body.slice(0, 200)}` };
+      return {
+        models: [],
+        error: `服务商返回 ${res.status}: ${body.slice(0, 200)}`,
+        authFailed: res.status === 401 || res.status === 403,
+      };
     }
     const json = await res.json() as { data?: Array<{ id: string }> };
     return {
@@ -430,6 +434,13 @@ async function probeServiceCapabilities(args: {
 
   const baseService = isCustomServiceId(args.service) ? "custom" : args.service;
   const modelsResponse = await fetchModelsFromServiceBaseUrl(baseService, args.baseUrl, args.apiKey);
+  if (modelsResponse.authFailed) {
+    return {
+      ok: false,
+      models: [],
+      error: modelsResponse.error ?? "API Key 无效或无权访问模型列表。",
+    };
+  }
   const discoveredModels = modelsResponse.models;
   const modelCandidates = buildModelCandidates({
     preferredModel: args.preferredModel,
@@ -458,14 +469,14 @@ async function probeServiceCapabilities(args: {
         apiKey: args.apiKey.trim(),
         model,
         temperature: 0.7,
-        maxTokens: 64,
+        maxTokens: 2048,
         thinkingBudget: 0,
         apiFormat: plan.apiFormat,
         stream: plan.stream,
       } as ProjectConfig["llm"]);
 
       try {
-        await chatCompletion(client, model, [{ role: "user", content: "ping" }], { maxTokens: 5 });
+        await chatCompletion(client, model, [{ role: "user", content: "ping" }], { maxTokens: 2048 });
         const models = discoveredModels.length > 0
           ? discoveredModels
           : [{ id: model, name: model }];
