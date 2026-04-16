@@ -19,6 +19,7 @@ const loadProjectConfigMock = vi.fn();
 const pipelineConfigs: unknown[] = [];
 const processProjectInteractionInputMock = vi.fn();
 const processProjectInteractionRequestMock = vi.fn();
+const routeNaturalLanguageIntentMock = vi.fn();
 const createInteractionToolsFromDepsMock = vi.fn(() => ({}));
 const loadProjectSessionMock = vi.fn();
 const resolveSessionActiveBookMock = vi.fn();
@@ -158,6 +159,7 @@ vi.mock("@actalk/inkos-core", () => {
     loadProjectConfig: loadProjectConfigMock,
     processProjectInteractionInput: processProjectInteractionInputMock,
     processProjectInteractionRequest: processProjectInteractionRequestMock,
+    routeNaturalLanguageIntent: routeNaturalLanguageIntentMock,
     createInteractionToolsFromDeps: createInteractionToolsFromDepsMock,
     loadProjectSession: loadProjectSessionMock,
     resolveSessionActiveBook: resolveSessionActiveBookMock,
@@ -266,6 +268,7 @@ describe("createStudioServer daemon lifecycle", () => {
     loadProjectConfigMock.mockReset();
     processProjectInteractionInputMock.mockReset();
     processProjectInteractionRequestMock.mockReset();
+    routeNaturalLanguageIntentMock.mockReset();
     createInteractionToolsFromDepsMock.mockReset();
     loadProjectSessionMock.mockReset();
     resolveSessionActiveBookMock.mockReset();
@@ -293,6 +296,21 @@ describe("createStudioServer daemon lifecycle", () => {
       messages: [],
     });
     resolveSessionActiveBookMock.mockResolvedValue(undefined);
+    routeNaturalLanguageIntentMock.mockImplementation((input: string, context?: { activeBookId?: string }) => {
+      const trimmed = input.trim();
+      if (trimmed === "重写第3章") {
+        return {
+          intent: "rewrite_chapter",
+          ...(context?.activeBookId ? { bookId: context.activeBookId } : {}),
+          chapterNumber: 3,
+        };
+      }
+      return {
+        intent: "chat",
+        ...(context?.activeBookId ? { bookId: context.activeBookId } : {}),
+        instruction: trimmed,
+      };
+    });
     loadProjectConfigMock.mockImplementation(async () => {
       const raw = JSON.parse(await readFile(join(root, "inkos.json"), "utf-8")) as Record<string, unknown>;
       return {
@@ -1178,11 +1196,11 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
-  it("routes /api/agent through runAgentSession and returns response + sessionId", async () => {
+  it("routes ordinary chat through runAgentSession and returns response + sessionId", async () => {
     runAgentSessionMock.mockResolvedValueOnce({
       responseText: "Completed write_next for demo-book.",
       messages: [
-        { role: "user", content: "continue" },
+        { role: "user", content: "聊聊这一章的问题" },
         { role: "assistant", content: "Completed write_next for demo-book." },
       ],
     });
@@ -1193,7 +1211,7 @@ describe("createStudioServer daemon lifecycle", () => {
     const response = await app.request("http://localhost/api/v1/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction: "continue", activeBookId: "demo-book" }),
+      body: JSON.stringify({ instruction: "聊聊这一章的问题", activeBookId: "demo-book" }),
     });
 
     expect(response.status).toBe(200);
@@ -1208,7 +1226,7 @@ describe("createStudioServer daemon lifecycle", () => {
         bookId: "demo-book",
         projectRoot: root,
       }),
-      "continue",
+      "聊聊这一章的问题",
       expect.any(Array),
     );
   });
@@ -1269,6 +1287,49 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(response.json()).resolves.toMatchObject({
       response: "你好，我在。",
     });
+  });
+
+  it("routes high-risk chapter intents through the shared interaction runtime before agent chat", async () => {
+    processProjectInteractionRequestMock.mockResolvedValueOnce({
+      request: { intent: "rewrite_chapter", bookId: "demo-book", chapterNumber: 3 },
+      responseText: "已为 demo-book 完成章节重写。",
+      session: {
+        sessionId: "interaction-session-1",
+        projectRoot: root,
+        activeBookId: "demo-book",
+        automationMode: "semi",
+        messages: [],
+        events: [],
+      },
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "重写第3章", activeBookId: "demo-book" }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      response: "已为 demo-book 完成章节重写。",
+      session: {
+        sessionId: "agent-session-1",
+        activeBookId: "demo-book",
+      },
+    });
+    expect(processProjectInteractionRequestMock).toHaveBeenCalledWith(expect.objectContaining({
+      projectRoot: root,
+      activeBookId: "demo-book",
+      request: expect.objectContaining({
+        intent: "rewrite_chapter",
+        bookId: "demo-book",
+        chapterNumber: 3,
+      }),
+    }));
+    expect(runAgentSessionMock).not.toHaveBeenCalled();
   });
 
   it("returns 500 with an error payload when the agent session fails", async () => {
