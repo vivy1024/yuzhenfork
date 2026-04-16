@@ -64,7 +64,7 @@ describe("buildAgentSystemPrompt", () => {
       expect(prompt).toContain("write_truth_file");
       expect(prompt).toContain("用户要求重写/精修已有章节");
       expect(prompt).toContain("revise_chapter");
-      expect(prompt).not.toContain("edit");
+      expect(prompt).not.toContain("用户想做小修改（改名字、调设定）→ 用 edit 直接修改");
     });
 
     it("Chinese prompt warns NOT to call architect", () => {
