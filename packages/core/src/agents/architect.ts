@@ -14,23 +14,36 @@ import type { StoredHook } from "../state/memory-db.js";
 
 // ---------------------------------------------------------------------------
 // Phase 5 (v13) — Static 骨架 layer collapse
+// Phase 5 consolidation — 7 sections → 5 sections (output shrinks ~25–40%).
 //
-// Architect now produces 3 prose outline files + one-file-per-character roles/
-// folder, plus compat pointer shims for story_bible.md and character_matrix.md.
-// The 9-file contract degenerates into this shape:
+// Architect now produces 2 prose outline files + one-file-per-character roles/
+// folder, plus compat pointer shims. The LLM output contract is now 5 blocks:
 //
-//   outline/story_frame.md      ← 5 prose sections
-//   outline/volume_map.md       ← 6 prose sections, chapter-granular
-//   outline/节奏原则.md         ← 6 concrete rhythm principles (prose)
+//   === SECTION: story_frame ===   4 散文段（主题 / 冲突 / 世界铁律+质感 / 终局）
+//   === SECTION: volume_map ===    5 散文段 + 尾段「本书具体化的 6 条节奏原则」
+//   === SECTION: roles ===         一人一卡；主角卡承载完整弧线（起点→终点→代价）
+//   === SECTION: book_rules ===    仅 YAML frontmatter，零散文
+//   === SECTION: pending_hooks ===  13-column 表；可含 startChapter=0 种子行
+//
+// Consolidation rules (MUST reflect in prompt):
+//   - 主角弧线只写在 roles/<主角>.md，不在 story_frame 重复
+//   - 世界铁律/世界质感只写在 story_frame.世界观底色，不在 book_rules 重复
+//   - 节奏原则只写在 volume_map 尾段，不作为独立 section
+//   - 初始状态（第 0 章）拆散到 roles.当前现状 + pending_hooks (startChapter=0)
+//     — 不再作为独立 current_state section
+//
+// 输出落盘 contract（未变）：
+//   outline/story_frame.md      ← 4 prose sections + YAML frontmatter
+//   outline/volume_map.md       ← 5 prose sections + 节奏原则尾段
+//   outline/节奏原则.md         ← 从 volume_map 尾段派生（或空占位）
 //   roles/主要角色/<name>.md    ← one file per major character
 //   roles/次要角色/<name>.md    ← one file per minor character
-//   story_bible.md              ← compat shim (pointer + excerpt)
-//   character_matrix.md         ← compat shim (pointer + role listing)
-//   book_rules.md               ← compat shim (cleanup #3). YAML frontmatter
-//                                 now lives on story_frame.md.
-//   current_state.md            ← runtime state (unchanged)
-//   pending_hooks.md            ← runtime state (unchanged)
-//   emotional_arcs.md           ← runtime state (unchanged)
+//   story_bible.md              ← compat shim
+//   character_matrix.md         ← compat shim
+//   book_rules.md               ← compat shim
+//   current_state.md            ← seed 文件（空/最小），consolidator 运行时追加
+//   pending_hooks.md            ← 架构师初始伏笔池
+//   emotional_arcs.md           ← runtime state
 //
 // 「散文密度」= 架构师 LLM 的输出密度。所有 prose 都写死在架构师 prompt 里，
 // 不从模板复制。v6 灵气的起点在这里。
@@ -109,7 +122,7 @@ export class ArchitectAgent extends BaseAgent {
       : this.buildChineseFoundationPrompt(book, gp, genreBody, contextBlock, reviewFeedbackBlock, numericalBlock, powerBlock, eraBlock);
 
     const langPrefix = resolvedLanguage === "en"
-      ? `【LANGUAGE OVERRIDE】ALL output (story_frame, volume_map, rhythm_principles, roles, book_rules, current_state, pending_hooks) MUST be written in English. Character names, place names, and all prose must be in English. The === SECTION: === tags remain unchanged.\n\n`
+      ? `【LANGUAGE OVERRIDE】ALL output (story_frame, volume_map, roles, book_rules, pending_hooks) MUST be written in English. Character names, place names, and all prose must be in English. The === SECTION: === tags remain unchanged. Do NOT emit rhythm_principles or current_state sections — they have been consolidated away.\n\n`
       : "";
     const userMessage = resolvedLanguage === "en"
       ? `Generate the complete foundation for a ${gp.name} novel titled "${book.title}". Write everything in English.`
@@ -153,30 +166,37 @@ ${numericalBlock}
 ${powerBlock}
 ${eraBlock}
 
-## 输出结构（严格按 === SECTION: === 分块，不要漏任何一块）
+## 输出结构（5 个 SECTION，严格按 === SECTION: === 分块，不要漏任何一块）
+
+## 去重铁律（必读）
+禁止在多段里重复同一事实。主角弧线只写在 roles；世界铁律只写在 story_frame.世界观底色；节奏原则只写在 volume_map 最后一段。如果一个段落写了另一段的内容，删掉。
+
+## 预算（超预算必删）
+- story_frame ≤ 3000 chars
+- volume_map ≤ 5000 chars
+- roles 总 ≤ 8000 chars
+- book_rules ≤ 500 chars（仅 YAML）
+- pending_hooks ≤ 2000 chars
 
 === SECTION: story_frame ===
 
-这是散文骨架。5 段，每段约 1500 字，不要写表格，不要写 bullet list，写成能被人读下去的段落。段落标题用 \`## \` 开头，段落内部是正经段落。
+这是散文骨架。**4 段**，每段约 600-900 字，不要写表格，不要写 bullet list，写成能被人读下去的段落。段落标题用 \`## \` 开头，段落内部是正经段落。**主角弧线不写在本 section；它的权威来源是 roles/主要角色/<主角>.md。** 本段只需一句指针："本书主角是 X，完整弧线详见 roles/主要角色/X.md"。
 
 ### 段 1：主题与基调
-写这本书到底讲的是什么——不是"讲主角如何从弱到强"这种空话，而是具体的命题（"一个被时代按在泥里的人，如何选择不被改写"、"当所有人都在撒谎时，坚持记录真相要付出什么代价"）。主题下面跟着基调——温情冷冽悲壮肃杀，哪一种？为什么是这种而不是另一种？
+写这本书到底讲的是什么——不是"讲主角如何从弱到强"这种空话，而是具体的命题（"一个被时代按在泥里的人，如何选择不被改写"、"当所有人都在撒谎时，坚持记录真相要付出什么代价"）。主题下面跟着基调——温情冷冽悲壮肃杀，哪一种？为什么是这种而不是另一种？结尾用一句话指向主角并引向 roles（例："本书主角是林辞，完整弧线详见 roles/主要角色/林辞.md"）。
 
-### 段 2：主角弧线（起点 → 终点 → 代价）
-主角从哪里出发（身份、处境、核心缺陷、一开始最想要什么），到哪里落脚（最终变成什么样的人、拿到/失去什么），为了这个落脚他付出了什么不可逆的代价（关系、身体、信念、某段过去）。不要只写"变强"这种平面变化，要写**内在的位移**。
-
-### 段 3：核心冲突与对手
+### 段 2：核心冲突与对手定性
 这本书的主要矛盾是什么？不是"正邪对抗"，而是"因为 A 相信 X、B 相信 Y，所以他们一定会在某件事上对撞"。主要对手是谁（至少 2 个：一个显性对手 + 一个结构性对手/体制），他们的动机从哪里长出来。对手不是工具，对手有自己的逻辑。
 
-### 段 4：世界观底色（含铁律 + 风格基调）
-这个世界的运行规则是什么？3-5 条**不可违反的铁律**（原本写在 book_rules 里的 prohibitions，现在用散文嵌进去）。这个世界的质感是什么——湿的还是干的、快的还是慢的、噪的还是静的？给 writer 一个明确的感官锚（这是原来 particle_ledger 承载的基调部分）。
+### 段 3：世界观底色（铁律 + 质感 + 本书专属规则）
+这个世界的运行规则是什么？3-5 条**不可违反的铁律**——以 prose 写出，不要 bullet。这个世界的质感是什么——湿的还是干的、快的还是慢的、噪的还是静的？给 writer 一个明确的感官锚（这是原来 particle_ledger 承载的基调部分）。**这一段同时承担原先 book_rules 正文里写的"叙事视角 / 本书专属规则 / 核心冲突驱动"等 prose 内容**——全部合并到这里写一次就够，不要再去 book_rules 重复。
 
-### 段 5：终局方向
+### 段 4：终局方向
 这本书最后一章大概是什么感觉——不是"主角登顶"、"大结局"这种套话，而是**最后一个镜头**大致长什么样。主角最后在哪、做什么、身边有谁、心里想什么。这是给全书所有后面的规划一个远方靶子。
 
 === SECTION: volume_map ===
 
-这是分卷散文地图，6 段。**关键要求：写到章级 prose**（"第 17 章让他回家"、"第 32-35 章把师父的秘密揭开"级别的布局）。这是 Phase 3 planner LLM 能从稀疏 memo 里读出动作的源头。不写到章级就废了。
+这是分卷散文地图，**5 段主体 + 1 段节奏原则尾段**。**关键要求：写到章级 prose**（"第 17 章让他回家"、"第 32-35 章把师父的秘密揭开"级别的布局）。这是 Phase 3 planner LLM 能从稀疏 memo 里读出动作的源头。不写到章级就废了。
 
 ### 段 1：各卷主题与情绪曲线
 有几卷？每卷的主题一句话，每卷的情绪曲线一段（哪里压、哪里爽、哪里冷、哪里暖）。不要机械的"第一卷打小怪第二卷打大怪"，写情绪的流动。
@@ -188,45 +208,29 @@ ${eraBlock}
 第 1 卷埋什么钩子、哪一章回收；第 2 卷埋什么、哪一章回收。散文写，不要表格。必须写具体"这个钩子在第 N 章回"而不是"后期回收"。
 
 ### 段 4：角色阶段性目标
-主角在第 1 卷末要到什么状态？第 2 卷末？每一卷结束时主角的身份/关系/能力/心境应该是什么。次要角色的阶段性变化也要点到（师父在第 2 卷会死、对手在第 3 卷会黑化等）。
+主角在第 1 卷末要到什么状态？第 2 卷末？每一卷结束时主角的身份/关系/能力/心境应该是什么。次要角色的阶段性变化也要点到（师父在第 2 卷会死、对手在第 3 卷会黑化等）。写阶段性，不写完整弧线（完整弧线在 roles）。
 
 ### 段 5：卷尾必须发生的改变
 每一卷最后一章必须发生什么不可逆的事——权力结构改变、关系破裂、秘密暴露、主角身份重定位。写散文，一卷一段。
 
-### 段 6：节奏意图（哪几章喘息 / 哪几章压紧）
-本书节奏的宏观设计：前 X 章高压引人，第 X-Y 章放缓给感情线呼吸空间，第 Y-Z 章再次拉紧引向中卷高潮。这段直接指导 writer 在某一章该松还是该紧。
-
-=== SECTION: rhythm_principles ===
-
-6 条节奏原则——**必须写具体不抽象**。反面例子："节奏要张弛有度"（废话）。正面例子："前 30 章每 5 章一个小爽点，且小爽点必须落在章末 300 字内"。
-
-### 原则 1：高潮间距
-本书大高潮之间最长多少章？为什么？
-
-### 原则 2：喘息频率
-高压段多长必须插一章喘息？喘息章不是水章，它承担什么任务？
-
-### 原则 3：钩子密度
-每章章末必须留钩，一个还是两个？主钩最多允许悬多少章？
-
-### 原则 4：信息释放节奏
-主线信息（主角的秘密、对手的底牌、世界的真相）按什么节奏暴露？前 1/3 释放多少，中段多少，后段多少？
-
-### 原则 5：爽点节奏
-爽点间距多少章一个？什么样的爽点（智商碾压 / 实力反杀 / 翻身打脸 / 真相揭穿）？
-
-### 原则 6：情感节点递进
-情感关系（主角与 X 的关系）每多少章必须有一次实质推进？不推进会塌。
+### 段 6：节奏原则与本书具体化（必须具体不抽象）
+**这是节奏原则的唯一归宿，不再有独立 rhythm_principles section。** 针对这本书写 6 条具体原则，反面例子："节奏要张弛有度"（废话）。正面例子："前 30 章每 5 章一个小爽点，且小爽点必须落在章末 300 字内"。6 条各写 2-3 句，具体到章号区间：
+1. 高潮间距——本书大高潮之间最长多少章？为什么？
+2. 喘息频率——高压段多长必须插一章喘息？喘息章承担什么任务？
+3. 钩子密度——每章章末留钩数量，主钩最多允许悬多少章？
+4. 信息释放节奏——主线信息在前 1/3、中段、后 1/3 分别释放多少比例？
+5. 爽点节奏——爽点间距多少章一个？什么类型为主？
+6. 情感节点递进——情感关系每多少章必须有一次实质推进？
 
 === SECTION: roles ===
 
-一人一卡 prose，用以下格式分隔：
+一人一卡 prose。**主角卡是本书角色弧线的唯一权威来源**——story_frame 不再写主角弧线，writer/planner 都从这里读。用以下格式分隔：
 
 ---ROLE---
 tier: major
 name: <角色名>
 ---CONTENT---
-（这里写散文角色卡，下面的 7 个小标题必须全部出现，每段至少 3 行正经散文，不要写表格）
+（这里写散文角色卡，下面的小标题必须全部出现，每段至少 3 行正经散文，不要写表格）
 
 ## 核心标签
 （3-5 个关键词 + 一句话为什么是这些词）
@@ -235,10 +239,13 @@ name: <角色名>
 （1-2 个与核心标签反差的具体细节——"冷酷杀手但会给流浪猫留鱼骨"。反差细节是人物立体化的公式，必须有。）
 
 ## 人物小传（过往经历）
-（一段散文，说这个人怎么变成现在这样。童年/重大事件/塑造性格的那件事。）
+（一段散文，说这个人怎么变成现在这样。童年/重大事件/塑造性格的那件事。只写关键过往，简版。）
 
-## 当前现状
-（第 0 章时他在哪、做什么、处境如何、最近最烦心的事。）
+## 主角弧线（起点 → 终点 → 代价）
+**只有主角必须写本段；其他 major 角色如果弧线分量重也可以写，否则略过。**主角从哪里出发（身份、处境、核心缺陷、一开始最想要什么），到哪里落脚（最终变成什么样的人、拿到/失去什么），为了这个落脚他付出了什么不可逆的代价（关系、身体、信念、某段过去）。不要只写"变强"这种平面变化，要写**内在的位移**。本段是之前 story_frame.段 2 迁移过来的权威位置，写足写实。
+
+## 当前现状（第 0 章初始状态）
+（第 0 章时他在哪、做什么、处境如何、最近最烦心的事。这段同时承担原先独立 current_state section 的初始状态字段，不再有独立 current_state 块。）
 
 ## 关系网络
 （与主角、与其他重要角色的关系——一句话一条，关系不是标签是动态。）
@@ -247,7 +254,7 @@ name: <角色名>
 （他想要什么、为什么想要、愿意付出什么代价。）
 
 ## 成长弧光
-（他在这本书里会经历什么内在位移——变好变坏变复杂，落在哪里。）
+（他在这本书里会经历什么内在位移——变好变坏变复杂，落在哪里。非主角可短可长。）
 
 ---ROLE---
 tier: major
@@ -255,7 +262,7 @@ name: <下一个主要角色>
 ---CONTENT---
 ...
 
-（主要角色至少 3 个：主角 + 主要对手 + 主要协作者。建议 4-5 个。）
+（主要角色至少 3 个：主角 + 主要对手 + 主要协作者。建议 2-3 主 + 2-3 辅，不要灌水。质量 > 数量。）
 
 ---ROLE---
 tier: minor
@@ -267,7 +274,7 @@ name: <次要角色名>
 
 === SECTION: book_rules ===
 
-生成 book_rules.md 格式的 YAML frontmatter，保留结构化字段供 readBookRules() 使用：
+**只输出 YAML frontmatter 一块——零散文。** 所有的"叙事视角 / 本书专属规则 / 核心冲突驱动"等散文已经合并到 story_frame.世界观底色，不要在这里重复写。
 \`\`\`
 ---
 version: "1.0"
@@ -288,26 +295,7 @@ fatigueWordsOverride: []
 additionalAuditDimensions: []
 enableFullCastTracking: false
 ---
-
-## 叙事视角
-(描述本书叙事视角，一段散文)
-
-## 核心冲突驱动
-(指向 outline/story_frame.md 的段 3 并做一段精简概述)
 \`\`\`
-
-=== SECTION: current_state ===
-
-初始状态卡（第0章），Markdown 表格：
-| 字段 | 值 |
-|------|-----|
-| 当前章节 | 0 |
-| 当前位置 | (起始地点) |
-| 主角状态 | (初始状态) |
-| 当前目标 | (第一个目标) |
-| 当前限制 | (初始限制) |
-| 当前敌我 | (初始关系) |
-| 当前冲突 | (第一个冲突) |
 
 === SECTION: pending_hooks ===
 
@@ -323,12 +311,15 @@ enableFullCastTracking: false
 - 第10列「核心」：是否主线承重伏笔 true / false。主线承重伏笔一本书最多 3-7 条（主谜团、身世、核心承诺），其余次要伏笔填 false
 - 第11列「半衰期」：可选，整数章数。若不填自动按回收节奏推导（立即/近期 = 10、中程 = 30、慢烧/终局 = 80）
 - 初始线索放备注列，不放第5列
+- **初始世界状态 / 初始敌我关系** 如果有关键信息（例如"主角身上带着父亲的笔记本"、"体制已经开始监视码头"），可以作为 startChapter=0 的种子行录入，备注列说明其"初始状态"属性。这替代了原先独立 current_state section 的结构化字段。
 
 ## 最后强调
 - 符合${book.platform}平台口味、${gp.name}题材特征
 - 主角人设鲜明、行为边界清晰
 - 伏笔前后呼应、配角有独立动机不是工具人
-- **story_frame / volume_map / rhythm_principles / roles 必须是散文密度，不要退化成 bullet**
+- **story_frame / volume_map / roles 必须是散文密度，不要退化成 bullet**
+- **book_rules 只留 YAML，不要写散文**
+- **不要输出 rhythm_principles 或 current_state 两个独立 section**——它们已被合并/删除
 - **pending_hooks 表必须包含 Phase 7 扩展列——depends_on 标出因果链、pays_off_in_arc 锁定回收大致位置、core_hook 标记主线承重伏笔（3-7 条）、half_life 仅给重点伏笔设置**`;
   }
 
@@ -359,30 +350,37 @@ ${numericalBlock}
 ${powerBlock}
 ${eraBlock}
 
-## Output contract (strict === SECTION: === blocks)
+## Output contract (5 === SECTION: === blocks)
+
+## Deduplication rule (MANDATORY)
+Do not duplicate the same fact across sections. The protagonist's arc lives only in roles; world hard-rules live only in story_frame; rhythm principles live only in the last paragraph of volume_map. If a section repeats content that belongs elsewhere, delete it.
+
+## Output budget (over-budget means cut)
+- story_frame ≤ 3000 chars
+- volume_map ≤ 5000 chars
+- roles ≤ 8000 chars total
+- book_rules ≤ 500 chars (YAML only)
+- pending_hooks ≤ 2000 chars
 
 === SECTION: story_frame ===
 
-Five prose sections, ~1500 chars each. No tables. No bullet lists. Real paragraphs.
+Four prose sections, ~600-900 chars each. No tables. No bullet lists. Real paragraphs. **Do NOT write the protagonist's full arc here** — that is owned by roles/主要角色/<protagonist>.md. Use a single-line pointer inside this block (e.g. "The protagonist is X; full arc lives in roles/主要角色/X.md").
 
 ## 01_Theme_and_Tonal_Ground
-What is this book actually about — not "hero grows from weak to strong" (empty), but a concrete proposition. Then the tonal ground: warm / cold / fierce / severe — which, and why this and not another.
+What is this book actually about — not "hero grows from weak to strong" (empty), but a concrete proposition. Then the tonal ground: warm / cold / fierce / severe — which, and why this and not another. End with a one-line pointer to the protagonist role file.
 
-## 02_Protagonist_Arc (start → end → cost)
-Where the protagonist starts (identity, situation, core flaw, initial desire); where they land (who they become, what they gain or lose); the irreversible cost they pay for that landing. Show internal displacement, not just growth.
-
-## 03_Core_Conflict_and_Opponent
+## 02_Core_Conflict_and_Opponent
 The book's main tension — not "good vs evil" but "because A believes X and B believes Y, they will inevitably collide on Z". At least two opponents: one visible, one structural/systemic. Opponents have their own logic.
 
-## 04_World_Tonal_Ground (hard rules + sensory tone)
-The world's operating rules. 3-5 unbreakable laws (originally prohibitions, now embedded as prose). Sensory texture: wet or dry, fast or slow, noisy or quiet — give the writer an anchor (originally what particle_ledger carried).
+## 03_World_Tonal_Ground (hard rules + sensory tone + book-specific rules)
+The world's operating rules. 3-5 unbreakable laws written as prose, not bullets. Sensory texture: wet or dry, fast or slow, noisy or quiet — give the writer an anchor. **This paragraph also absorbs the narrative prose that used to live in book_rules (narrative perspective, core conflict driver, book-specific rules).** Write them all here once. Do not repeat them in book_rules.
 
-## 05_Endgame_Direction
+## 04_Endgame_Direction
 What the last chapter roughly feels like. The final shot: where, doing what, around whom, thinking what. A distant target for every planner call downstream.
 
 === SECTION: volume_map ===
 
-Prose volume map, 6 sections. **Critical requirement: write to chapter-level prose** ("chapter 17 sends him home", "chapters 32-35 reveal the master's secret"). Without chapter-level detail the sparse-memo planner has nothing to read.
+Prose volume map, **5 sections + 1 closing rhythm paragraph**. **Critical requirement: write to chapter-level prose** ("chapter 17 sends him home", "chapters 32-35 reveal the master's secret"). Without chapter-level detail the sparse-memo planner has nothing to read.
 
 ## 01_Volume_Themes_and_Emotional_Curves
 How many volumes? Each volume's theme in one sentence; each volume's emotional curve as a paragraph (where pressured, where rewarding, where cold, where warm). Not mechanical rotation.
@@ -394,39 +392,17 @@ Climax chapters (ch X, ch Y), turning-point chapters, breath/tender chapters. On
 Volume 1 plants hook A, paid off in ch N; volume 2 plants hook B, paid off in ch M. Prose, not tables. Concrete chapter numbers, not "late game payoff".
 
 ## 04_Character_Stage_Goals
-Protagonist's state at end of vol 1, vol 2, ... Supporting characters' stage changes (master dies end of vol 2, opponent breaks bad in vol 3).
+Protagonist's state at end of vol 1, vol 2, ... Supporting characters' stage changes (master dies end of vol 2, opponent breaks bad in vol 3). Stage goals only — full arc lives in roles.
 
 ## 05_Volume_End_Mandatory_Changes
 Each volume's last chapter must contain an irreversible event. Prose, one paragraph per volume.
 
-## 06_Rhythm_Intent (breath vs clench)
-Macro rhythm: first X chapters high pressure, ch X-Y breathe for the relationship arc, ch Y-Z clench again for the mid-arc climax.
-
-=== SECTION: rhythm_principles ===
-
-Six rhythm principles — **must be concrete, not abstract**. Bad: "rhythm must balance tension and release". Good: "every 5 chapters in the first 30 must carry a small payoff, and each must land within the last 300 chars of the chapter".
-
-## Principle_1_Climax_Spacing
-Longest allowed distance between major climaxes. Why.
-
-## Principle_2_Breath_Frequency
-How long a high-pressure run before a breath chapter is mandatory. What the breath chapter must carry.
-
-## Principle_3_Hook_Density
-Chapter-end hooks — one or two per chapter? Maximum unresolved span for the main hook?
-
-## Principle_4_Information_Release
-How main-line information (protagonist's secret, opponent's hand, world truth) is released across first third / middle / last third.
-
-## Principle_5_Payoff_Rhythm
-Interval between small payoffs. What kind (intelligence domination / raw strength / face-slap / truth reveal).
-
-## Principle_6_Relationship_Advancement
-Every N chapters a relationship must make a concrete move or it collapses.
+## 06_Rhythm_Principles_Concretised (ONLY place rhythm principles live)
+**This is the single home for rhythm principles — no separate rhythm_principles section exists.** Write 6 concrete principles for THIS book. Bad: "rhythm must balance tension and release". Good: "every 5 chapters in the first 30 carries a small payoff landing in the last 300 chars of the chapter". Cover: (1) climax spacing, (2) breath frequency, (3) hook density, (4) information release pacing, (5) payoff rhythm, (6) relationship advancement — each 2-3 sentences with concrete chapter ranges.
 
 === SECTION: roles ===
 
-One-file-per-character prose. Use this delimiter:
+One-file-per-character prose. **The protagonist card is the single source of truth for the protagonist's arc** — story_frame no longer carries it, and writer/planner both read it here.
 
 ---ROLE---
 tier: major
@@ -439,10 +415,13 @@ name: <character name>
 (1-2 concrete details that contradict the core tags — "ice-cold killer but leaves fish bones for stray cats". Contrast detail is the formula for character dimensionality.)
 
 ## Back_Story
-(Prose paragraph — how this person became who they are.)
+(Prose paragraph — how this person became who they are. Key past only, keep it lean.)
 
-## Current_State
-(Where they are at chapter 0, what's on their mind, most recent worry.)
+## Protagonist_Arc (start → end → cost)
+**Mandatory for the protagonist; optional for other majors with substantial arcs.** Where they start (identity, situation, core flaw, initial desire); where they land (who they become, what they gain or lose); the irreversible cost they pay for that landing. Show internal displacement, not just growth. This section absorbs what used to live in story_frame.02_Protagonist_Arc.
+
+## Current_State (initial state at chapter 0)
+(Where they are at chapter 0, what's on their mind, most recent worry. This also absorbs the fields that used to live in the separate current_state section — no separate current_state block is produced any more.)
 
 ## Relationship_Network
 (With protagonist, with other major characters. One line each. Relationships are dynamic, not labels.)
@@ -451,7 +430,7 @@ name: <character name>
 (What they want, why, what they're willing to pay.)
 
 ## Growth_Arc
-(What internal displacement they undergo across the book.)
+(Internal displacement across the book. Can be short for non-protagonists.)
 
 ---ROLE---
 tier: major
@@ -459,7 +438,7 @@ name: <next major>
 ---CONTENT---
 ...
 
-(At least 3 majors: protagonist + main opponent + main collaborator. 4-5 is ideal.)
+(Aim for 2-3 majors + 2-3 supporting majors. Quality over quantity — do not pad.)
 
 ---ROLE---
 tier: minor
@@ -471,7 +450,7 @@ name: <minor name>
 
 === SECTION: book_rules ===
 
-book_rules.md as YAML frontmatter + narrative guidance:
+**Output ONLY the YAML frontmatter block — zero prose.** All narrative guidance (perspective, book-specific rules, core conflict driver) has moved into story_frame.03_World_Tonal_Ground. Do not repeat it here.
 \`\`\`
 ---
 version: "1.0"
@@ -492,26 +471,7 @@ fatigueWordsOverride: []
 additionalAuditDimensions: []
 enableFullCastTracking: false
 ---
-
-## Narrative Perspective
-(One prose paragraph on perspective and style.)
-
-## Core Conflict Driver
-(Brief pointer to outline/story_frame.md section 3.)
 \`\`\`
-
-=== SECTION: current_state ===
-
-Initial state card (chapter 0) as a Markdown table:
-| Field | Value |
-| --- | --- |
-| Current Chapter | 0 |
-| Current Location | (starting location) |
-| Protagonist State | (initial condition) |
-| Current Goal | (first goal) |
-| Current Constraint | (initial constraint) |
-| Current Alliances | (initial relationships) |
-| Current Conflict | (first conflict) |
 
 === SECTION: pending_hooks ===
 
@@ -527,12 +487,15 @@ Rules:
 - Column 10 (core_hook): true / false. Core hooks are main-line load-bearing (central mystery, identity, key promise). A book typically has 3-7 cores; everything else is false
 - Column 11 (half_life): optional integer chapters. If blank, derived from payoff_timing (immediate/near-term = 10, mid-arc = 30, slow-burn/endgame = 80)
 - Put initial signal text in notes, not column 5
+- **Initial world / alliance state**: any load-bearing initial condition ("protagonist carries the father's notebook", "the regime already watches the harbor") can be seeded as a start_chapter=0 row with a note-column tag indicating its initial-state nature. This replaces the structured fields of the removed current_state section.
 
 ## Final emphasis
 - Fit ${book.platform} platform taste and ${gp.name} genre traits
 - Protagonist persona clear with sharp behavioral boundaries
 - Hooks planted with payoff promises; supporting characters have independent motivation
-- **story_frame / volume_map / rhythm_principles / roles must be prose density — no bullet-list degradation**
+- **story_frame / volume_map / roles must be prose density — no bullet-list degradation**
+- **book_rules is YAML only — no prose body**
+- **Do NOT emit rhythm_principles or current_state as separate sections** — both have been merged / removed
 - **pending_hooks table MUST carry Phase 7 extended columns — depends_on spells out the causal chain, pays_off_in_arc locks the approximate payoff location, core_hook marks main-line load-bearing hooks (3-7 per book), half_life only on priority hooks**`;
   }
 
@@ -832,7 +795,7 @@ ${numericalBlock}
 ${continuationDirective}
 
 ## Output contract
-Follow the same === SECTION: === block layout as original-foundation generation: story_frame, volume_map, rhythm_principles, roles, book_rules, current_state, pending_hooks.
+Follow the consolidated 5-section === SECTION: === layout: story_frame, volume_map, roles, book_rules, pending_hooks. Do NOT emit rhythm_principles or current_state — rhythm principles live in the last paragraph of volume_map, initial state facts live in roles.Current_State and (optionally) pending_hooks start_chapter=0 rows.
 
 All prose must be derived from the source text. Do not invent settings. For volume_map, treat existing chapters as "review" (one paragraph) and continuation as prose chapter-level planning. Hook extraction must be complete (every unresolved clue).
 
@@ -853,7 +816,7 @@ ${numericalBlock}
 ${continuationDirective}
 
 ## 输出契约
-与从零架构完全一致的 === SECTION: === 结构：story_frame / volume_map / rhythm_principles / roles / book_rules / current_state / pending_hooks。
+合并后的 5 段 === SECTION: === 结构：story_frame / volume_map / roles / book_rules / pending_hooks。**不要输出 rhythm_principles 或 current_state 两个 section**——节奏原则合并进 volume_map 尾段，初始状态字段合并进 roles.当前现状（以及可选的 pending_hooks startChapter=0 行）。
 
 所有 prose 必须从正文中推导，不得臆造。volume_map 中，已有章节作为"回顾段"（一段散文），续写部分写到章级 prose。伏笔识别要完整（所有悬而未决的线索）。`;
 
@@ -906,11 +869,13 @@ ${fanficCanon}
 ${genreBody}
 
 ## 输出契约
-严格按 === SECTION: === 块输出：story_frame / volume_map / rhythm_principles / roles / book_rules / current_state / pending_hooks。
+严格按合并后的 5 段 === SECTION: === 块输出：story_frame / volume_map / roles / book_rules / pending_hooks。**不要输出 rhythm_principles 或 current_state**（节奏原则合并进 volume_map 尾段；初始状态合并进 roles.当前现状）。
 
 - 主要角色必须来自原作正典
 - 可添加原创配角，标注"原创"
 - book_rules 的 fanficMode 必须设为 "${fanficMode}"
+- book_rules 只输出 YAML frontmatter，散文写进 story_frame.世界观底色
+- 主角弧线只写在 roles/主要角色/<主角>.md，不在 story_frame 重复
 - 所有 outline 必须是散文密度`;
 
     const response = await this.chat([
