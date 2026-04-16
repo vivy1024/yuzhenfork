@@ -8,6 +8,7 @@ import {
   createPatchChapterTextTool,
   createRenameEntityTool,
   createReviseChapterTool,
+  createWriteFileTool,
   createWriteTruthFileTool,
 } from "../agent/agent-tools.js";
 
@@ -219,5 +220,18 @@ describe("agent deterministic writing tools", () => {
     if (result.content[0]?.type === "text") {
       expect(result.content[0].text).toContain(".md");
     }
+  });
+
+  it("creates nested files through the generic write tool", async () => {
+    const tool = createWriteFileTool(root);
+
+    const result = await tool.execute("tool-10", {
+      path: "harbor/story/runtime/notes.md",
+      content: "# Notes\n\nWatch the harbor ledger.\n",
+    });
+
+    expect(result.content[0]?.type).toBe("text");
+    await expect(readFile(join(state.bookDir("harbor"), "story", "runtime", "notes.md"), "utf-8"))
+      .resolves.toContain("Watch the harbor ledger");
   });
 });

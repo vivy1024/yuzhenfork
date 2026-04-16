@@ -7,6 +7,7 @@ export {
   createRenameEntityTool,
   createPatchChapterTextTool,
   createEditTool,
+  createWriteFileTool,
   createGrepTool,
   createLsTool,
 } from "./agent-tools.js";
