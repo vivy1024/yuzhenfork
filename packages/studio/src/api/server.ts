@@ -1039,6 +1039,14 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     // No key = no models (don't fallback to built-in list)
     if (!apiKey) return c.json({ models: [] });
 
+    // Fast path: services with knownModels don't need API probing
+    const preset = resolveServicePreset(isCustomServiceId(service) ? "custom" : service);
+    if (preset?.knownModels && preset.knownModels.length > 0) {
+      return c.json({
+        models: preset.knownModels.map((id) => ({ id, name: id })),
+      });
+    }
+
     const resolvedBaseUrl = await resolveConfiguredServiceBaseUrl(root, service);
     if (!resolvedBaseUrl) return c.json({ models: [] });
 
