@@ -160,32 +160,4 @@ describe("agent deterministic writing tools", () => {
       }),
     );
   });
-
-  it("passes explicit chapterNumber through sub_agent auditor and reviser", async () => {
-    const pipeline = {
-      initBook: vi.fn(async () => undefined),
-      auditDraft: vi.fn(async () => ({
-        chapterNumber: 5,
-        issues: [],
-      })),
-      reviseDraft: vi.fn(async () => undefined),
-    };
-    const tool = createSubAgentTool(pipeline as never, "harbor");
-
-    await tool.execute("tool-7", {
-      agent: "auditor",
-      bookId: "harbor",
-      chapterNumber: 5,
-      instruction: "审计第5章",
-    });
-    await tool.execute("tool-8", {
-      agent: "reviser",
-      bookId: "harbor",
-      chapterNumber: 6,
-      instruction: "重写第6章",
-    });
-
-    expect(pipeline.auditDraft).toHaveBeenCalledWith("harbor", 5);
-    expect(pipeline.reviseDraft).toHaveBeenCalledWith("harbor", 6, "rewrite");
-  });
 });

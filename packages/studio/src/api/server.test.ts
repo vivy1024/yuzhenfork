@@ -488,17 +488,6 @@ describe("createStudioServer daemon lifecycle", () => {
       },
     };
     loadProjectConfigMock.mockResolvedValue(freshConfig);
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      text: async () => "404 page not found",
-    });
-    vi.stubGlobal("fetch", fetchMock as typeof fetch);
-    createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
-    chatCompletionMock.mockResolvedValue({
-      content: "pong",
-      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
-    });
 
     const { createStudioServer } = await import("./server.js");
     const app = createStudioServer(startupConfig as never, root);
@@ -506,14 +495,15 @@ describe("createStudioServer daemon lifecycle", () => {
     const response = await app.request("http://localhost/api/v1/doctor");
 
     expect(response.status).toBe(200);
+    expect(createLLMClientMock).toHaveBeenCalledWith(expect.objectContaining({
+      model: "fresh-model",
+      baseUrl: "https://fresh.example.com/v1",
+    }));
     expect(chatCompletionMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        model: "fresh-model",
-        baseUrl: "https://fresh.example.com/v1",
-      }),
+      expect.anything(),
       "fresh-model",
       expect.any(Array),
-      expect.objectContaining({ maxTokens: 2048 }),
+      expect.objectContaining({ maxTokens: 5 }),
     );
   });
 
@@ -529,15 +519,9 @@ describe("createStudioServer daemon lifecycle", () => {
       },
     };
     loadProjectConfigMock.mockResolvedValue(freshConfig);
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 404,
-      text: async () => "404 page not found",
-    });
-    vi.stubGlobal("fetch", fetchMock as typeof fetch);
     createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
-    chatCompletionMock.mockImplementation(async (client: any, _model: string, _messages: any, options: any) => {
-      if (client.stream === false && options?.maxTokens === 2048) {
+    chatCompletionMock.mockImplementation(async (client: any) => {
+      if (client.stream === false) {
         return {
           content: "pong",
           usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
@@ -554,24 +538,14 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(response.json()).resolves.toMatchObject({
       llmConnected: true,
     });
-    expect(chatCompletionMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        stream: true,
-        apiFormat: "chat",
-      }),
-      "claude-sonnet-4-6",
-      expect.any(Array),
-      expect.objectContaining({ maxTokens: 2048 }),
-    );
-    expect(chatCompletionMock).toHaveBeenCalledWith(
-      expect.objectContaining({
-        stream: false,
-        apiFormat: "chat",
-      }),
-      "claude-sonnet-4-6",
-      expect.any(Array),
-      expect.objectContaining({ maxTokens: 2048 }),
-    );
+    expect(createLLMClientMock).toHaveBeenCalledWith(expect.objectContaining({
+      stream: true,
+      apiFormat: "chat",
+    }));
+    expect(createLLMClientMock).toHaveBeenCalledWith(expect.objectContaining({
+      stream: false,
+      apiFormat: "chat",
+    }));
   });
 
   it("reloads latest llm config for radar scans without restarting the studio server", async () => {
@@ -900,10 +874,9 @@ describe("createStudioServer daemon lifecycle", () => {
         services: [
           { service: "minimax", apiFormat: "chat", stream: false },
         ],
-        defaultModel: "kimi-k2.5",
+        defaultModel: "MiniMax-M2.7",
       },
     }, null, 2), "utf-8");
-    SERVICE_PRESETS_MOCK.minimax.knownModels = ["MiniMax-M2.7", "MiniMax-M2.5"];
 
     const fetchMock = vi.fn().mockResolvedValue({
       ok: false,
@@ -912,11 +885,8 @@ describe("createStudioServer daemon lifecycle", () => {
     });
     vi.stubGlobal("fetch", fetchMock as typeof fetch);
     createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
-    chatCompletionMock.mockImplementation(async (client: any, model: string, _messages: any, options: any) => {
-      if (client.provider === "anthropic"
-        && client.baseUrl === "https://api.minimaxi.com/anthropic"
-        && model === "MiniMax-M2.7"
-        && options?.maxTokens === 2048) {
+    chatCompletionMock.mockImplementation(async (client: any, model: string) => {
+      if (client.provider === "anthropic" && client.baseUrl === "https://api.minimaxi.com/anthropic" && model === "MiniMax-M2.7") {
         return {
           content: "pong",
           usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
@@ -948,37 +918,6 @@ describe("createStudioServer daemon lifecycle", () => {
         baseUrl: "https://api.minimaxi.com/anthropic",
       },
     });
-    SERVICE_PRESETS_MOCK.minimax.knownModels = [];
-  });
-
-  it("short-circuits the probe when /models returns 401 or 403", async () => {
-    const fetchMock = vi.fn().mockResolvedValue({
-      ok: false,
-      status: 401,
-      text: async () => "unauthorized",
-    });
-    vi.stubGlobal("fetch", fetchMock as typeof fetch);
-    createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
-
-    const { createStudioServer } = await import("./server.js");
-    const app = createStudioServer(cloneProjectConfig() as never, root);
-
-    const response = await app.request("http://localhost/api/v1/services/openai/test", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        apiKey: "sk-bad",
-        apiFormat: "chat",
-        stream: false,
-      }),
-    });
-
-    expect(response.status).toBe(400);
-    await expect(response.json()).resolves.toMatchObject({
-      ok: false,
-      error: "API Key 无效，请检查后重试",
-    });
-    expect(chatCompletionMock).not.toHaveBeenCalled();
   });
 
   it("uses the preset models baseUrl when listing Bailian models", async () => {

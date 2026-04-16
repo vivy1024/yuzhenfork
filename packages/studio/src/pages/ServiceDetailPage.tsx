@@ -20,15 +20,6 @@ interface DetectedConfig {
   readonly modelsSource?: "api" | "fallback";
 }
 
-interface ServiceProbeResponse {
-  readonly ok: boolean;
-  readonly models?: ModelInfo[];
-  readonly modelCount?: number;
-  readonly selectedModel?: string;
-  readonly detected?: DetectedConfig;
-  readonly error?: string;
-}
-
 // Unified page state
 type ConnectionStatus =
   | { state: "idle" }               // No action taken yet
@@ -37,115 +28,6 @@ type ConnectionStatus =
   | { state: "error"; message: string }          // Test failed
   | { state: "saving" }             // Save in progress
   | { state: "saved" }              // Save succeeded
-
-export async function probeServiceForDetail(
-  fetcher: typeof fetchJson,
-  args: {
-    readonly effectiveServiceId: string;
-    readonly apiKey: string;
-    readonly apiFormat: "chat" | "responses";
-    readonly stream: boolean;
-    readonly isCustom: boolean;
-    readonly baseUrl: string;
-  },
-): Promise<ServiceProbeResponse> {
-  return fetcher<ServiceProbeResponse>(
-    `/services/${encodeURIComponent(args.effectiveServiceId)}/test`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        apiKey: args.apiKey,
-        apiFormat: args.apiFormat,
-        stream: args.stream,
-        ...(args.isCustom ? { baseUrl: args.baseUrl.trim() } : {}),
-      }),
-    },
-  );
-}
-
-export async function rehydrateServiceConnectionStatus(
-  fetcher: typeof fetchJson,
-  args: {
-    readonly connected: boolean;
-    readonly effectiveServiceId: string;
-    readonly apiFormat: "chat" | "responses";
-    readonly stream: boolean;
-    readonly isCustom: boolean;
-    readonly baseUrl: string;
-  },
-): Promise<ServiceProbeResponse | null> {
-  if (!args.connected) return null;
-  const secret = await fetcher<{ apiKey?: string }>(`/services/${encodeURIComponent(args.effectiveServiceId)}/secret`);
-  const savedKey = secret.apiKey?.trim();
-  if (!savedKey) return null;
-  return probeServiceForDetail(fetcher, {
-    effectiveServiceId: args.effectiveServiceId,
-    apiKey: savedKey,
-    apiFormat: args.apiFormat,
-    stream: args.stream,
-    isCustom: args.isCustom,
-    baseUrl: args.baseUrl,
-  });
-}
-
-export async function saveServiceConfigWithValidation(
-  fetcher: typeof fetchJson,
-  args: {
-    readonly effectiveServiceId: string;
-    readonly serviceId: string;
-    readonly isCustom: boolean;
-    readonly resolvedCustomName: string;
-    readonly baseUrl: string;
-    readonly apiKey: string;
-    readonly apiFormat: "chat" | "responses";
-    readonly stream: boolean;
-    readonly temperature: string;
-    readonly maxTokens: string;
-    readonly defaultModel?: string;
-  },
-): Promise<{ probe: ServiceProbeResponse | null }> {
-  const trimmedKey = args.apiKey.trim();
-  let probe: ServiceProbeResponse | null = null;
-  if (trimmedKey) {
-    probe = await probeServiceForDetail(fetcher, {
-      effectiveServiceId: args.effectiveServiceId,
-      apiKey: trimmedKey,
-      apiFormat: args.apiFormat,
-      stream: args.stream,
-      isCustom: args.isCustom,
-      baseUrl: args.baseUrl,
-    });
-    if (!probe.ok) {
-      throw new Error(probe.error ?? "连接失败");
-    }
-  }
-
-  await fetcher(`/services/${encodeURIComponent(args.effectiveServiceId)}/secret`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ apiKey: trimmedKey }),
-  });
-  await fetcher("/services/config", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      service: args.effectiveServiceId,
-      ...(args.defaultModel ? { defaultModel: args.defaultModel } : {}),
-      services: [
-        {
-          service: args.isCustom ? "custom" : args.serviceId,
-          temperature: parseFloat(args.temperature),
-          maxTokens: parseInt(args.maxTokens, 10),
-          apiFormat: args.apiFormat,
-          stream: args.stream,
-          ...(args.isCustom ? { name: args.resolvedCustomName, baseUrl: args.baseUrl.trim() } : {}),
-        },
-      ],
-    }),
-  });
-  return { probe };
-}
 
 function DetailSkeleton() {
   return (
@@ -187,9 +69,6 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
 
   // -- Unified connection status --
   const [status, setStatus] = useState<ConnectionStatus>({ state: "idle" });
-  const resolvedCustomName = persistedCustomName || customName.trim() || "Custom";
-  const effectiveServiceId = isCustom ? `custom:${resolvedCustomName}` : serviceId;
-  const label = isCustom ? (customName || persistedCustomName || "自定义服务") : (svc?.label ?? serviceId);
 
   useEffect(() => {
     let cancelled = false;
@@ -217,32 +96,24 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     return () => { cancelled = true; };
   }, [isCustom, persistedCustomName, serviceId]);
 
-  // Validate existing key on mount via /test, not just /models
+  // Load models on mount if connected
   useEffect(() => {
-    let cancelled = false;
-    if (!svc?.connected) return;
-    setStatus({ state: "testing" });
-    void rehydrateServiceConnectionStatus(fetchJson, {
-      connected: svc.connected,
-      effectiveServiceId,
-      apiFormat,
-      stream,
-      isCustom,
-      baseUrl,
-    })
-      .then((result) => {
-        if (cancelled || !result) return;
-        if (result.ok && result.models) {
-          setStatus({ state: "connected", models: result.models });
-        } else {
-          setStatus({ state: "idle" });
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setStatus({ state: "idle" });
-      });
-    return () => { cancelled = true; };
-  }, [svc?.connected, effectiveServiceId, apiFormat, stream, isCustom, baseUrl]);
+    if (svc?.connected) {
+      setStatus({ state: "testing" });
+      fetchJson<{ models: ModelInfo[] }>(`/services/${encodeURIComponent(serviceId)}/models`)
+        .then((data) => {
+          const models = data.models ?? [];
+          setStatus(models.length > 0
+            ? { state: "connected", models }
+            : { state: "idle" });
+        })
+        .catch(() => setStatus({ state: "idle" }));
+    }
+  }, [svc?.connected, serviceId]);
+
+  const resolvedCustomName = persistedCustomName || customName.trim() || "Custom";
+  const effectiveServiceId = isCustom ? `custom:${resolvedCustomName}` : serviceId;
+  const label = isCustom ? (customName || persistedCustomName || "自定义服务") : (svc?.label ?? serviceId);
 
   useEffect(() => {
     let cancelled = false;
@@ -278,14 +149,26 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     setApiKey(trimmedKey);
     setStatus({ state: "testing" });
     try {
-      const result = await probeServiceForDetail(fetchJson, {
-        effectiveServiceId,
-        apiKey: trimmedKey,
-        apiFormat,
-        stream,
-        isCustom,
-        baseUrl,
-      });
+      const result = await fetchJson<{
+        ok: boolean;
+        models?: ModelInfo[];
+        modelCount?: number;
+        selectedModel?: string;
+        detected?: DetectedConfig;
+        error?: string;
+      }>(
+        `/services/${encodeURIComponent(effectiveServiceId)}/test`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            apiKey: trimmedKey,
+            apiFormat,
+            stream,
+            ...(isCustom ? { baseUrl: baseUrl.trim() } : {}),
+          }),
+        },
+      );
       if (result.ok) {
         const models = result.models ?? [];
         if (result.detected?.apiFormat) setApiFormat(result.detected.apiFormat);
@@ -313,28 +196,63 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
     }
     setStatus({ state: "saving" });
     try {
-      const { probe: validatedResult } = await saveServiceConfigWithValidation(fetchJson, {
-        effectiveServiceId,
-        serviceId,
-        isCustom,
-        resolvedCustomName,
-        baseUrl,
-        apiKey: trimmedKey,
-        apiFormat,
-        stream,
-        temperature,
-        maxTokens,
-        defaultModel: detectedModel || undefined,
+      // Save key (empty = delete)
+      await fetchJson(`/services/${encodeURIComponent(effectiveServiceId)}/secret`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ apiKey: trimmedKey }),
       });
-
-      if (trimmedKey && validatedResult?.models) {
-        if (validatedResult.detected?.apiFormat) setApiFormat(validatedResult.detected.apiFormat);
-        if (typeof validatedResult.detected?.stream === "boolean") setStream(validatedResult.detected.stream);
-        if (isCustom && validatedResult.detected?.baseUrl) setBaseUrl(validatedResult.detected.baseUrl);
-        setDetectedModel(validatedResult.selectedModel ?? detectedModel);
-        setDetectedConfig(validatedResult.detected ?? detectedConfig);
-        setStoreModels(effectiveServiceId, validatedResult.models);
-        setStatus({ state: "connected", models: validatedResult.models });
+      // Save config (temperature, maxTokens, etc.)
+      await fetchJson("/services/config", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          service: effectiveServiceId,
+          ...(detectedModel ? { defaultModel: detectedModel } : {}),
+          services: [
+            {
+              service: isCustom ? "custom" : serviceId,
+              temperature: parseFloat(temperature),
+              maxTokens: parseInt(maxTokens, 10),
+              apiFormat,
+              stream,
+              ...(isCustom ? { name: resolvedCustomName, baseUrl: baseUrl.trim() } : {}),
+            },
+          ],
+        }),
+      });
+      if (trimmedKey) {
+        try {
+          const result = await fetchJson<{
+            ok: boolean;
+            models?: ModelInfo[];
+            selectedModel?: string;
+            detected?: DetectedConfig;
+            error?: string;
+          }>(`/services/${encodeURIComponent(effectiveServiceId)}/test`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              apiKey: trimmedKey,
+              apiFormat,
+              stream,
+              ...(isCustom ? { baseUrl: baseUrl.trim() } : {}),
+            }),
+          });
+          if (result.ok && result.models) {
+            if (result.detected?.apiFormat) setApiFormat(result.detected.apiFormat);
+            if (typeof result.detected?.stream === "boolean") setStream(result.detected.stream);
+            if (isCustom && result.detected?.baseUrl) setBaseUrl(result.detected.baseUrl);
+            setDetectedModel(result.selectedModel ?? detectedModel);
+            setDetectedConfig(result.detected ?? detectedConfig);
+            setStoreModels(effectiveServiceId, result.models);
+            setStatus({ state: "connected", models: result.models });
+          } else {
+            setStatus({ state: "error", message: result.error ?? "连接失败" });
+          }
+        } catch (e) {
+          setStatus({ state: "error", message: e instanceof Error ? e.message : "连接失败" });
+        }
       } else {
         clearStoreModels(effectiveServiceId);
         setStatus({ state: "saved" });

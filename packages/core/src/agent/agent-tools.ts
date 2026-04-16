@@ -60,7 +60,6 @@ const SubAgentParams = Type.Object({
   instruction: Type.String({ description: "Natural language instruction from the main Agent" }),
   bookId: Type.Optional(Type.String({ description: "Book ID — required for all agents except architect" })),
   title: Type.Optional(Type.String({ description: "Architect only: explicit book title. Required when creating a book." })),
-  chapterNumber: Type.Optional(Type.Number({ description: "Auditor/reviser only: target chapter number. Omit to use the latest chapter." })),
 });
 
 function deriveBookIdFromTitle(title: string): string {
@@ -91,7 +90,7 @@ export function createSubAgentTool(
       _signal?: AbortSignal,
       onUpdate?: AgentToolUpdateCallback,
     ): Promise<AgentToolResult<undefined>> {
-      const { agent, instruction, bookId, title, chapterNumber } = params;
+      const { agent, instruction, bookId, title } = params;
 
       const progress = (msg: string) => {
         onUpdate?.(textResult(msg));
@@ -131,8 +130,8 @@ export function createSubAgentTool(
 
           case "auditor": {
             if (!bookId) return textResult("Error: bookId is required for the auditor agent.");
-            progress(`Auditing chapter ${chapterNumber ?? "latest"} for "${bookId}"...`);
-            const audit = await pipeline.auditDraft(bookId, chapterNumber);
+            progress(`Auditing draft for "${bookId}"...`);
+            const audit = await pipeline.auditDraft(bookId);
             progress(`Audit complete for "${bookId}".`);
             const issueCount = audit.issues?.length ?? 0;
             return textResult(
@@ -151,8 +150,8 @@ export function createSubAgentTool(
                 : /rework|返工/.test(instruction)
                   ? "rework"
                   : "spot-fix";
-            progress(`Revising chapter ${chapterNumber ?? "latest"} for "${bookId}" in ${mode} mode...`);
-            await pipeline.reviseDraft(bookId, chapterNumber, mode);
+            progress(`Revising "${bookId}" in ${mode} mode...`);
+            await pipeline.reviseDraft(bookId, undefined, mode);
             progress(`Revision complete for "${bookId}".`);
             return textResult(`Revision (${mode}) complete for "${bookId}".`);
           }
