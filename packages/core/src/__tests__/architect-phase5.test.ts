@@ -255,7 +255,7 @@ describe("ArchitectAgent — Phase 5 prose output", () => {
     await expect(readFile(join(storyDir, "volume_outline.md"), "utf-8")).rejects.toThrow();
   });
 
-  it("still requires book_rules / roles / pending_hooks to be present (current_state is optional after consolidation)", async () => {
+  it("still requires book_rules / roles / current_state / pending_hooks to be present", async () => {
     const agent = buildAgent();
     vi.spyOn(agent as unknown as { chat: (...args: unknown[]) => Promise<unknown> }, "chat")
       .mockResolvedValue({
@@ -270,9 +270,10 @@ describe("ArchitectAgent — Phase 5 prose output", () => {
         usage: ZERO_USAGE,
       });
 
-    // book_rules + roles both missing — the error message lists them.
+    // book_rules + roles + current_state all missing — the error lists them.
     await expect(agent.generateFoundation(baseBook())).rejects.toThrow(/book_rules/i);
     await expect(agent.generateFoundation(baseBook())).rejects.toThrow(/roles/i);
+    await expect(agent.generateFoundation(baseBook())).rejects.toThrow(/current_state/i);
   });
 
   it("requires at least one of story_frame or legacy story_bible", async () => {
@@ -315,10 +316,12 @@ describe("ArchitectAgent — Phase 5 prose output", () => {
     expect(system).toContain("节奏原则");
     expect(system).toContain("=== SECTION: story_frame ===");
     expect(system).toContain("=== SECTION: volume_map ===");
-    // Phase 5 consolidation: rhythm_principles is now merged into volume_map's
-    // closing paragraph and NO LONGER a standalone SECTION header in the prompt.
+    // Phase 5 consolidation: rhythm_principles is merged into volume_map's
+    // closing paragraph and remains NOT a standalone SECTION header.
     expect(system).not.toContain("=== SECTION: rhythm_principles ===");
-    expect(system).not.toContain("=== SECTION: current_state ===");
+    // Post-consolidation-fix: current_state restored as a narrow 6th section
+    // (500-800 chars, env/era/macro prose only).
+    expect(system).toContain("=== SECTION: current_state ===");
     expect(system).toContain("=== SECTION: roles ===");
     expect(system).toContain("=== SECTION: book_rules ===");
     expect(system).toContain("=== SECTION: pending_hooks ===");
