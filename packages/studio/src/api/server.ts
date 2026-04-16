@@ -12,7 +12,6 @@ import {
   loadProjectConfig,
   loadProjectSession,
   processProjectInteractionRequest,
-  routeNaturalLanguageIntent,
   resolveSessionActiveBook,
   findOrCreateBookSession,
   listBookSessions,
@@ -1255,13 +1254,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       // Load config + create LLM client (pipeline created after model resolution)
       const config = await loadCurrentProjectConfig({ requireApiKey: false });
       const client = createLLMClient(config.llm);
-      const interactionSession = await loadProjectSession(root);
-      const resolvedInteractionBookId = activeBookId ?? await resolveSessionActiveBook(root, interactionSession);
-      const routedRequest = routeNaturalLanguageIntent(instruction, {
-        activeBookId: resolvedInteractionBookId,
-        hasCreationDraft: Boolean((interactionSession as { creationDraft?: unknown }).creationDraft),
-        hasFailed: (interactionSession as { currentExecution?: { status?: string } }).currentExecution?.status === "failed",
-      });
 
       // Resolve or create BookSession for history
       let bookSession: BookSession;
@@ -1271,46 +1263,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           (await findOrCreateBookSession(root, activeBookId ?? null));
       } else {
         bookSession = await findOrCreateBookSession(root, activeBookId ?? null);
-      }
-
-      const deterministicIntent = routedRequest.intent !== "chat" && routedRequest.intent !== "develop_book";
-      if (deterministicIntent) {
-        const interactionPipeline = new PipelineRunner(await buildPipelineConfig({
-          client,
-          model: config.llm.model,
-          currentConfig: config,
-        }));
-        const interactionTools = createInteractionToolsFromDeps(interactionPipeline, state);
-        const interactionResult = await processProjectInteractionRequest({
-          projectRoot: root,
-          request: routedRequest,
-          tools: interactionTools,
-          activeBookId: activeBookId ?? undefined,
-        });
-        const responseBookId = interactionResult.session.activeBookId ?? activeBookId ?? null;
-        if (responseBookId !== (bookSession.bookId ?? null)) {
-          bookSession = await findOrCreateBookSession(root, responseBookId);
-        }
-        bookSession = appendBookSessionMessage(bookSession, {
-          role: "user",
-          content: instruction,
-          timestamp: Date.now(),
-        });
-        if (interactionResult.responseText) {
-          bookSession = appendBookSessionMessage(bookSession, {
-            role: "assistant",
-            content: interactionResult.responseText,
-            timestamp: Date.now() + 1,
-          });
-        }
-        await persistBookSession(root, bookSession);
-        return c.json({
-          response: interactionResult.responseText,
-          session: {
-            sessionId: bookSession.sessionId,
-            ...(interactionResult.session.activeBookId ? { activeBookId: interactionResult.session.activeBookId } : {}),
-          },
-        });
       }
 
       // Build initial message context from persisted session
