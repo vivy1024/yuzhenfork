@@ -81,6 +81,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
 - **write_truth_file** — 整文件覆盖真相文件（story_bible、volume_outline、book_rules、current_focus 等）
 - **rename_entity** — 统一改角色/实体名
 - **patch_chapter_text** — 对已有章节做局部定点修补
+- **edit** — 通用精确字符串替换编辑（仅在专用 deterministic 工具都不适合时使用）
 - **grep** — 搜索内容（如"哪一章提到了某个角色"）
 - **ls** — 列出文件或章节
 
@@ -92,6 +93,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
 - 用户要求重写/精修已有章节 → 用 revise_chapter
 - 用户要求角色或实体改名 → 用 rename_entity
 - 用户要求对某一章做局部小修 → 用 patch_chapter_text
+- 只有当上述专用工具都不适合，而且你已精确读取并定位文本时，才使用 edit
 - 其他情况 → 直接对话回答
 - **注意：不要调用 architect，当前已有书籍，不需要建书**
 - **不要在回复中添加表情符号**
@@ -128,6 +130,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
 - **write_truth_file** — Replace a canonical truth file in story/
 - **rename_entity** — Rename a character or entity across the book
 - **patch_chapter_text** — Apply a local deterministic patch to a chapter
+- **edit** — Generic exact string replacement editor (use only when the dedicated deterministic tools do not fit)
 - **grep** — Search content across chapters
 - **ls** — List files or chapters
 
@@ -139,6 +142,7 @@ export function buildAgentSystemPrompt(bookId: string | null, language: string):
 - Use revise_chapter for rewrite/polish/rework of existing chapters
 - Use rename_entity for character/entity renames
 - Use patch_chapter_text for local chapter fixes
+- Use edit only as a last-resort generic editor after you have read the exact file content
 - Chat directly for other questions
 - **Do NOT call architect — a book already exists**
 - **Do NOT use emoji in your responses**
