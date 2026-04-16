@@ -9,9 +9,9 @@ describe("service-presets regression", () => {
       expect(preset!.baseUrl).toBe("https://api.minimaxi.com/anthropic");
     });
 
-    it("uses openai-completions api format", () => {
+    it("uses anthropic-messages api format", () => {
       const preset = resolveServicePreset("minimax");
-      expect(preset!.api).toBe("openai-completions");
+      expect(preset!.api).toBe("anthropic-messages");
     });
 
     it("has knownModels with all 7 MiniMax models", () => {

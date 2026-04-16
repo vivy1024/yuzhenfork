@@ -77,7 +77,7 @@ export function createInteractCommand(hooks: InteractCommandHooks = {}): Command
         ? await hooks.createTools(projectRoot)
         : hooks.runInteraction
           ? ({} as InteractionRuntimeTools)
-          : await createInteractionTools(projectRoot);
+          : await createInteractionTools(projectRoot, undefined, { requireApiKey: false });
       const runInteraction = hooks.runInteraction ?? processProjectInteractionInput;
       const result = await runInteraction({
         projectRoot,

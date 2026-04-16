@@ -40,8 +40,9 @@ export { createInteractionToolsFromDepsCompat as createInteractionToolsFromDeps 
 export async function createInteractionTools(
   projectRoot: string,
   hooks?: CliInteractionToolHooks,
+  options?: { readonly requireApiKey?: boolean },
 ): Promise<InteractionRuntimeTools> {
-  const config = await loadConfig({ projectRoot });
+  const config = await loadConfig({ projectRoot, requireApiKey: options?.requireApiKey });
   const pipeline = new PipelineRunner(buildPipelineConfig(config, projectRoot));
   const state = new StateManager(projectRoot);
   return createInteractionToolsFromDeps(pipeline, state, hooks);

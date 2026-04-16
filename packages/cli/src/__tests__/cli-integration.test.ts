@@ -12,16 +12,29 @@ const cliEntry = resolve(cliDir, "dist", "index.js");
 
 let projectDir: string;
 
+function buildTestEnv(overrides?: Record<string, string>) {
+  const baseEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) =>
+      !key.startsWith("INKOS_")
+      && !key.startsWith("OPENAI_")
+      && !key.startsWith("ANTHROPIC_")
+      && key !== "TAVILY_API_KEY",
+    ),
+  );
+
+  return {
+    ...baseEnv,
+    // Prevent global config from leaking into tests
+    HOME: projectDir,
+    ...overrides,
+  };
+}
+
 function run(args: string[], options?: { env?: Record<string, string> }): string {
   return execFileSync("node", [cliEntry, ...args], {
     cwd: projectDir,
     encoding: "utf-8",
-    env: {
-      ...process.env,
-      // Prevent global config from leaking into tests
-      HOME: projectDir,
-      ...options?.env,
-    },
+    env: buildTestEnv(options?.env),
     timeout: 10_000,
   });
 }
@@ -31,7 +44,7 @@ function runStderr(args: string[], options?: { env?: Record<string, string> }): 
     const stdout = execFileSync("node", [cliEntry, ...args], {
       cwd: projectDir,
       encoding: "utf-8",
-      env: { ...process.env, HOME: projectDir, ...options?.env },
+      env: buildTestEnv(options?.env),
       timeout: 10_000,
     });
     return { stdout, stderr: "", exitCode: 0 };
@@ -195,48 +208,58 @@ describe("CLI integration", () => {
     it("returns structured JSON for shared interaction mode switches", async () => {
       const initialized = await stat(join(projectDir, "inkos.json")).then(() => true).catch(() => false);
       if (!initialized) run(["init"]);
-      await writeFile(
-        join(projectDir, ".env"),
-        Object.entries(failingLlmEnv).map(([key, value]) => `${key}=${value}`).join("\n"),
-        "utf-8",
-      );
-      const output = run(["interact", "--json", "--message", "切换到全自动"]);
-      const data = JSON.parse(output);
+      const envPath = join(projectDir, ".env");
+      const originalEnv = await readFile(envPath, "utf-8");
+      try {
+        await writeFile(
+          envPath,
+          Object.entries(failingLlmEnv).map(([key, value]) => `${key}=${value}`).join("\n"),
+          "utf-8",
+        );
+        const output = run(["interact", "--json", "--message", "切换到全自动"]);
+        const data = JSON.parse(output);
 
-      expect(data.request.intent).toBe("switch_mode");
-      expect(data.request.mode).toBe("auto");
-      expect(data.session.automationMode).toBe("auto");
+        expect(data.request.intent).toBe("switch_mode");
+        expect(data.request.mode).toBe("auto");
+        expect(data.session.automationMode).toBe("auto");
+      } finally {
+        await writeFile(envPath, originalEnv, "utf-8");
+      }
     });
 
     it("binds the requested book when interact is called with --book", async () => {
       const initialized = await stat(join(projectDir, "inkos.json")).then(() => true).catch(() => false);
       if (!initialized) run(["init"]);
-      await writeFile(
-        join(projectDir, ".env"),
-        Object.entries(failingLlmEnv).map(([key, value]) => `${key}=${value}`).join("\n"),
-        "utf-8",
-      );
-      const state = new StateManager(projectDir);
-      await state.saveBookConfig("harbor", {
-        id: "harbor",
-        title: "Harbor",
-        platform: "tomato",
-        genre: "other",
-        status: "active",
-        targetChapters: 20,
-        chapterWordCount: 3000,
-        createdAt: "2026-04-07T00:00:00.000Z",
-        updatedAt: "2026-04-07T00:00:00.000Z",
-      });
+      const envPath = join(projectDir, ".env");
+      const originalEnv = await readFile(envPath, "utf-8");
+      try {
+        await writeFile(
+          envPath,
+          Object.entries(failingLlmEnv).map(([key, value]) => `${key}=${value}`).join("\n"),
+          "utf-8",
+        );
+        const state = new StateManager(projectDir);
+        await state.saveBookConfig("harbor", {
+          id: "harbor",
+          title: "Harbor",
+          platform: "tomato",
+          genre: "other",
+          status: "active",
+          targetChapters: 20,
+          chapterWordCount: 3000,
+          createdAt: "2026-04-07T00:00:00.000Z",
+          updatedAt: "2026-04-07T00:00:00.000Z",
+        });
 
-      const output = run(["interact", "--json", "--book", "harbor", "--message", "/books"]);
-      const data = JSON.parse(output);
+        const output = run(["interact", "--json", "--book", "harbor", "--message", "/books"]);
+        const data = JSON.parse(output);
 
-      expect(data.session.activeBookId).toBe("harbor");
-
-      // Clean up harbor book and session so subsequent tests start with an empty project
-      await rm(join(projectDir, "books", "harbor"), { recursive: true, force: true });
-      await rm(join(projectDir, ".inkos-session.json"), { force: true }).catch(() => {});
+        expect(data.session.activeBookId).toBe("harbor");
+      } finally {
+        await writeFile(envPath, originalEnv, "utf-8");
+        await rm(join(projectDir, "books", "harbor"), { recursive: true, force: true });
+        await rm(join(projectDir, ".inkos-session.json"), { force: true }).catch(() => {});
+      }
     });
   });
 
