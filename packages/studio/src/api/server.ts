@@ -29,6 +29,7 @@ import {
   getServiceApiKey,
   listModelsForService,
   chatCompletion,
+  buildExportArtifact,
   GLOBAL_ENV_PATH,
   type ResolvedModel,
   type PipelineConfig,
@@ -1654,59 +1655,19 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const id = c.req.param("id");
     const format = (c.req.query("format") ?? "txt") as string;
     const approvedOnly = c.req.query("approvedOnly") === "true";
-    const bookDir = state.bookDir(id);
-    const chaptersDir = join(bookDir, "chapters");
 
     try {
-      const book = await state.loadBookConfig(id);
-      const index = await state.loadChapterIndex(id);
-      const approvedNums = new Set(
-        approvedOnly ? index.filter((ch) => ch.status === "approved").map((ch) => ch.number) : [],
-      );
-
-      const files = await readdir(chaptersDir);
-      const mdFiles = files.filter((f) => f.endsWith(".md") && /^\d{4}/.test(f)).sort();
-
-      const filteredFiles = approvedOnly
-        ? mdFiles.filter((f) => approvedNums.has(parseInt(f.slice(0, 4), 10)))
-        : mdFiles;
-
-      const contents = await Promise.all(
-        filteredFiles.map((f) => readFile(join(chaptersDir, f), "utf-8")),
-      );
-
-      if (format === "epub") {
-        // Basic EPUB: XHTML container
-        const chapters = contents.map((content, i) => {
-          const title = content.match(/^#\s+(.+)$/m)?.[1] ?? `Chapter ${i + 1}`;
-          const html = content.split("\n").filter((l) => !l.startsWith("#")).map((l) => l.trim() ? `<p>${l}</p>` : "").join("\n");
-          return { title, html };
-        });
-        const toc = chapters.map((ch, i) => `<li><a href="#ch${i}">${ch.title}</a></li>`).join("\n");
-        const body = chapters.map((ch, i) => `<h2 id="ch${i}">${ch.title}</h2>\n${ch.html}`).join("\n<hr/>\n");
-        const epub = `<!DOCTYPE html><html><head><meta charset="utf-8"><title>${book.title}</title><style>body{font-family:serif;max-width:40em;margin:auto;padding:2em;line-height:1.8}h2{margin-top:3em}</style></head><body><h1>${book.title}</h1><nav><ol>${toc}</ol></nav><hr/>${body}</body></html>`;
-        return new Response(epub, {
-          headers: {
-            "Content-Type": "text/html; charset=utf-8",
-            "Content-Disposition": `attachment; filename="${id}.html"`,
-          },
-        });
-      }
-      if (format === "md") {
-        const body = contents.join("\n\n---\n\n");
-        return new Response(body, {
-          headers: {
-            "Content-Type": "text/markdown; charset=utf-8",
-            "Content-Disposition": `attachment; filename="${id}.md"`,
-          },
-        });
-      }
-      // Default: txt
-      const body = contents.join("\n\n");
-      return new Response(body, {
+      const artifact = await buildExportArtifact(state, id, {
+        format: format as "txt" | "md" | "epub",
+        approvedOnly,
+      });
+      const responseBody = typeof artifact.payload === "string"
+        ? artifact.payload
+        : new Uint8Array(artifact.payload);
+      return new Response(responseBody, {
         headers: {
-          "Content-Type": "text/plain; charset=utf-8",
-          "Content-Disposition": `attachment; filename="${id}.txt"`,
+          "Content-Type": artifact.contentType,
+          "Content-Disposition": `attachment; filename="${artifact.fileName}"`,
         },
       });
     } catch {
