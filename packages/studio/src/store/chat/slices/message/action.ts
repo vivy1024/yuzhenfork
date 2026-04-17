@@ -207,6 +207,10 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
   },
 
   loadSessionDetail: async (sessionId) => {
+    // 本地已有消息 → 不拉取远端，避免流式中或未持久化的消息被覆盖。
+    const existing = get().sessions[sessionId];
+    if (existing && existing.messages.length > 0) return;
+
     try {
       const data = await fetchJson<SessionResponse>(`/sessions/${sessionId}`);
       const detail = data.session;
@@ -216,6 +220,8 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
 
       set((state) => {
         const runtime = state.sessions[detailSessionId];
+        // set 执行到这里可能已有本地消息写入（比如并发 sendMessage），再查一次。
+        if (runtime && runtime.messages.length > 0) return {};
         const nextBookId = detail.bookId ?? runtime?.bookId ?? null;
         return {
           sessions: {
