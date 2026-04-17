@@ -19,6 +19,7 @@ import { DoctorView } from "./pages/DoctorView";
 import { LanguageSelector } from "./pages/LanguageSelector";
 import { BookSidebar, BookSidebarToggle } from "./components/chat/BookSidebar";
 import { useSSE } from "./hooks/use-sse";
+import { useSessionEvents } from "./hooks/use-session-events";
 import { useTheme } from "./hooks/use-theme";
 import { useI18n } from "./hooks/use-i18n";
 import { postApi, putApi, useApi } from "./hooks/use-api";
@@ -55,6 +56,8 @@ export function App() {
       setReady(true);
     }
   }, [project]);
+
+  useSessionEvents(sse, route, setRoute);
 
   const nav = {
     toDashboard: () => setRoute({ page: "dashboard" }),
