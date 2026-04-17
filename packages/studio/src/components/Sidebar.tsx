@@ -8,7 +8,6 @@ import { ConfirmDialog } from "./ConfirmDialog";
 import {
   Dialog,
   DialogContent,
-  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -75,7 +74,7 @@ export function Sidebar({ nav, activePage, sse, t }: {
   const loadSessionList = useChatStore((s) => s.loadSessionList);
   const loadSessionDetail = useChatStore((s) => s.loadSessionDetail);
   const activateSession = useChatStore((s) => s.activateSession);
-  const createSession = useChatStore((s) => s.createSession);
+  const createDraftSession = useChatStore((s) => s.createDraftSession);
   const renameSession = useChatStore((s) => s.renameSession);
   const deleteSession = useChatStore((s) => s.deleteSession);
   const [renameTarget, setRenameTarget] = useState<{ sessionId: string; currentTitle: string } | null>(null);
@@ -96,19 +95,25 @@ export function Sidebar({ nav, activePage, sse, t }: {
     }
   }, [refetchBooks, refetchDaemon, sse.messages]);
 
+  // bookDataVersion 变化（外部数据信号）时才重拉当前已展开书的 session 列表；
+  // 展开/折叠本身不触发请求（展开由 toggleBook 驱动，已带"首次加载"判断）。
   useEffect(() => {
     for (const bookId of expandedBooks) {
       void loadSessionList(bookId);
     }
-  }, [bookDataVersion, expandedBooks, loadSessionList]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bookDataVersion, loadSessionList]);
 
   const toggleBook = (bookId: string) => {
     setExpandedBooks((prev) => {
       const next = new Set(prev);
       if (next.has(bookId)) {
         next.delete(bookId);
-      } else {
-        next.add(bookId);
+        return next;
+      }
+      next.add(bookId);
+      // 首次展开才拉：已有 sessionIdsByBook 数据就直接用缓存
+      if (sessionIdsByBook[bookId] === undefined) {
         void loadSessionList(bookId);
       }
       return next;
@@ -134,11 +139,12 @@ export function Sidebar({ nav, activePage, sse, t }: {
     void loadSessionDetail(sessionId);
   };
 
-  const handleCreateSession = async (bookId: string) => {
+  const handleCreateSession = (bookId: string) => {
+    // 前端创建草稿会话：对话区立即变空，但 session 文件不落盘；
+    // 发第一条消息时 sendMessage 会调 POST /sessions 真正创建。
     setExpandedBooks((prev) => new Set(prev).add(bookId));
-    const sessionId = await createSession(bookId);
+    createDraftSession(bookId);
     nav.toBook(bookId);
-    await loadSessionDetail(sessionId);
   };
 
   const handleRenameConfirm = async () => {
@@ -221,7 +227,7 @@ export function Sidebar({ nav, activePage, sse, t }: {
                     <div className="mt-0.5">
                       {bookSessions.map((session) => {
                         const isActiveSession = isActiveBook && activeSessionId === session.sessionId;
-                        const label = getSessionLabel(session.sessionId, session.title);
+                        const label = getSessionLabel(session);
                         return (
                           <div
                             key={session.sessionId}
@@ -387,40 +393,35 @@ export function Sidebar({ nav, activePage, sse, t }: {
           }
         }}
       >
-        <DialogContent showCloseButton={false}>
-          <DialogHeader>
-            <DialogTitle>重命名会话</DialogTitle>
-            <DialogDescription>
-              手动标题会覆盖自动生成标题，后续不再被 AI 改写。
-            </DialogDescription>
+        <DialogContent
+          showCloseButton={false}
+          className="sm:max-w-[360px] p-4 gap-3"
+        >
+          <DialogHeader className="space-y-0 gap-0">
+            <DialogTitle className="font-sans text-sm font-medium">重命名会话</DialogTitle>
           </DialogHeader>
-          <div className="space-y-2">
-            <label className="text-xs font-medium text-muted-foreground" htmlFor="session-rename-input">
-              会话标题
-            </label>
-            <input
-              id="session-rename-input"
-              autoFocus
-              value={renameValue}
-              onChange={(event) => setRenameValue(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  void handleRenameConfirm();
-                }
-              }}
-              placeholder="输入新标题"
-              className="w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary"
-            />
-          </div>
-          <DialogFooter>
+          <input
+            id="session-rename-input"
+            autoFocus
+            value={renameValue}
+            onChange={(event) => setRenameValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") {
+                event.preventDefault();
+                void handleRenameConfirm();
+              }
+            }}
+            placeholder="输入新标题"
+            className="w-full rounded-md border border-border/60 bg-background px-3 py-1.5 text-sm outline-none focus:border-border"
+          />
+          <DialogFooter className="gap-1 sm:gap-1">
             <button
               type="button"
               onClick={() => {
                 setRenameTarget(null);
                 setRenameValue("");
               }}
-              className="px-4 py-2 text-sm font-medium rounded-xl bg-secondary text-foreground hover:bg-secondary/80 transition-all border border-border/50"
+              className="px-3 py-1 text-xs text-muted-foreground hover:text-foreground transition-colors"
             >
               取消
             </button>
@@ -428,7 +429,7 @@ export function Sidebar({ nav, activePage, sse, t }: {
               type="button"
               onClick={() => void handleRenameConfirm()}
               disabled={!renameValue.trim()}
-              className="px-4 py-2 text-sm font-bold rounded-xl bg-primary text-primary-foreground transition-all disabled:opacity-40"
+              className="px-3 py-1 text-xs font-medium rounded-md bg-foreground text-background hover:opacity-90 transition-opacity disabled:opacity-30"
             >
               保存
             </button>
@@ -450,15 +451,16 @@ export function Sidebar({ nav, activePage, sse, t }: {
   );
 }
 
-function getSessionLabel(sessionId: string, title: string | null): string {
-  if (title) return title;
-  const rawTs = Number(sessionId.split("-")[0]);
-  if (!Number.isFinite(rawTs)) return "新会话";
-  const formatted = new Date(rawTs).toLocaleTimeString("zh-CN", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  return `新会话 · ${formatted}`;
+function getSessionLabel(session: { sessionId: string; title: string | null; messages: ReadonlyArray<{ role: string; content: string }> }): string {
+  if (session.title) return session.title;
+  // 后端会在第一条用户消息发送时立即把消息内容持久化为占位标题。
+  // 这里处理的是"已有消息但标题还没同步回来"的短暂中间态（乐观显示）。
+  const firstUserMsg = session.messages.find((m) => m.role === "user")?.content?.trim();
+  if (firstUserMsg) {
+    const oneLine = firstUserMsg.replace(/\s+/g, " ");
+    return oneLine.length > 20 ? `${oneLine.slice(0, 20)}…` : oneLine;
+  }
+  return "新会话";
 }
 
 function formatRelativeTime(sessionId: string): string {
