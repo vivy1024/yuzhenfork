@@ -155,6 +155,35 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
     return sessionId;
   },
 
+  createDraftSession: (bookId) => {
+    // 前端生成 sessionId（与后端 createBookSession 同格式），暂不持久化到磁盘。
+    // 发送第一条消息时，sendMessage 会调 POST /sessions { sessionId, bookId } 落盘。
+    const sessionId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    set((state) => {
+      const runtime = createSessionRuntime({
+        sessionId,
+        bookId,
+        title: null,
+        isDraft: true,
+      });
+      return {
+        sessions: {
+          ...state.sessions,
+          [sessionId]: runtime,
+        },
+        sessionIdsByBook: {
+          ...state.sessionIdsByBook,
+          [bookKey(bookId)]: mergeSessionIds(
+            state.sessionIdsByBook[bookKey(bookId)],
+            [sessionId],
+          ),
+        },
+        activeSessionId: sessionId,
+      };
+    });
+    return sessionId;
+  },
+
   renameSession: async (sessionId, title) => {
     const previous = get().sessions[sessionId]?.title ?? null;
     set((state) => ({
@@ -177,10 +206,13 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
   deleteSession: async (sessionId) => {
     const session = get().sessions[sessionId];
     session?.stream?.close();
-    try {
-      await fetchJson(`/sessions/${sessionId}`, { method: "DELETE" });
-    } catch {
-      // ignore
+    // 草稿会话还没写到磁盘，跳过 DELETE 请求避免后端返回 404
+    if (session && !session.isDraft) {
+      try {
+        await fetchJson(`/sessions/${sessionId}`, { method: "DELETE" });
+      } catch {
+        // ignore
+      }
     }
 
     set((state) => {
@@ -207,8 +239,10 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
   },
 
   loadSessionDetail: async (sessionId) => {
-    // 本地已有消息 → 不拉取远端，避免流式中或未持久化的消息被覆盖。
+    // 草稿会话：磁盘上还没有文件，直接跳过远端拉取。
+    // 本地已有消息：不拉取远端，避免流式中或未持久化的消息被覆盖。
     const existing = get().sessions[sessionId];
+    if (existing?.isDraft) return;
     if (existing && existing.messages.length > 0) return;
 
     try {
@@ -260,6 +294,25 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
       get().addUserMessage(sessionId, trimmed);
       get().addErrorMessage(sessionId, "请先选择一个模型");
       return;
+    }
+
+    // 草稿会话：第一条消息发送时才真正把 session 文件写到磁盘。
+    // 后端 POST /sessions 支持接受客户端传入的 sessionId，所以 id 保持一致，
+    // 前端 store 里的 runtime 不用 remount，只需要把 isDraft 翻成 false。
+    if (session.isDraft) {
+      try {
+        await fetchJson<SessionResponse>("/sessions", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId, bookId: session.bookId }),
+        });
+        set((state) => ({
+          sessions: updateSession(state.sessions, sessionId, () => ({ isDraft: false })),
+        }));
+      } catch (err) {
+        get().addErrorMessage(sessionId, err instanceof Error ? err.message : String(err));
+        return;
+      }
     }
 
     const instruction = activeBookId ? trimmed : `/new ${trimmed}`;

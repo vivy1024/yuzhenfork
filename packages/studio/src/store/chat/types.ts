@@ -111,6 +111,8 @@ export interface SessionRuntime {
   readonly isStreaming: boolean;
   readonly lastError: string | null;
   readonly pendingBookArgs: Record<string, unknown> | null;
+  // 仅前端存在、尚未持久化到磁盘的草稿会话。发送第一条消息时才调 POST /sessions 把它落盘。
+  readonly isDraft: boolean;
 }
 
 export interface MessageState {
@@ -147,6 +149,7 @@ export interface MessageActions {
   loadSessionMessages: (sessionId: string, msgs: ReadonlyArray<SessionMessage>) => void;
   loadSessionList: (bookId: string | null) => Promise<void>;
   createSession: (bookId: string | null) => Promise<string>;
+  createDraftSession: (bookId: string | null) => string;
   renameSession: (sessionId: string, title: string) => Promise<void>;
   deleteSession: (sessionId: string) => Promise<void>;
   loadSessionDetail: (sessionId: string) => Promise<void>;

@@ -1,11 +1,10 @@
 import type { MessageState } from "../../types";
 
 export const initialMessageState: MessageState = {
-  messages: [],
+  sessions: {},
+  sessionIdsByBook: {},
+  activeSessionId: null,
   input: "",
-  loading: false,
-  currentSessionId: null,
   selectedModel: null,
   selectedService: null,
-  _activeStream: null,
 };

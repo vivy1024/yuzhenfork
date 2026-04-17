@@ -129,6 +129,7 @@ export function createSessionRuntime(input: {
   bookId: string | null;
   title: string | null;
   messages?: ReadonlyArray<Message>;
+  isDraft?: boolean;
 }): SessionRuntime {
   return {
     sessionId: input.sessionId,
@@ -139,6 +140,7 @@ export function createSessionRuntime(input: {
     isStreaming: false,
     lastError: null,
     pendingBookArgs: null,
+    isDraft: input.isDraft ?? false,
   };
 }
 
