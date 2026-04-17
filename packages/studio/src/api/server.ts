@@ -1063,8 +1063,11 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     // No key = no models
     if (!apiKey) return c.json({ models: [] });
 
-    // Cache by service + apiKey fingerprint; valid for 10 min unless ?refresh=1
-    const cacheKey = `${service}::${apiKey.slice(-8)}`;
+    const preset = resolveServicePreset(isCustomServiceId(service) ? "custom" : service);
+    const resolvedBaseUrl = await resolveConfiguredServiceBaseUrl(root, service);
+
+    // Cache by service + resolved baseUrl + apiKey fingerprint; valid for 10 min unless ?refresh=1
+    const cacheKey = `${service}::${resolvedBaseUrl ?? ""}::${apiKey.slice(-8)}`;
     if (!refresh) {
       const cached = modelListCache.get(cacheKey);
       if (cached && Date.now() - cached.at < 10 * 60 * 1000) {
@@ -1073,7 +1076,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     }
 
     // Fast path: services with knownModels return immediately
-    const preset = resolveServicePreset(isCustomServiceId(service) ? "custom" : service);
     if (preset?.knownModels && preset.knownModels.length > 0) {
       const models = preset.knownModels.map((id) => ({ id, name: id }));
       modelListCache.set(cacheKey, { models, at: Date.now() });
@@ -1081,7 +1083,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     }
 
     // Simple /models API call + fallback to pi-ai built-in list (no slow probe)
-    const resolvedBaseUrl = await resolveConfiguredServiceBaseUrl(root, service);
     if (!resolvedBaseUrl) return c.json({ models: [] });
 
     const modelsBase = preset?.modelsBaseUrl ?? resolvedBaseUrl;

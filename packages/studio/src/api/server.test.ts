@@ -37,7 +37,7 @@ const getServiceApiKeyMock = vi.fn();
 type ServicePresetMock = {
   providerFamily: "openai" | "anthropic";
   baseUrl: string;
-  modelsBaseUrl: string;
+  modelsBaseUrl?: string;
   knownModels: string[];
 };
 const SERVICE_PRESETS_MOCK: Record<string, ServicePresetMock> = {
@@ -45,7 +45,7 @@ const SERVICE_PRESETS_MOCK: Record<string, ServicePresetMock> = {
   anthropic: { providerFamily: "anthropic", baseUrl: "https://api.anthropic.com", modelsBaseUrl: "https://api.anthropic.com", knownModels: [] as string[] },
   minimax: { providerFamily: "anthropic", baseUrl: "https://api.minimaxi.com/anthropic", modelsBaseUrl: "https://api.minimaxi.com/anthropic", knownModels: [] as string[] },
   bailian: { providerFamily: "anthropic", baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic", modelsBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", knownModels: [] as string[] },
-  custom: { providerFamily: "openai", baseUrl: "", modelsBaseUrl: "", knownModels: [] as string[] },
+  custom: { providerFamily: "openai", baseUrl: "", knownModels: [] as string[] },
 };
 const resolveServicePresetMock = vi.fn((service: string) => SERVICE_PRESETS_MOCK[service]);
 const resolveServiceProviderFamilyMock = vi.fn((service: string) => resolveServicePresetMock(service)?.providerFamily);
@@ -1043,6 +1043,64 @@ describe("createStudioServer daemon lifecycle", () => {
       "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
       expect.any(Object),
     );
+  });
+
+  it("keys cached model lists by baseUrl so custom endpoints do not leak stale results", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "custom", name: "Switcher", baseUrl: "https://a.example.com/v1" },
+        ],
+      },
+    }, null, 2), "utf-8");
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "https://a.example.com/v1/models") {
+        return {
+          ok: true,
+          json: async () => ({ data: [{ id: "model-a" }] }),
+          text: async () => "",
+        };
+      }
+      if (url === "https://b.example.com/v1/models") {
+        return {
+          ok: true,
+          json: async () => ({ data: [{ id: "model-b" }] }),
+          text: async () => "",
+        };
+      }
+      return {
+        ok: false,
+        status: 404,
+        text: async () => "404 page not found",
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const first = await app.request("http://localhost/api/v1/services/custom%3ASwitcher/models?apiKey=sk-shared-tail");
+    expect(first.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({
+      models: [{ id: "model-a", name: "model-a" }],
+    });
+
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "custom", name: "Switcher", baseUrl: "https://b.example.com/v1" },
+        ],
+      },
+    }, null, 2), "utf-8");
+
+    const second = await app.request("http://localhost/api/v1/services/custom%3ASwitcher/models?apiKey=sk-shared-tail");
+    expect(second.status).toBe(200);
+    await expect(second.json()).resolves.toMatchObject({
+      models: [{ id: "model-b", name: "model-b" }],
+    });
   });
 
   it("returns stored service secret for detail page rehydration", async () => {
