@@ -1198,6 +1198,7 @@ export class PipelineRunner {
       pipelineLang,
     );
     const { validatePostWrite: postWriteValidate } = await import("../agents/post-write-validator.js");
+    const { validateHookLedger } = await import("../utils/hook-ledger-validator.js");
     const { readBookRules } = await import("../agents/rules-reader.js");
     const parsedBookRules = (await readBookRules(bookDir))?.rules ?? null;
 
@@ -1241,7 +1242,7 @@ export class PipelineRunner {
       analyzeAITells: (content) => analyzeAITells(content, pipelineLang),
       analyzeSensitiveWords: (content) => analyzeSensitiveWords(content, undefined, pipelineLang),
       runPostWriteChecks: (content) => {
-        return postWriteValidate(content, gp, parsedBookRules, pipelineLang)
+        const baseIssues = postWriteValidate(content, gp, parsedBookRules, pipelineLang)
           .filter((v) => v.severity === "error")
           .map((v) => ({
             severity: "critical" as const,
@@ -1249,6 +1250,12 @@ export class PipelineRunner {
             description: v.description,
             suggestion: v.suggestion,
           }));
+        // Phase 9-3: verify the draft acts on every hook the memo committed to.
+        const memoBody = writeInput.chapterMemo?.body ?? "";
+        const ledgerIssues = memoBody
+          ? validateHookLedger(memoBody, content)
+          : [];
+        return [...baseIssues, ...ledgerIssues];
       },
       logWarn: (message) => this.logWarn(pipelineLang, message),
       logStage: (message) => this.logStage(stageLanguage, message),

@@ -37,6 +37,7 @@ const REQUIRED_SECTIONS: ReadonlyArray<RequiredSection> = [
   { zh: "## 日常/过渡承担什么任务", en: "## What the slow / transitional beats carry", minContentChars: 20 },
   { zh: "## 关键抉择过三连问", en: "## Three-question check on the key choice", minContentChars: 20 },
   { zh: "## 章尾必须发生的改变", en: "## Required end-of-chapter change", minContentChars: 20 },
+  { zh: "## 本章 hook 账", en: "## Hook ledger for this chapter", minContentChars: 20 },
   { zh: "## 不要做", en: "## Do not", minContentChars: 1 },
 ];
 

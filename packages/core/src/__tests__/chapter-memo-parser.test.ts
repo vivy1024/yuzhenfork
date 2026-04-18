@@ -30,6 +30,14 @@ const SECTIONS = `
 - 信息改变：主角掌握实证
 - 关系改变：主角对阿泽产生戒心
 
+## 本章 hook 账
+advance:
+- H03 "七号门异常" → 从 pressured → near_payoff（主角拿到实证）
+resolve:
+- S004 "锁芯刮痕" → 本章核验完毕
+defer:
+- H07 "幕后主使" → 压到第 20 章，时机未到
+
 ## 不要做
 - 不要让对手突然降智
 - 不要直接点破幕后主使
@@ -99,6 +107,7 @@ describe("parseMemo", () => {
     "## 日常/过渡承担什么任务",
     "## 关键抉择过三连问",
     "## 章尾必须发生的改变",
+    "## 本章 hook 账",
     "## 不要做",
   ])("throws when body is missing section %s", (heading) => {
     const body = SECTIONS.replace(heading, "## SECTION-REMOVED");
@@ -154,6 +163,8 @@ describe("parseMemo", () => {
         "",
         "## 章尾必须发生的改变",
         "",
+        "## 本章 hook 账",
+        "",
         "## 不要做",
         "",
       ].join("\n");
@@ -172,8 +183,8 @@ describe("parseMemo", () => {
 
     it("rejects a memo where one section has 'TODO' (under 20 chars)", () => {
       const body = SECTIONS.replace(
-        /## 章尾必须发生的改变\n[\s\S]*?\n\n## 不要做/,
-        "## 章尾必须发生的改变\nTODO\n\n## 不要做",
+        /## 章尾必须发生的改变\n[\s\S]*?\n\n## 本章 hook 账/,
+        "## 章尾必须发生的改变\nTODO\n\n## 本章 hook 账",
       );
       expect(() => parseMemo(makeRaw({ body }), 12, false))
         .toThrow(/empty sections.*章尾必须发生的改变/);
@@ -200,6 +211,9 @@ describe("parseMemo", () => {
         "",
         "## 章尾必须发生的改变",
         "关系改变：主角和协作者从交易关系微微转向共担风险的同伴。",
+        "",
+        "## 本章 hook 账",
+        "advance: H03 线索 → 从 planted 推到 pressured（本章让协作者第一次点头）。",
         "",
         "## 不要做",
         "无",

@@ -28,12 +28,14 @@ import {
   extractProtagonistRow,
   extractRelevantThreads,
   formatRecentSummaries,
+  formatRecyclableHooks,
   readBookRules,
   readCharacterMatrix,
   readEmotionalArcs,
   readPendingHooks,
   readSubplotBoard,
 } from "./planner-context.js";
+import type { StoredHook } from "../state/memory-db.js";
 
 export interface PlanChapterInput {
   readonly book: BookConfig;
@@ -137,6 +139,7 @@ export class PlannerAgent extends BaseAgent {
       chapterSummariesRaw: seedMaterials.chapterSummariesRaw,
       previousEndingExcerpt: seedMaterials.previousEndingExcerpt,
       brief: seedMaterials.brief,
+      recyclableHooks: memorySelection.recyclableHooks,
       // Phase hotfix 4: thread book language through so the planner uses
       // English prompts (system + user template + golden opening guidance)
       // for English books instead of always-Chinese.
@@ -182,6 +185,7 @@ export class PlannerAgent extends BaseAgent {
     readonly chapterSummariesRaw: string;
     readonly previousEndingExcerpt?: string;
     readonly brief?: string;
+    readonly recyclableHooks?: ReadonlyArray<StoredHook>;
     readonly language?: "zh" | "en";
   }): Promise<ChapterMemo> {
     const [characterMatrix, subplotBoard, emotionalArcs, pendingHooks, bookRulesRaw] = await Promise.all([
@@ -217,6 +221,11 @@ export class PlannerAgent extends BaseAgent {
       opponentRows: extractOpponentRows(characterMatrix, 3),
       collaboratorRows: extractCollaboratorRows(characterMatrix, 3),
       relevantThreads: extractRelevantThreads(pendingHooks, subplotBoard),
+      recyclableHooks: formatRecyclableHooks(
+        input.recyclableHooks ?? [],
+        input.chapterNumber,
+        language,
+      ),
       isGoldenOpening: input.isGoldenOpening,
       bookRulesRelevant: bookRulesRaw.trim().length > 0 ? bookRulesRaw.trim() : noBookRules,
       brief: input.brief ?? "",

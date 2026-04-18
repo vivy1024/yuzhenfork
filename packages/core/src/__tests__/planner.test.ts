@@ -36,6 +36,14 @@ const VALID_BODY = `
 ## 章尾必须发生的改变
 - 信息改变：主角掌握实证，可以面对幕后主使前先压住对手的退路
 
+## 本章 hook 账
+advance:
+- H03 "七号门异常" → 从 pressured → near_payoff（本章钉成实证）
+resolve:
+- S004 "锁芯刮痕" → 核验完毕，本章结清
+defer:
+- H07 "幕后主使" → 第 20 章再动
+
 ## 不要做
 - 不要让对手突然降智
 - 不要直接点破幕后主使
@@ -198,6 +206,12 @@ n/a — pressure chapter, no transitional beats.
 
 ## Required end-of-chapter change
 - Information change: protagonist holds live evidence.
+
+## Hook ledger for this chapter
+advance:
+- H03 "Door 7 anomaly" → pressured → near_payoff (pinned as live evidence this chapter)
+defer:
+- H07 "the mastermind" → hold until chapter 20
 
 ## Do not
 - Do not let the antagonist suddenly turn dumb.

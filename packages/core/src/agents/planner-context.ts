@@ -3,6 +3,7 @@ import { dirname, join } from "node:path";
 import { parseMarkdownTableRows } from "../utils/story-markdown.js";
 import { readCharacterContext } from "../utils/outline-paths.js";
 import { readBookRules as readStructuredBookRules } from "./rules-reader.js";
+import type { StoredHook } from "../state/memory-db.js";
 
 async function readOrEmpty(path: string): Promise<string> {
   try {
@@ -257,4 +258,40 @@ export function extractRelevantThreads(pendingHooksRaw: string, subplotBoardRaw:
     return "（暂无活跃线索）";
   }
   return lines.join("\n");
+}
+
+/**
+ * Phase 9-2: render stale hooks that the planner MUST dispose of in this
+ * chapter's memo ("## 本章 hook 账"). These are already filtered by
+ * computeRecyclableHooks; here we just format them for the prompt.
+ *
+ * Language switch mirrors the rest of the planner prompt: zh by default,
+ * en for English books.
+ */
+export function formatRecyclableHooks(
+  hooks: ReadonlyArray<StoredHook>,
+  chapterNumber: number,
+  language: "zh" | "en" = "zh",
+): string {
+  if (hooks.length === 0) {
+    return language === "en"
+      ? "(no stale hooks — the ledger is clean)"
+      : "（暂无陈旧 hook——账本干净）";
+  }
+
+  const topSlice = hooks.slice(0, 6);
+  const lines = topSlice.map((hook) => {
+    const lastTouch = Math.max(hook.startChapter, hook.lastAdvancedChapter);
+    const silence = lastTouch <= 0 ? chapterNumber : Math.max(0, chapterNumber - lastTouch);
+    const payoff = hook.expectedPayoff?.trim() || hook.notes?.trim() || "";
+    const core = hook.coreHook === true ? (language === "en" ? " [core]" : " [核心]") : "";
+    return language === "en"
+      ? `- ${hook.hookId} "${payoff}" — status=${hook.status}, silent ${silence} ch${core}`
+      : `- ${hook.hookId} "${payoff}" — 状态=${hook.status}，已沉默 ${silence} 章${core}`;
+  });
+
+  const header = language === "en"
+    ? "The planner MUST place each of these under advance / resolve / defer in the hook ledger (deferring requires an explicit reason):"
+    : "规划时必须把以下每个 hook 放入 advance / resolve / defer（若 defer，必须写出理由）：";
+  return [header, ...lines].join("\n");
 }

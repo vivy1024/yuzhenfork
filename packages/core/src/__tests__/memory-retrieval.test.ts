@@ -1212,3 +1212,92 @@ describe("parsePendingHooksMarkdown", () => {
   });
 
 });
+
+// ---------------------------------------------------------------------------
+// Phase 9-2 — computeRecyclableHooks unit tests
+// ---------------------------------------------------------------------------
+
+import { computeRecyclableHooks } from "../utils/memory-retrieval.js";
+import type { StoredHook } from "../state/memory-db.js";
+
+function makeHook(overrides: Partial<StoredHook> & Pick<StoredHook, "hookId">): StoredHook {
+  return {
+    startChapter: 1,
+    type: "foreshadow",
+    status: "open",
+    lastAdvancedChapter: 0,
+    expectedPayoff: "",
+    notes: "",
+    ...overrides,
+  };
+}
+
+describe("computeRecyclableHooks", () => {
+  it("returns empty array when no hooks are stale", () => {
+    const hooks = [
+      makeHook({ hookId: "H1", startChapter: 8, lastAdvancedChapter: 9, status: "pressured" }),
+      makeHook({ hookId: "H2", startChapter: 9, lastAdvancedChapter: 0, status: "open" }),
+    ];
+    expect(computeRecyclableHooks(hooks, 10)).toEqual([]);
+  });
+
+  it("flags pressured hooks silent ≥ 5 chapters", () => {
+    const hooks = [
+      makeHook({ hookId: "H1", startChapter: 3, lastAdvancedChapter: 4, status: "pressured" }),
+      makeHook({ hookId: "H2", startChapter: 9, lastAdvancedChapter: 9, status: "pressured" }),
+    ];
+    const result = computeRecyclableHooks(hooks, 10);
+    expect(result.map((h) => h.hookId)).toEqual(["H1"]);
+  });
+
+  it("flags near_payoff hooks silent ≥ 5 chapters", () => {
+    const hooks = [
+      makeHook({ hookId: "H1", startChapter: 3, lastAdvancedChapter: 4, status: "near_payoff" }),
+    ];
+    const result = computeRecyclableHooks(hooks, 10);
+    expect(result.map((h) => h.hookId)).toEqual(["H1"]);
+  });
+
+  it("flags core hooks silent ≥ 8 chapters (not 10)", () => {
+    const hooks = [
+      makeHook({ hookId: "H-core", startChapter: 2, lastAdvancedChapter: 2, status: "open", coreHook: true }),
+      makeHook({ hookId: "H-regular", startChapter: 2, lastAdvancedChapter: 2, status: "open" }),
+    ];
+    // silence = 10 - 2 = 8. core: qualifies (>=8). regular: does not (<10).
+    const result = computeRecyclableHooks(hooks, 10);
+    expect(result.map((h) => h.hookId)).toEqual(["H-core"]);
+  });
+
+  it("flags plain open hooks only when silent ≥ 10 chapters", () => {
+    const hooks = [
+      makeHook({ hookId: "H1", startChapter: 1, lastAdvancedChapter: 0, status: "open" }),
+    ];
+    expect(computeRecyclableHooks(hooks, 10).map((h) => h.hookId)).toEqual([]);
+    expect(computeRecyclableHooks(hooks, 11).map((h) => h.hookId)).toEqual(["H1"]);
+  });
+
+  it("excludes resolved / deferred hooks regardless of silence", () => {
+    const hooks = [
+      makeHook({ hookId: "H1", startChapter: 1, lastAdvancedChapter: 1, status: "resolved" }),
+      makeHook({ hookId: "H2", startChapter: 1, lastAdvancedChapter: 1, status: "deferred" }),
+    ];
+    expect(computeRecyclableHooks(hooks, 20)).toEqual([]);
+  });
+
+  it("excludes future-planted hooks that have not yet landed", () => {
+    const hooks = [
+      makeHook({ hookId: "H1", startChapter: 30, lastAdvancedChapter: 0, status: "open" }),
+    ];
+    expect(computeRecyclableHooks(hooks, 10)).toEqual([]);
+  });
+
+  it("sorts by silence DESC — most overdue hook first", () => {
+    const hooks = [
+      makeHook({ hookId: "H-mid", startChapter: 2, lastAdvancedChapter: 4, status: "pressured" }),
+      makeHook({ hookId: "H-worst", startChapter: 1, lastAdvancedChapter: 1, status: "pressured" }),
+      makeHook({ hookId: "H-mild", startChapter: 3, lastAdvancedChapter: 5, status: "pressured" }),
+    ];
+    const result = computeRecyclableHooks(hooks, 10);
+    expect(result.map((h) => h.hookId)).toEqual(["H-worst", "H-mid", "H-mild"]);
+  });
+});

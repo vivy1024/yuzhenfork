@@ -32,6 +32,7 @@ describe("PLANNER_MEMO_USER_TEMPLATE", () => {
       "{{opponent_rows}}",
       "{{collaborator_rows}}",
       "{{relevant_threads}}",
+      "{{recyclable_hooks}}",
       "{{isGoldenOpening}}",
       "{{book_rules_relevant}}",
     ];
@@ -52,6 +53,7 @@ describe("buildPlannerUserMessage", () => {
       opponentRows: "| 老李 | 对手 | ... |",
       collaboratorRows: "| 小白 | 盟友 | ... |",
       relevantThreads: "- H03: 未解码信\n- S004: 七号门异常",
+      recyclableHooks: "（暂无陈旧 hook——账本干净）",
       isGoldenOpening: false,
       bookRulesRelevant: "- 禁止主角降智",
     });
@@ -79,6 +81,7 @@ describe("buildPlannerUserMessage", () => {
       opponentRows: "",
       collaboratorRows: "",
       relevantThreads: "",
+      recyclableHooks: "",
       isGoldenOpening: true,
       bookRulesRelevant: "",
     });
@@ -153,6 +156,7 @@ describe("buildGoldenOpeningGuidance", () => {
       opponentRows: "",
       collaboratorRows: "",
       relevantThreads: "",
+      recyclableHooks: "",
       isGoldenOpening: false,
       bookRulesRelevant: "",
     };
