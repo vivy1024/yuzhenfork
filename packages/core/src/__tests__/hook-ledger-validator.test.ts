@@ -46,18 +46,31 @@ defer:
 describe("parseHookLedger", () => {
   it("extracts all four sub-lists from a zh memo", () => {
     const ledger = parseHookLedger(ZH_MEMO);
-    expect(ledger.advance).toEqual(["H007", "H012"]);
-    expect(ledger.resolve).toEqual(["H003"]);
-    expect(ledger.defer).toEqual(["H009"]);
+    expect(ledger.advance.map((e) => e.id)).toEqual(["H007", "H012"]);
+    expect(ledger.resolve.map((e) => e.id)).toEqual(["H003"]);
+    expect(ledger.defer.map((e) => e.id)).toEqual(["H009"]);
     // open uses [new] so no hook_id is extracted
     expect(ledger.open).toEqual([]);
   });
 
+  it("captures descriptor + keywords for each entry", () => {
+    const ledger = parseHookLedger(ZH_MEMO);
+    const h007 = ledger.advance[0]!;
+    expect(h007.id).toBe("H007");
+    expect(h007.descriptor).toContain("胖虎借条");
+    expect(h007.keywords).toContain("胖虎");
+    expect(h007.keywords).toContain("借条");
+
+    const h003 = ledger.resolve[0]!;
+    expect(h003.keywords).toContain("杂役");
+    expect(h003.keywords).toContain("腰牌");
+  });
+
   it("extracts all four sub-lists from an en memo", () => {
     const ledger = parseHookLedger(EN_MEMO);
-    expect(ledger.advance).toEqual(["H007"]);
-    expect(ledger.resolve).toEqual(["H003"]);
-    expect(ledger.defer).toEqual(["H009"]);
+    expect(ledger.advance.map((e) => e.id)).toEqual(["H007"]);
+    expect(ledger.resolve.map((e) => e.id)).toEqual(["H003"]);
+    expect(ledger.defer.map((e) => e.id)).toEqual(["H009"]);
   });
 
   it("returns empty lists when no ledger section is present", () => {
@@ -73,22 +86,41 @@ advance:
 ## 不要做
 - H999 looks-like-a-hook-but-its-under-do-not`;
     const ledger = parseHookLedger(memo);
-    expect(ledger.advance).toEqual(["H007"]);
+    expect(ledger.advance.map((e) => e.id)).toEqual(["H007"]);
+    expect(ledger.defer).toEqual([]);
+  });
+
+  it("ignores placeholder tokens like 无 / none / n/a under empty slots", () => {
+    const memo = `## 本章 hook 账
+advance:
+- 无
+- none
+- H007 "真的钩子" → planted
+resolve:
+- 暂无
+defer:
+- n/a
+`;
+    const ledger = parseHookLedger(memo);
+    expect(ledger.advance.map((e) => e.id)).toEqual(["H007"]);
+    expect(ledger.resolve).toEqual([]);
     expect(ledger.defer).toEqual([]);
   });
 });
 
 describe("validateHookLedger", () => {
-  it("passes when draft echoes every committed hook_id", () => {
-    const draft = "林秋摸出胖虎借条（H007），又被雷架焦痕 H012 刺到眼睛。随后他摘下 H003 腰牌。";
+  it("passes when draft echoes keyword from each committed ledger entry", () => {
+    // Draft mentions 胖虎/借条 (→H007), 雷架 or 焦痕 (→H012), 杂役 or 腰牌 (→H003).
+    const draft =
+      "林秋在账房找到胖虎借条，又在后巷被雷架焦痕刮到眼角。他摘下杂役腰牌后退入暗处。";
     const violations = validateHookLedger(ZH_MEMO, draft);
     expect(violations).toEqual([]);
   });
 
-  it("flags a critical violation for each un-echoed advance/resolve id", () => {
-    const draft = "林秋只摸出 H007 借条，其他都没写。";
+  it("flags a critical violation for each un-echoed advance/resolve entry", () => {
+    // Only 胖虎 (H007) present; 雷架/焦痕 (H012) and 杂役/腰牌 (H003) missing.
+    const draft = "林秋只摸出胖虎借条，其他都没写。";
     const violations = validateHookLedger(ZH_MEMO, draft);
-    // H012 advance and H003 resolve are missing
     expect(violations).toHaveLength(2);
     expect(violations.every((v) => v.severity === "critical")).toBe(true);
     expect(violations.map((v) => v.description).join(" ")).toContain("H012");
@@ -96,8 +128,8 @@ describe("validateHookLedger", () => {
   });
 
   it("does NOT flag hooks that are only under defer", () => {
-    // H009 is deferred — if draft doesn't echo it, that's fine
-    const draft = "林秋翻出 H007、H012 推进情节。林秋摘下 H003 腰牌。";
+    // H009 is deferred — keyword 守拙诀 absence is fine.
+    const draft = "林秋翻出胖虎借条与雷架焦痕推进情节，随后摘下杂役腰牌。";
     const violations = validateHookLedger(ZH_MEMO, draft);
     expect(violations).toEqual([]);
   });
@@ -107,9 +139,9 @@ describe("validateHookLedger", () => {
 open:
 - [new] 新钩子 || 理由
 advance:
-- H001 "test" → x
+- H001 "测试项" → x
 `;
-    const draft = "正文里有 H001。";
+    const draft = "正文提到测试项的细节。";
     const violations = validateHookLedger(memo, draft);
     expect(violations).toEqual([]);
   });
@@ -119,15 +151,34 @@ advance:
     expect(violations).toEqual([]);
   });
 
-  it("uses word boundary so H12 does not accidentally match H1 or H123", () => {
+  it("falls back to strict ID match when ledger line has no descriptor", () => {
     const memo = `## 本章 hook 账
 advance:
-- H1 "a" → x
+- H1
 `;
-    // Draft contains H12, which must NOT satisfy the H1 commitment
+    // Draft contains H12 — must NOT accidentally satisfy H1 commitment.
     const draft = "剧情涉及 H12 和 H123。";
     const violations = validateHookLedger(memo, draft);
     expect(violations).toHaveLength(1);
     expect(violations[0]!.description).toContain("H1");
+  });
+
+  it("accepts english keyword match for en memos", () => {
+    const draft =
+      "Lin Qiu finds Huzi's IOU folded inside the ledger and tucks it away. Later he unpins the errand badge before slipping out.";
+    const violations = validateHookLedger(EN_MEMO, draft);
+    expect(violations).toEqual([]);
+  });
+
+  it("does not let placeholder 无 raise a false critical", () => {
+    const memo = `## 本章 hook 账
+advance:
+- 无
+resolve:
+- H005 "通行印验号" → ok
+`;
+    const draft = "主峰的通行印验号按部就班完成。";
+    const violations = validateHookLedger(memo, draft);
+    expect(violations).toEqual([]);
   });
 });

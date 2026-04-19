@@ -7,13 +7,11 @@
  *   - advance: <hook_id> "name" → state-change
  *   - resolve: <hook_id> "name" → action
  *
- * This validator parses those two lists and checks that each committed
- * hook_id is echoed somewhere in the draft body. A silent failure would
- * let the planner promise advancement the writer never delivered — exactly
- * the "debt keeps piling up" failure mode Phase 9 is meant to prevent.
- *
- * A missing echo is a "critical" severity violation so the review cycle
- * forces a reviser pass instead of shipping.
+ * The validator parses those two lists and checks that every committed hook
+ * has observable evidence in the draft. "Evidence" means the draft mentions
+ * at least one keyword from the ledger line's descriptor (hook name, key
+ * noun, etc.). We deliberately do NOT require the draft to repeat the raw
+ * hook_id like "H007" — writers don't embed IDs in prose.
  */
 
 export interface HookLedgerViolation {
@@ -23,11 +21,19 @@ export interface HookLedgerViolation {
   readonly suggestion: string;
 }
 
+export interface HookLedgerEntry {
+  readonly id: string;
+  /** Raw text of the ledger line after the hook_id. */
+  readonly descriptor: string;
+  /** 2+ char CJK sequences and 3+ letter ASCII words extracted from descriptor. */
+  readonly keywords: ReadonlyArray<string>;
+}
+
 export interface HookLedger {
-  readonly open: ReadonlyArray<string>;
-  readonly advance: ReadonlyArray<string>;
-  readonly resolve: ReadonlyArray<string>;
-  readonly defer: ReadonlyArray<string>;
+  readonly open: ReadonlyArray<HookLedgerEntry>;
+  readonly advance: ReadonlyArray<HookLedgerEntry>;
+  readonly resolve: ReadonlyArray<HookLedgerEntry>;
+  readonly defer: ReadonlyArray<HookLedgerEntry>;
 }
 
 const LEDGER_HEADING_PATTERNS = [
@@ -38,18 +44,22 @@ const LEDGER_HEADING_PATTERNS = [
 const SUBSECTION_KEYS: ReadonlyArray<keyof HookLedger> = ["open", "advance", "resolve", "defer"];
 
 /**
- * Extract the hook ledger's four sub-lists from a memo body. Hook IDs follow
- * the pending_hooks convention — typically H###, S###, or an alphanumeric
- * token. We accept any token matching [A-Za-z][A-Za-z0-9_-]{0,15} so the
- * validator is robust to ID style differences between books.
+ * Tokens that look like hook_ids but are placeholders meaning "no hooks in
+ * this slot". Writers sometimes emit "- 无" or "- none" under an empty slot
+ * instead of leaving it blank.
  */
+const PLACEHOLDER_TOKENS = /^(无|空|none|nil|null|暂无|n\/a|na|n-a|tbd|todo|待定)$/i;
+
+/** Subsection heading words that must not be parsed as hook_ids. */
+const SUBSECTION_WORDS = /^(open|advance|resolve|defer|new)$/i;
+
 export function parseHookLedger(memoBody: string): HookLedger {
   const section = extractLedgerSection(memoBody);
   if (!section) {
     return { open: [], advance: [], resolve: [], defer: [] };
   }
 
-  const result: Record<keyof HookLedger, string[]> = {
+  const result: Record<keyof HookLedger, HookLedgerEntry[]> = {
     open: [],
     advance: [],
     resolve: [],
@@ -70,34 +80,35 @@ export function parseHookLedger(memoBody: string): HookLedger {
     if (!current) continue;
     if (!line.startsWith("-")) continue;
 
-    const id = extractHookIdFromLine(line);
-    if (id) result[current].push(id);
+    const entry = extractLedgerEntry(line);
+    if (entry) result[current].push(entry);
   }
 
   return result;
 }
 
 /**
- * Enforce: every hook_id declared under advance / resolve must appear in the
- * draft text. We do NOT validate `open` (new hooks by definition don't have
- * a pre-existing ID to echo) or `defer` (deferred = deliberately not touched).
+ * Enforce: every hook declared under advance / resolve must have observable
+ * evidence in the draft text. We do NOT validate `open` (new hooks don't have
+ * a pre-existing id/descriptor to echo) or `defer` (deferred = deliberately
+ * not touched).
  */
 export function validateHookLedger(
   memoBody: string,
   draftContent: string,
 ): ReadonlyArray<HookLedgerViolation> {
   const ledger = parseHookLedger(memoBody);
-  const committedIds = dedupe([...ledger.advance, ...ledger.resolve]);
-  if (committedIds.length === 0) return [];
+  const committed = dedupeById([...ledger.advance, ...ledger.resolve]);
+  if (committed.length === 0) return [];
 
   const violations: HookLedgerViolation[] = [];
-  for (const id of committedIds) {
-    if (!draftEchoesHookId(draftContent, id)) {
+  for (const entry of committed) {
+    if (!draftEchoesEntry(draftContent, entry)) {
       violations.push({
         severity: "critical",
         category: "hook 账未兑现",
-        description: `memo 在 advance/resolve 里声明要处理 ${id}，但正文没有对应的落地动作`,
-        suggestion: `在正文中加入对 ${id} 的具体情节推进（动作、对话、环境变化），或把它从 hook 账里移到 defer 并给出理由`,
+        description: `memo 在 advance/resolve 里声明要处理 ${entry.id}，但正文没有对应的落地动作`,
+        suggestion: `在正文中加入对 ${entry.id} 的具体情节推进（动作、对话、环境变化），或把它从 hook 账里移到 defer 并给出理由`,
       });
     }
   }
@@ -110,7 +121,6 @@ function extractLedgerSection(memoBody: string): string | undefined {
     if (!match || match.index === undefined) continue;
     const start = match.index + match[0].length;
     const rest = memoBody.slice(start);
-    // Stop at the next H2/H3 heading.
     const nextHeading = rest.match(/\n#{2,3}\s/);
     const end = nextHeading ? nextHeading.index ?? rest.length : rest.length;
     return rest.slice(0, end);
@@ -118,39 +128,91 @@ function extractLedgerSection(memoBody: string): string | undefined {
   return undefined;
 }
 
-function extractHookIdFromLine(line: string): string | undefined {
-  // Strip leading "-" bullet and any trailing punctuation before checking.
+function extractLedgerEntry(line: string): HookLedgerEntry | undefined {
   const cleaned = line.replace(/^-+\s*/, "").trim();
   if (cleaned.startsWith("[new]") || cleaned.startsWith("[NEW]")) return undefined;
 
-  // Hook IDs: H007, S004, hook_12, 主线-01, etc. Match a token that starts
-  // with a letter/CJK and contains [A-Za-z0-9_-]. We stop at whitespace or
-  // quote so "H007 \"xxx\"" cleanly yields "H007".
+  // Reject whole-line placeholders first — "- 无", "- n/a", "- none" etc.
+  const firstWord = cleaned.split(/\s+/)[0] ?? "";
+  if (PLACEHOLDER_TOKENS.test(firstWord)) return undefined;
+
   const idMatch = cleaned.match(/^([A-Za-z\u4e00-\u9fff][A-Za-z0-9_\-\u4e00-\u9fff]{0,19})/);
   if (!idMatch) return undefined;
 
   const candidate = idMatch[1]!;
-  // Reject obvious non-IDs like "open", "advance" that slipped through.
-  if (/^(open|advance|resolve|defer|new)$/i.test(candidate)) return undefined;
-  return candidate;
+  if (SUBSECTION_WORDS.test(candidate)) return undefined;
+  if (PLACEHOLDER_TOKENS.test(candidate)) return undefined;
+
+  const descriptor = cleaned.slice(candidate.length).trim();
+  return { id: candidate, descriptor, keywords: extractKeywords(descriptor) };
 }
 
-function draftEchoesHookId(draftContent: string, id: string): boolean {
-  // Exact token match — word boundary for ASCII, simple substring for CJK.
-  if (/^[A-Za-z0-9_-]+$/.test(id)) {
-    const pattern = new RegExp(`\\b${escapeRegex(id)}\\b`);
-    if (pattern.test(draftContent)) return true;
-  } else {
-    if (draftContent.includes(id)) return true;
+/**
+ * Extract content-matching tokens from a ledger line's descriptor.
+ *
+ * Priority 1: quoted hook name — `H007 "胖虎借条" → ...` — this is the most
+ * informative token the planner attached, and it's what the writer should
+ * echo. We split compound CJK names into leading/trailing 2-grams so
+ * partial echoes still count.
+ *
+ * Priority 2: if no quoted name, fall back to the descriptor text UP TO the
+ * first state-transition arrow (→ or ->), same CJK/ASCII splitting. Anything
+ * AFTER the arrow describes new state, not the hook itself, and risks
+ * character-name false positives.
+ */
+function extractKeywords(descriptor: string): ReadonlyArray<string> {
+  if (!descriptor) return [];
+
+  // Try the quoted-name anchor first — matches "..." or "..." quotes.
+  const quotedMatch = descriptor.match(/[""]([^""\n]+)[""]/);
+  const source = quotedMatch ? quotedMatch[1]! : descriptor.split(/[→]|->/, 1)[0]!;
+
+  const cjkRuns = source.match(/[\u4e00-\u9fff]{2,}/g) ?? [];
+  const cjkTokens: string[] = [];
+  for (const run of cjkRuns) {
+    cjkTokens.push(run);
+    if (run.length >= 4) {
+      cjkTokens.push(run.slice(0, 2));
+      cjkTokens.push(run.slice(-2));
+    }
   }
-
-  // Also accept the hook's name quoted in the ledger line — but we only have
-  // the ID here. Name-based matching is the responsibility of the caller if
-  // it wants softer gating. This validator stays strict on IDs.
-  return false;
+  const ascii = (source.match(/[A-Za-z]{3,}/g) ?? []).map((w) => w.toLowerCase());
+  return dedupeStrings([...cjkTokens, ...ascii].filter((tok) => !ASCII_STOPWORDS.has(tok)));
 }
 
-function dedupe(values: ReadonlyArray<string>): string[] {
+const ASCII_STOPWORDS = new Set([
+  "and", "the", "for", "with", "from", "that", "into", "then",
+  "open", "close", "advance", "resolve", "defer", "new",
+  "planted", "pressured", "near", "payoff", "ready", "stale",
+]);
+
+function draftEchoesEntry(draft: string, entry: HookLedgerEntry): boolean {
+  if (entry.keywords.length > 0) {
+    const draftLower = draft.toLowerCase();
+    return entry.keywords.some((kw) => {
+      // ASCII keywords are already lowercased; CJK keywords case doesn't matter.
+      return /^[a-z]/.test(kw) ? draftLower.includes(kw) : draft.includes(kw);
+    });
+  }
+  // Bare-id ledger line with no descriptor — fall back to ID match.
+  if (/^[A-Za-z0-9_-]+$/.test(entry.id)) {
+    return new RegExp(`\\b${escapeRegex(entry.id)}\\b`).test(draft);
+  }
+  return draft.includes(entry.id);
+}
+
+function dedupeById(entries: ReadonlyArray<HookLedgerEntry>): HookLedgerEntry[] {
+  const seen = new Set<string>();
+  const result: HookLedgerEntry[] = [];
+  for (const entry of entries) {
+    if (seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    result.push(entry);
+  }
+  return result;
+}
+
+function dedupeStrings(values: ReadonlyArray<string>): string[] {
   return [...new Set(values)];
 }
 
@@ -161,5 +223,6 @@ function escapeRegex(value: string): string {
 export const INTERNAL = {
   SUBSECTION_KEYS,
   extractLedgerSection,
-  extractHookIdFromLine,
+  extractLedgerEntry,
+  extractKeywords,
 };
