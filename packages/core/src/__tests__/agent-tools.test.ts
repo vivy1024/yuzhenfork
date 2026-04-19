@@ -7,7 +7,7 @@ import {
   createSubAgentTool,
   createPatchChapterTextTool,
   createRenameEntityTool,
-  createReviseChapterTool,
+  createWriteFileTool,
   createWriteTruthFileTool,
 } from "../agent/agent-tools.js";
 
@@ -62,27 +62,6 @@ describe("agent deterministic writing tools", () => {
     expect(result.content[0]?.type).toBe("text");
     await expect(readFile(join(state.bookDir("harbor"), "story", "story_bible.md"), "utf-8"))
       .resolves.toContain("distrusts the guild");
-  });
-
-  it("routes chapter rewrite requests through reviseDraft with the requested mode", async () => {
-    const pipeline = {
-      reviseDraft: vi.fn(async () => ({
-        chapterNumber: 3,
-        wordCount: 1300,
-        fixedIssues: [],
-        applied: true,
-        status: "ready-for-review" as const,
-      })),
-    };
-    const tool = createReviseChapterTool(pipeline as never, "harbor");
-
-    const result = await tool.execute("tool-2", {
-      chapterNumber: 3,
-      mode: "rewrite",
-    });
-
-    expect(pipeline.reviseDraft).toHaveBeenCalledWith("harbor", 3, "rewrite");
-    expect(result.content[0]?.type).toBe("text");
   });
 
   it("renames entities through the deterministic edit controller", async () => {
@@ -159,5 +138,78 @@ describe("agent deterministic writing tools", () => {
         externalContext: "写一本港风商战小说",
       }),
     );
+  });
+
+  it("passes chapterWordCount through the writer sub-agent", async () => {
+    const pipeline = {
+      writeNextChapter: vi.fn(async () => ({
+        chapterNumber: 4,
+        wordCount: 2600,
+      })),
+    };
+    const tool = createSubAgentTool(pipeline as never, "harbor");
+
+    await tool.execute("tool-7", {
+      agent: "writer",
+      bookId: "harbor",
+      chapterWordCount: 2600,
+      instruction: "继续写，控制在 2600 字",
+    } as any);
+
+    expect(pipeline.writeNextChapter).toHaveBeenCalledWith("harbor", 2600);
+  });
+
+  it("prefers explicit reviser mode over instruction guessing", async () => {
+    const pipeline = {
+      reviseDraft: vi.fn(async () => ({
+        chapterNumber: 3,
+        wordCount: 120,
+        fixedIssues: [],
+        applied: true,
+        status: "ready-for-review" as const,
+      })),
+    };
+    const tool = createSubAgentTool(pipeline as never, "harbor");
+
+    await tool.execute("tool-8", {
+      agent: "reviser",
+      bookId: "harbor",
+      chapterNumber: 3,
+      mode: "spot-fix",
+      instruction: "重写第3章",
+    } as any);
+
+    expect(pipeline.reviseDraft).toHaveBeenCalledWith("harbor", 3, "spot-fix");
+  });
+
+  it("uses explicit exporter params instead of guessing from instruction", async () => {
+    const pipeline = {};
+    const tool = createSubAgentTool(pipeline as never, "harbor", root);
+
+    const result = await tool.execute("tool-9", {
+      agent: "exporter",
+      bookId: "harbor",
+      format: "md",
+      approvedOnly: false,
+      instruction: "导出成 epub",
+    } as any);
+
+    expect(result.content[0]?.type).toBe("text");
+    if (result.content[0]?.type === "text") {
+      expect(result.content[0].text).toContain(".md");
+    }
+  });
+
+  it("creates nested files through the generic write tool", async () => {
+    const tool = createWriteFileTool(root);
+
+    const result = await tool.execute("tool-10", {
+      path: "harbor/story/runtime/notes.md",
+      content: "# Notes\n\nWatch the harbor ledger.\n",
+    });
+
+    expect(result.content[0]?.type).toBe("text");
+    await expect(readFile(join(state.bookDir("harbor"), "story", "runtime", "notes.md"), "utf-8"))
+      .resolves.toContain("Watch the harbor ledger");
   });
 });

@@ -51,22 +51,36 @@ describe("buildAgentSystemPrompt", () => {
       expect(prompt).toContain("writer");
       expect(prompt).toContain("auditor");
       expect(prompt).toContain("reviser");
+      expect(prompt).toContain("chapterWordCount");
+      expect(prompt).toContain("mode");
+      expect(prompt).toContain("approvedOnly");
       expect(prompt).toContain("read");
-      expect(prompt).toContain("revise_chapter");
       expect(prompt).toContain("write_truth_file");
       expect(prompt).toContain("rename_entity");
       expect(prompt).toContain("patch_chapter_text");
+      expect(prompt).toContain("edit");
+      expect(prompt).toContain("write");
       expect(prompt).toContain("grep");
       expect(prompt).toContain("ls");
     });
 
-    it("with-book prompt steers high-risk edits to dedicated deterministic tools", () => {
+    it("Chinese prompt does NOT mention revise_chapter (merged into sub_agent reviser)", () => {
+      const prompt = buildAgentSystemPrompt("my-book", "zh");
+      expect(prompt).not.toContain("revise_chapter");
+    });
+
+    it("English prompt does NOT mention revise_chapter (merged into sub_agent reviser)", () => {
+      const prompt = buildAgentSystemPrompt("novel", "en");
+      expect(prompt).not.toContain("revise_chapter");
+    });
+
+    it("with-book prompt steers chapter rewrites to sub_agent reviser, not a separate tool", () => {
       const prompt = buildAgentSystemPrompt("my-book", "zh");
       expect(prompt).toContain("改设定/改真相文件");
       expect(prompt).toContain("write_truth_file");
       expect(prompt).toContain("用户要求重写/精修已有章节");
-      expect(prompt).toContain("revise_chapter");
-      expect(prompt).not.toContain("edit");
+      expect(prompt).toContain("reviser");
+      expect(prompt).toContain("也可以直接使用 edit / write");
     });
 
     it("Chinese prompt warns NOT to call architect", () => {
@@ -93,6 +107,16 @@ describe("buildAgentSystemPrompt", () => {
       const prompt = buildAgentSystemPrompt("my-book", "zh");
       // architect 不在可用工具列表里
       expect(prompt).not.toMatch(/agent="architect"/);
+    });
+
+    it("book-mode prompt documents all sub_agent params", () => {
+      const prompt = buildAgentSystemPrompt("test-book", "zh");
+      expect(prompt).toContain("chapterWordCount");
+      expect(prompt).toContain("chapterNumber");
+      expect(prompt).toContain("mode");
+      expect(prompt).toContain("anti-detect");
+      expect(prompt).toContain("format");
+      expect(prompt).toContain("approvedOnly");
     });
   });
 });

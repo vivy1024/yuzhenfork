@@ -1,7 +1,7 @@
 import { Type, type Static } from "@mariozechner/pi-ai";
 import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@mariozechner/pi-agent-core";
 import type { PipelineRunner } from "../pipeline/runner.js";
-import { DEFAULT_REVISE_MODE, type ReviseMode } from "../agents/reviser.js";
+import { type ReviseMode } from "../agents/reviser.js";
 import { readFile, writeFile, readdir, stat } from "node:fs/promises";
 import { join, normalize, resolve } from "node:path";
 import { StateManager } from "../state/manager.js";
@@ -57,10 +57,39 @@ const SubAgentParams = Type.Object({
     Type.Literal("reviser"),
     Type.Literal("exporter"),
   ]),
-  instruction: Type.String({ description: "Natural language instruction from the main Agent" }),
+  instruction: Type.String({ description: "Natural language instruction for the sub-agent" }),
   bookId: Type.Optional(Type.String({ description: "Book ID — required for all agents except architect" })),
-  title: Type.Optional(Type.String({ description: "Architect only: explicit book title. Required when creating a book." })),
-  chapterNumber: Type.Optional(Type.Number({ description: "Target chapter number for auditor/reviser. Omit to use the latest chapter." })),
+  chapterNumber: Type.Optional(Type.Number({ description: "auditor/reviser: target chapter number. Omit to use the latest chapter." })),
+  // -- architect params --
+  title: Type.Optional(Type.String({ description: "architect only: explicit book title. Required when creating a book." })),
+  genre: Type.Optional(Type.String({ description: "architect only: genre (xuanhuan, urban, mystery, romance, scifi, fantasy, wuxia, general, etc.)" })),
+  platform: Type.Optional(Type.Union([
+    Type.Literal("tomato"),
+    Type.Literal("qidian"),
+    Type.Literal("feilu"),
+    Type.Literal("other"),
+  ], { description: "architect only: target platform. Default: other" })),
+  language: Type.Optional(Type.Union([
+    Type.Literal("zh"),
+    Type.Literal("en"),
+  ], { description: "architect only: writing language. Default: zh" })),
+  targetChapters: Type.Optional(Type.Number({ description: "architect only: total chapter count. Default: 200" })),
+  chapterWordCount: Type.Optional(Type.Number({ description: "architect/writer: words per chapter. Default: 3000" })),
+  // -- reviser params --
+  mode: Type.Optional(Type.Union([
+    Type.Literal("spot-fix"),
+    Type.Literal("polish"),
+    Type.Literal("rewrite"),
+    Type.Literal("rework"),
+    Type.Literal("anti-detect"),
+  ], { description: "reviser only: revision mode. Default: spot-fix" })),
+  // -- exporter params --
+  format: Type.Optional(Type.Union([
+    Type.Literal("txt"),
+    Type.Literal("md"),
+    Type.Literal("epub"),
+  ], { description: "exporter only: export format. Default: txt" })),
+  approvedOnly: Type.Optional(Type.Boolean({ description: "exporter only: export only approved chapters. Default: false" })),
 });
 
 function deriveBookIdFromTitle(title: string): string {
@@ -91,7 +120,7 @@ export function createSubAgentTool(
       _signal?: AbortSignal,
       onUpdate?: AgentToolUpdateCallback,
     ): Promise<AgentToolResult<undefined>> {
-      const { agent, instruction, bookId, title, chapterNumber } = params;
+      const { agent, instruction, bookId, title, chapterNumber, genre, platform, language, targetChapters, chapterWordCount, mode, format, approvedOnly } = params;
 
       const progress = (msg: string) => {
         onUpdate?.(textResult(msg));
@@ -100,7 +129,6 @@ export function createSubAgentTool(
       try {
         switch (agent) {
           case "architect": {
-            // architect 只在没有书的时候可用（建书流程）
             if (activeBookId) {
               return textResult("当前已有书籍，不需要建书。如果你想创建新书，请先回到首页。");
             }
@@ -109,9 +137,21 @@ export function createSubAgentTool(
               return textResult('Error: title is required for the architect agent.');
             }
             const id = bookId || deriveBookIdFromTitle(resolvedTitle) || `book-${Date.now().toString(36)}`;
+            const now = new Date().toISOString();
             progress(`Starting architect for book "${id}"...`);
             await pipeline.initBook(
-              { id, genre: "general", title: resolvedTitle, language: "zh" } as any,
+              {
+                id,
+                title: resolvedTitle,
+                genre: genre ?? "general",
+                platform: (platform ?? "other") as any,
+                language: (language ?? "zh") as any,
+                status: "outlining" as any,
+                targetChapters: targetChapters ?? 200,
+                chapterWordCount: chapterWordCount ?? 3000,
+                createdAt: now,
+                updatedAt: now,
+              },
               { externalContext: instruction },
             );
             progress(`Architect finished — book "${id}" foundation created.`);
@@ -121,7 +161,7 @@ export function createSubAgentTool(
           case "writer": {
             if (!bookId) return textResult("Error: bookId is required for the writer agent.");
             progress(`Writing next chapter for "${bookId}"...`);
-            const result = await pipeline.writeNextChapter(bookId);
+            const result = await pipeline.writeNextChapter(bookId, chapterWordCount);
             progress(`Writer finished chapter for "${bookId}".`);
             return textResult(
               `Chapter written for "${bookId}". ` +
@@ -134,42 +174,37 @@ export function createSubAgentTool(
             progress(`Auditing chapter ${chapterNumber ?? "latest"} for "${bookId}"...`);
             const audit = await pipeline.auditDraft(bookId, chapterNumber);
             progress(`Audit complete for "${bookId}".`);
-            const issueCount = audit.issues?.length ?? 0;
+            const issueLines = (audit.issues ?? [])
+              .map((i: any) => `[${i.severity}] ${i.description}`)
+              .join("\n");
             return textResult(
-              `Audit complete for "${bookId}": ${issueCount} issue(s) found. ` +
-              `Chapter ${audit.chapterNumber}.`,
+              `Audit chapter ${audit.chapterNumber}: ${audit.passed ? "PASSED" : "FAILED"}, ${(audit.issues ?? []).length} issue(s).` +
+              (issueLines ? `\n${issueLines}` : ""),
             );
           }
 
           case "reviser": {
             if (!bookId) return textResult("Error: bookId is required for the reviser agent.");
-            // Detect revision mode from instruction keywords
-            const mode: ReviseMode = /rewrite|改写|重写/.test(instruction)
-              ? "rewrite"
-              : /polish|润色/.test(instruction)
-                ? "polish"
-                : /rework|返工/.test(instruction)
-                  ? "rework"
-                  : "spot-fix";
-            progress(`Revising "${bookId}" chapter ${chapterNumber ?? "latest"} in ${mode} mode...`);
-            await pipeline.reviseDraft(bookId, chapterNumber, mode);
+            const resolvedMode: ReviseMode = (mode as ReviseMode) ?? "spot-fix";
+            progress(`Revising "${bookId}" chapter ${chapterNumber ?? "latest"} in ${resolvedMode} mode...`);
+            await pipeline.reviseDraft(bookId, chapterNumber, resolvedMode);
             progress(`Revision complete for "${bookId}".`);
-            return textResult(`Revision (${mode}) complete for "${bookId}" chapter ${chapterNumber ?? "latest"}.`);
+            return textResult(`Revision (${resolvedMode}) complete for "${bookId}" chapter ${chapterNumber ?? "latest"}.`);
           }
 
           case "exporter": {
             if (!bookId) return textResult("Error: bookId is required for the exporter agent.");
             if (!projectRoot) return textResult("Error: exporter requires projectRoot.");
-            const inferredFormat = /epub/i.test(instruction)
+            const inferredFormat = format ?? (/epub/i.test(instruction)
               ? "epub"
               : /markdown|\bmd\b/i.test(instruction)
                 ? "md"
-                : "txt";
-            const approvedOnly = /approved|已通过|通过章节/.test(instruction);
+                : "txt");
+            const exportApprovedOnly = approvedOnly ?? /approved|已通过|通过章节/.test(instruction);
             const state = new StateManager(projectRoot);
             const result = await writeExportArtifact(state, bookId, {
               format: inferredFormat,
-              approvedOnly,
+              approvedOnly: exportApprovedOnly,
             });
             return textResult(
               `Exported "${bookId}": ${result.chaptersExported} chapters, ${result.totalWords} words → ${result.outputPath}`,
@@ -190,36 +225,6 @@ export function createSubAgentTool(
 // ---------------------------------------------------------------------------
 // 2. Deterministic writing tools
 // ---------------------------------------------------------------------------
-
-const ReviseChapterParams = Type.Object({
-  bookId: Type.Optional(Type.String({ description: "Book ID. Omit to use the active book." })),
-  chapterNumber: Type.Number({ description: "Chapter number to revise." }),
-  mode: Type.Optional(Type.Union([
-    Type.Literal("spot-fix"),
-    Type.Literal("polish"),
-    Type.Literal("rewrite"),
-    Type.Literal("rework"),
-    Type.Literal("anti-detect"),
-  ])),
-});
-
-export function createReviseChapterTool(
-  pipeline: PipelineRunner,
-  activeBookId: string | null,
-): AgentTool<typeof ReviseChapterParams> {
-  return {
-    name: "revise_chapter",
-    description: "Revise a specific chapter through the deterministic revision pipeline.",
-    label: "Revise Chapter",
-    parameters: ReviseChapterParams,
-    async execute(_toolCallId, params): Promise<AgentToolResult<undefined>> {
-      const bookId = resolveToolBookId("revise_chapter", params.bookId, activeBookId);
-      const mode = params.mode ?? DEFAULT_REVISE_MODE;
-      await pipeline.reviseDraft(bookId, params.chapterNumber, mode);
-      return textResult(`Revision (${mode}) complete for "${bookId}" chapter ${params.chapterNumber}.`);
-    },
-  };
-}
 
 const WriteTruthFileParams = Type.Object({
   bookId: Type.Optional(Type.String({ description: "Book ID. Omit to use the active book." })),
@@ -358,8 +363,10 @@ export function createEditTool(projectRoot: string): AgentTool<typeof EditParams
   return {
     name: "edit",
     description:
-      "Edit a file using exact string replacement. " +
-      "old_string must appear exactly once in the file. Path is relative to books/.",
+      "Edit a file under books/ via exact string replacement. " +
+      "old_string must appear exactly once in the file. " +
+      "For chapter text use patch_chapter_text; for canonical truth files (story_bible/volume_outline/book_rules/current_focus) prefer write_truth_file; " +
+      "to rewrite or polish a whole chapter call sub_agent with agent=\"reviser\".",
     label: "Edit File",
     parameters: EditParams,
     async execute(
@@ -387,7 +394,46 @@ export function createEditTool(projectRoot: string): AgentTool<typeof EditParams
 }
 
 // ---------------------------------------------------------------------------
-// 4. Grep Tool
+// 4. Write Tool
+// ---------------------------------------------------------------------------
+
+const WriteFileParams = Type.Object({
+  path: Type.String({ description: "File path relative to books/" }),
+  content: Type.String({ description: "Full file content to write" }),
+});
+
+export function createWriteFileTool(projectRoot: string): AgentTool<typeof WriteFileParams> {
+  const booksRoot = join(projectRoot, "books");
+
+  return {
+    name: "write",
+    description:
+      "Create a new file, or fully replace an existing file's content under books/. " +
+      "Parent directories are created automatically. Existing content is overwritten silently — " +
+      "for canonical truth files prefer write_truth_file; " +
+      "for whole-chapter rewrites/polishing call sub_agent with agent=\"reviser\".",
+    label: "Write File",
+    parameters: WriteFileParams,
+    async execute(
+      _toolCallId: string,
+      params: Static<typeof WriteFileParams>,
+    ): Promise<AgentToolResult<undefined>> {
+      try {
+        const filePath = safeBooksPath(booksRoot, params.path);
+        const parentDir = resolve(filePath, "..");
+        const { mkdir } = await import("node:fs/promises");
+        await mkdir(parentDir, { recursive: true });
+        await writeFile(filePath, params.content, "utf-8");
+        return textResult(`File "${params.path}" written successfully.`);
+      } catch (err: any) {
+        return textResult(`Failed to write "${params.path}": ${err?.message ?? String(err)}`);
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// 5. Grep Tool
 // ---------------------------------------------------------------------------
 
 const GrepParams = Type.Object({

@@ -9,8 +9,18 @@ export interface ChatPageModelGroup {
   readonly models: ReadonlyArray<ChatPageModelInfo>;
 }
 
-export function shouldUseFreshBookCreateSession(activeBookId?: string): boolean {
-  return !activeBookId;
+const BOOK_CREATE_SESSION_KEY = "inkos.book-create.session-id";
+
+export function getBookCreateSessionId(): string | null {
+  return globalThis.localStorage?.getItem(BOOK_CREATE_SESSION_KEY) ?? null;
+}
+
+export function setBookCreateSessionId(sessionId: string): void {
+  globalThis.localStorage?.setItem(BOOK_CREATE_SESSION_KEY, sessionId);
+}
+
+export function clearBookCreateSessionId(): void {
+  globalThis.localStorage?.removeItem(BOOK_CREATE_SESSION_KEY);
 }
 
 export function filterModelGroups(

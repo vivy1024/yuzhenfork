@@ -2,7 +2,8 @@ import { useRef, useEffect, useMemo, useState } from "react";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import type { SSEMessage } from "../hooks/use-sse";
-import { useChatStore } from "../store/chat";
+import { useApi } from "../hooks/use-api";
+import { chatSelectors, useChatStore } from "../store/chat";
 import { useServiceStore } from "../store/service";
 import {
   DropdownMenu,
@@ -30,7 +31,12 @@ import {
   Message,
   MessageContent,
 } from "../components/ai-elements/message";
-import { filterModelGroups, shouldUseFreshBookCreateSession } from "./chat-page-state";
+import {
+  clearBookCreateSessionId,
+  filterModelGroups,
+  getBookCreateSessionId,
+  setBookCreateSessionId,
+} from "./chat-page-state";
 
 // -- Types --
 
@@ -52,10 +58,12 @@ export interface ChatPageProps {
 
 export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPageProps) {
   // -- Store selectors --
-  const messages = useChatStore((s) => s.messages);
+  const activeSession = useChatStore(chatSelectors.activeSession);
+  const messages = useChatStore(chatSelectors.activeMessages);
+  const activeSessionId = useChatStore((s) => s.activeSessionId);
   const input = useChatStore((s) => s.input);
-  const loading = useChatStore((s) => s.loading);
-  const pendingBookArgs = useChatStore((s) => s.pendingBookArgs);
+  const loading = useChatStore(chatSelectors.isActiveSessionStreaming);
+  const pendingBookArgs = activeSession?.pendingBookArgs ?? null;
   const bookCreating = useChatStore((s) => s.bookCreating);
   const createProgress = useChatStore((s) => s.createProgress);
   const selectedModel = useChatStore((s) => s.selectedModel);
@@ -67,6 +75,10 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
   const handleCreateBook = useChatStore((s) => s.handleCreateBook);
   const setCreateProgress = useChatStore((s) => s.setCreateProgress);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
+  const loadSessionList = useChatStore((s) => s.loadSessionList);
+  const createSession = useChatStore((s) => s.createSession);
+  const loadSessionDetail = useChatStore((s) => s.loadSessionDetail);
+  const activateSession = useChatStore((s) => s.activateSession);
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -154,27 +166,73 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
     return () => { es.close(); };
   }, [bookCreating, setCreateProgress]);
 
-  // Load session messages on mount or when activeBookId changes.
-  // Book-create mode should always start from a fresh chat.
+  // Entering a book loads its latest session; book-create mode persists its orphan session in localStorage.
   useEffect(() => {
-    if (shouldUseFreshBookCreateSession(activeBookId)) {
-      useChatStore.setState({ currentSessionId: null, messages: [], input: "", _activeStream: null });
-    } else {
-      useChatStore.getState().loadSession(activeBookId);
-    }
-  }, [activeBookId]);
+    let cancelled = false;
+
+    void (async () => {
+      if (activeBookId) {
+        await loadSessionList(activeBookId);
+        if (cancelled) return;
+
+        const state = useChatStore.getState();
+        const currentSession = state.activeSessionId ? state.sessions[state.activeSessionId] : null;
+        if (currentSession?.bookId === activeBookId) {
+          await loadSessionDetail(currentSession.sessionId);
+          return;
+        }
+        const ids = state.sessionIdsByBook[activeBookId] ?? [];
+        if (ids.length > 0) {
+          activateSession(ids[0]);
+          await loadSessionDetail(ids[0]);
+          return;
+        }
+
+        await createSession(activeBookId);
+        return;
+      }
+
+      const existingId = getBookCreateSessionId();
+      if (existingId) {
+        await loadSessionDetail(existingId);
+        if (cancelled) return;
+
+        const state = useChatStore.getState();
+        const session = state.sessions[existingId];
+        if (session && session.bookId === null) {
+          activateSession(existingId);
+          return;
+        }
+      }
+
+      const newSessionId = await createSession(null);
+      if (!cancelled) {
+        setBookCreateSessionId(newSessionId);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBookId, activateSession, createSession, loadSessionDetail, loadSessionList]);
 
   const onSend = (text: string) => {
-    void sendMessage(text, activeBookId);
+    if (!activeSessionId) return;
+    void sendMessage(activeSessionId, text, activeBookId);
   };
 
   const onCreateBook = async () => {
-    const newBookId = await handleCreateBook(activeBookId);
-    if (newBookId) nav.toBook(newBookId);
+    if (!activeSessionId) return;
+    const newBookId = await handleCreateBook(activeSessionId, activeBookId);
+    if (newBookId) {
+      clearBookCreateSessionId();
+      nav.toBook(newBookId);
+    }
   };
 
   const handleQuickAction = (command: string) => {
-    void sendMessage(command, activeBookId);
+    if (!activeSessionId) return;
+    void sendMessage(activeSessionId, command, activeBookId);
   };
 
   const emptyGuidance = isZh
@@ -329,7 +387,7 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
         <div className="shrink-0 max-w-3xl mx-auto w-full px-4">
           <QuickActions
             onAction={handleQuickAction}
-            disabled={loading}
+            disabled={loading || !activeSessionId}
             isZh={isZh}
           />
         </div>
@@ -357,12 +415,14 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(input); } }}
                   placeholder={isZh ? "或输入修改要求…" : "Or type changes..."}
+                  disabled={!activeSessionId}
                   className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
                 />
                 {input.trim() && (
                   <button
                     type="button"
                     onClick={() => onSend(input)}
+                    disabled={!activeSessionId}
                     className="w-7 h-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all"
                   >
                     <ArrowUp size={12} strokeWidth={2.5} />
@@ -380,14 +440,14 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(input); } }}
                   placeholder={isZh ? "输入指令..." : "Enter command..."}
-                  disabled={loading}
+                  disabled={loading || !activeSessionId}
                   rows={1}
                   className="flex-1 bg-transparent text-sm leading-6 placeholder:text-muted-foreground/50 outline-none! border-none! ring-0! shadow-none focus:outline-none! focus:ring-0! focus:border-none! resize-none disabled:opacity-50 max-h-[200px] overflow-y-auto"
                 />
                 <button
                   type="button"
                   onClick={() => onSend(input)}
-                  disabled={!input.trim() || loading}
+                  disabled={!input.trim() || loading || !activeSessionId}
                   className="w-8 h-8 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all disabled:opacity-20 disabled:scale-100 shadow-sm shadow-primary/20"
                 >
                   {loading ? <Loader2 size={14} className="animate-spin" /> : <ArrowUp size={14} strokeWidth={2.5} />}

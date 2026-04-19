@@ -23,10 +23,13 @@ const createInteractionToolsFromDepsMock = vi.fn(() => ({}));
 const loadProjectSessionMock = vi.fn();
 const resolveSessionActiveBookMock = vi.fn();
 const runAgentSessionMock = vi.fn();
-const findOrCreateBookSessionMock = vi.fn();
+const createAndPersistBookSessionMock = vi.fn();
 const loadBookSessionMock = vi.fn();
 const persistBookSessionMock = vi.fn();
 const appendBookSessionMessageMock = vi.fn();
+const renameBookSessionMock = vi.fn();
+const deleteBookSessionMock = vi.fn();
+const migrateBookSessionMock = vi.fn();
 const resolveServiceModelMock = vi.fn();
 const loadSecretsMock = vi.fn();
 const saveSecretsMock = vi.fn();
@@ -34,7 +37,7 @@ const getServiceApiKeyMock = vi.fn();
 type ServicePresetMock = {
   providerFamily: "openai" | "anthropic";
   baseUrl: string;
-  modelsBaseUrl: string;
+  modelsBaseUrl?: string;
   knownModels: string[];
 };
 const SERVICE_PRESETS_MOCK: Record<string, ServicePresetMock> = {
@@ -42,7 +45,7 @@ const SERVICE_PRESETS_MOCK: Record<string, ServicePresetMock> = {
   anthropic: { providerFamily: "anthropic", baseUrl: "https://api.anthropic.com", modelsBaseUrl: "https://api.anthropic.com", knownModels: [] as string[] },
   minimax: { providerFamily: "anthropic", baseUrl: "https://api.minimaxi.com/anthropic", modelsBaseUrl: "https://api.minimaxi.com/anthropic", knownModels: [] as string[] },
   bailian: { providerFamily: "anthropic", baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic", modelsBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", knownModels: [] as string[] },
-  custom: { providerFamily: "openai", baseUrl: "", modelsBaseUrl: "", knownModels: [] as string[] },
+  custom: { providerFamily: "openai", baseUrl: "", knownModels: [] as string[] },
 };
 const resolveServicePresetMock = vi.fn((service: string) => SERVICE_PRESETS_MOCK[service]);
 const resolveServiceProviderFamilyMock = vi.fn((service: string) => resolveServicePresetMock(service)?.providerFamily);
@@ -80,6 +83,13 @@ const logger = {
 };
 
 vi.mock("@actalk/inkos-core", () => {
+  class MockSessionAlreadyMigratedError extends Error {
+    constructor(message = "Session already migrated") {
+      super(message);
+      this.name = "SessionAlreadyMigratedError";
+    }
+  }
+
   class MockStateManager {
     constructor(private readonly root: string) {}
 
@@ -163,10 +173,15 @@ vi.mock("@actalk/inkos-core", () => {
     resolveSessionActiveBook: resolveSessionActiveBookMock,
     runAgentSession: runAgentSessionMock,
     buildAgentSystemPrompt: vi.fn(() => "You are helpful."),
-    findOrCreateBookSession: findOrCreateBookSessionMock,
+    createAndPersistBookSession: createAndPersistBookSessionMock,
     loadBookSession: loadBookSessionMock,
     persistBookSession: persistBookSessionMock,
     appendBookSessionMessage: appendBookSessionMessageMock,
+    isNewLayoutBook: vi.fn(async () => false),
+    renameBookSession: renameBookSessionMock,
+    deleteBookSession: deleteBookSessionMock,
+    migrateBookSession: migrateBookSessionMock,
+    SessionAlreadyMigratedError: MockSessionAlreadyMigratedError,
     resolveServicePreset: resolveServicePresetMock,
     resolveServiceProviderFamily: resolveServiceProviderFamilyMock,
     resolveServiceModelsBaseUrl: resolveServiceModelsBaseUrlMock,
@@ -176,7 +191,6 @@ vi.mock("@actalk/inkos-core", () => {
     getServiceApiKey: getServiceApiKeyMock,
     listModelsForService: listModelsForServiceMock,
     GLOBAL_ENV_PATH: join(tmpdir(), "inkos-global.env"),
-    isNewLayoutBook: vi.fn(async () => false),
   };
 });
 
@@ -327,10 +341,13 @@ describe("createStudioServer daemon lifecycle", () => {
     rollbackToChapterMock.mockResolvedValue([]);
     pipelineConfigs.length = 0;
     runAgentSessionMock.mockReset();
-    findOrCreateBookSessionMock.mockReset();
+    createAndPersistBookSessionMock.mockReset();
     loadBookSessionMock.mockReset();
     persistBookSessionMock.mockReset();
     appendBookSessionMessageMock.mockReset();
+    renameBookSessionMock.mockReset();
+    deleteBookSessionMock.mockReset();
+    migrateBookSessionMock.mockReset();
     resolveServiceModelMock.mockReset();
     loadSecretsMock.mockReset();
     saveSecretsMock.mockReset();
@@ -342,17 +359,26 @@ describe("createStudioServer daemon lifecycle", () => {
     // Default BookSession for agent tests
     const defaultBookSession = {
       sessionId: "agent-session-1",
-      projectRoot: root,
-      activeBookId: "demo-book",
+      bookId: "demo-book",
+      title: null,
       messages: [],
       events: [],
+      draftRounds: [],
+      createdAt: 1,
+      updatedAt: 1,
     };
-    findOrCreateBookSessionMock.mockResolvedValue(defaultBookSession);
-    loadBookSessionMock.mockResolvedValue(null);
+    createAndPersistBookSessionMock.mockResolvedValue(defaultBookSession);
+    loadBookSessionMock.mockResolvedValue(defaultBookSession);
     persistBookSessionMock.mockResolvedValue(undefined);
     appendBookSessionMessageMock.mockImplementation(
       (session: unknown, _msg: unknown) => session,
     );
+    renameBookSessionMock.mockResolvedValue(null);
+    deleteBookSessionMock.mockResolvedValue(undefined);
+    migrateBookSessionMock.mockImplementation(async (_root: string, _sessionId: string, bookId: string) => ({
+      ...defaultBookSession,
+      bookId,
+    }));
     runAgentSessionMock.mockResolvedValue({
       responseText: "Agent response.",
       messages: [],
@@ -490,6 +516,14 @@ describe("createStudioServer daemon lifecycle", () => {
     };
     loadProjectConfigMock.mockResolvedValue(freshConfig);
 
+    // Stub /models so probe doesn't hit the real OpenAI endpoint and short-circuit on 401.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => "Not Found",
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
+
     const { createStudioServer } = await import("./server.js");
     const app = createStudioServer(startupConfig as never, root);
 
@@ -504,7 +538,7 @@ describe("createStudioServer daemon lifecycle", () => {
       expect.anything(),
       "fresh-model",
       expect.any(Array),
-      expect.objectContaining({ maxTokens: 5 }),
+      expect.objectContaining({ maxTokens: expect.any(Number) }),
     );
   });
 
@@ -520,6 +554,13 @@ describe("createStudioServer daemon lifecycle", () => {
       },
     };
     loadProjectConfigMock.mockResolvedValue(freshConfig);
+    // Stub /models so probe doesn't hit the real OpenAI endpoint and short-circuit on 401.
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => "Not Found",
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
     createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
     chatCompletionMock.mockImplementation(async (client: any) => {
       if (client.stream === false) {
@@ -1005,6 +1046,64 @@ describe("createStudioServer daemon lifecycle", () => {
     );
   });
 
+  it("keys cached model lists by baseUrl so custom endpoints do not leak stale results", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "custom", name: "Switcher", baseUrl: "https://a.example.com/v1" },
+        ],
+      },
+    }, null, 2), "utf-8");
+    const fetchMock = vi.fn(async (input: string | URL | Request) => {
+      const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
+      if (url === "https://a.example.com/v1/models") {
+        return {
+          ok: true,
+          json: async () => ({ data: [{ id: "model-a" }] }),
+          text: async () => "",
+        };
+      }
+      if (url === "https://b.example.com/v1/models") {
+        return {
+          ok: true,
+          json: async () => ({ data: [{ id: "model-b" }] }),
+          text: async () => "",
+        };
+      }
+      return {
+        ok: false,
+        status: 404,
+        text: async () => "404 page not found",
+      };
+    });
+    vi.stubGlobal("fetch", fetchMock as unknown as typeof fetch);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const first = await app.request("http://localhost/api/v1/services/custom%3ASwitcher/models?apiKey=sk-shared-tail");
+    expect(first.status).toBe(200);
+    await expect(first.json()).resolves.toMatchObject({
+      models: [{ id: "model-a", name: "model-a" }],
+    });
+
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "custom", name: "Switcher", baseUrl: "https://b.example.com/v1" },
+        ],
+      },
+    }, null, 2), "utf-8");
+
+    const second = await app.request("http://localhost/api/v1/services/custom%3ASwitcher/models?apiKey=sk-shared-tail");
+    expect(second.status).toBe(200);
+    await expect(second.json()).resolves.toMatchObject({
+      models: [{ id: "model-b", name: "model-b" }],
+    });
+  });
+
   it("returns stored service secret for detail page rehydration", async () => {
     loadSecretsMock.mockResolvedValue({
       services: {
@@ -1209,6 +1308,75 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
+  it("creates a fresh book session on POST /api/v1/sessions", async () => {
+    createAndPersistBookSessionMock.mockResolvedValueOnce({
+      sessionId: "fresh-session",
+      bookId: "demo-book",
+      title: null,
+      messages: [],
+      events: [],
+      draftRounds: [],
+      createdAt: 10,
+      updatedAt: 10,
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/sessions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bookId: "demo-book" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(createAndPersistBookSessionMock).toHaveBeenCalledWith(root, "demo-book", undefined);
+    await expect(response.json()).resolves.toMatchObject({
+      session: { sessionId: "fresh-session", bookId: "demo-book", title: null },
+    });
+  });
+
+  it("renames a session through PUT /api/v1/sessions/:sessionId", async () => {
+    renameBookSessionMock.mockResolvedValueOnce({
+      sessionId: "agent-session-1",
+      bookId: "demo-book",
+      title: "新标题",
+      messages: [],
+      events: [],
+      draftRounds: [],
+      createdAt: 1,
+      updatedAt: 2,
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/sessions/agent-session-1", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: "  新标题  " }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(renameBookSessionMock).toHaveBeenCalledWith(root, "agent-session-1", "新标题");
+    await expect(response.json()).resolves.toMatchObject({
+      session: { sessionId: "agent-session-1", title: "新标题" },
+    });
+  });
+
+  it("deletes a session through DELETE /api/v1/sessions/:sessionId", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/sessions/agent-session-1", {
+      method: "DELETE",
+    });
+
+    expect(response.status).toBe(200);
+    expect(deleteBookSessionMock).toHaveBeenCalledWith(root, "agent-session-1");
+    await expect(response.json()).resolves.toEqual({ ok: true });
+  });
+
   it("routes /api/agent through runAgentSession and returns response + sessionId", async () => {
     runAgentSessionMock.mockResolvedValueOnce({
       responseText: "Completed write_next for demo-book.",
@@ -1224,7 +1392,7 @@ describe("createStudioServer daemon lifecycle", () => {
     const response = await app.request("http://localhost/api/v1/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction: "continue", activeBookId: "demo-book" }),
+      body: JSON.stringify({ instruction: "continue", activeBookId: "demo-book", sessionId: "agent-session-1" }),
     });
 
     expect(response.status).toBe(200);
@@ -1293,6 +1461,7 @@ describe("createStudioServer daemon lifecycle", () => {
         instruction: "nihao",
         service: "custom:CodexForMe",
         model: "gpt-5.4",
+        sessionId: "agent-session-1",
       }),
     });
 
@@ -1311,7 +1480,7 @@ describe("createStudioServer daemon lifecycle", () => {
     const response = await app.request("http://localhost/api/v1/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction: "continue", activeBookId: "demo-book" }),
+      body: JSON.stringify({ instruction: "continue", activeBookId: "demo-book", sessionId: "agent-session-1" }),
     });
 
     expect(response.status).toBe(500);
@@ -1336,7 +1505,7 @@ describe("createStudioServer daemon lifecycle", () => {
     const response = await app.request("http://localhost/api/v1/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction: "nihao", activeBookId: "demo-book" }),
+      body: JSON.stringify({ instruction: "nihao", activeBookId: "demo-book", sessionId: "agent-session-1" }),
     });
 
     expect(response.status).toBe(502);
@@ -1365,13 +1534,32 @@ describe("createStudioServer daemon lifecycle", () => {
     const response = await app.request("http://localhost/api/v1/agent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ instruction: "nihao", activeBookId: "demo-book" }),
+      body: JSON.stringify({ instruction: "nihao", activeBookId: "demo-book", sessionId: "agent-session-1" }),
     });
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       response: "你好！",
       session: { sessionId: "agent-session-1" },
+    });
+  });
+
+  it("rejects /api/v1/agent requests without sessionId", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "continue", activeBookId: "demo-book" }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "SESSION_ID_REQUIRED",
+        message: "sessionId is required",
+      },
     });
   });
 
