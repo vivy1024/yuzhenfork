@@ -93,8 +93,21 @@ export interface LLMClient {
   readonly _apiKey?: string;
   readonly defaults: {
     readonly temperature: number;
+    /**
+     * Per-call fallback: 当 agent 调 chat() 不传 options.maxTokens 时用这个值。
+     * 不是硬上限——per-call 显式传的值会覆盖它，不会被它限制。
+     */
     readonly maxTokens: number;
-    readonly maxTokensCap: number | null; // non-null only when user explicitly configured
+    /**
+     * Per-call 硬上限。null 表示不封顶；非 null 表示给 chat() 的 per-call
+     * maxTokens 加一个 Math.min(perCall, cap) 约束。
+     *
+     * 语义必须跟 defaults.maxTokens 严格分开：maxTokens 是 fallback，
+     * maxTokensCap 是 cap。旧实现把两者用同一个数推导，导致 agent per-call 16384
+     * 被 config.maxTokens=8192 误裁（见 tests/__tests__/provider.test.ts 的
+     * "per-call maxTokens is not capped by config.maxTokens" 回归测试）。
+     */
+    readonly maxTokensCap: number | null;
     readonly thinkingBudget: number;
     readonly extra: Record<string, unknown>;
   };
@@ -130,8 +143,12 @@ export interface ChatWithToolsResult {
 export function createLLMClient(config: LLMConfig): LLMClient {
   const defaults = {
     temperature: config.temperature ?? 0.7,
+    // fallback: agent 没传 per-call 时用这个
     maxTokens: config.maxTokens ?? 8192,
-    maxTokensCap: config.maxTokens ?? null, // only cap when user explicitly set maxTokens
+    // cap: 只在用户显式配 maxTokensCap 时生效；默认 null = 不封顶 per-call。
+    // **禁止**改成 `config.maxTokens ?? null` —— 那样会让 architect 的 per-call
+    // 16384 被用户 config.maxTokens=8192 自动裁剪，基础设定输出会被截断。
+    maxTokensCap: config.maxTokensCap ?? null,
     thinkingBudget: config.thinkingBudget ?? 0,
     extra: config.extra ?? {},
   };

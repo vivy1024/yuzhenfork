@@ -58,14 +58,18 @@ export function useHashRoute() {
   }, []);
 
   const setRoute = useCallback((newRoute: HashRoute) => {
+    // 先同步 React state：无论目标页面是否写 URL，保证页面立刻切换。
+    // 之前只在非 hash 页面才 setRouteState，hash 页面完全靠 hashchange 事件回调触发。
+    // 但当 URL 没有实际变化时（比如从 services → logs → services，中间的 logs
+    // 不写 URL，URL 一直停在 #/services），再次赋值同一个 hash 不会触发 hashchange，
+    // React state 就永远停留在 logs，表现为"点不动"。
+    setRouteState(newRoute);
     if (HASH_PAGES.has(newRoute.page)) {
       const hash = routeToHash(newRoute);
-      if (hash) {
+      if (hash && window.location.hash !== hash) {
         window.location.hash = hash;
-        return;
       }
     }
-    setRouteState(newRoute);
   }, []);
 
   const nav = {

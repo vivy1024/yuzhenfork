@@ -484,3 +484,109 @@ describe("chatCompletion fixed-temperature clamp (thinking models)", () => {
     warn.mockRestore();
   });
 });
+
+// ── 回归测试：per-call maxTokens 不能被 config.maxTokens 误封顶 ─────────────
+//
+// 背景 / bug 成因：LLMConfigSchema.maxTokens 有 zod default 8192，曾经
+// createLLMClient 里 `maxTokensCap: config.maxTokens ?? null` 的实现会让 cap
+// 永远等于 config.maxTokens。architect 的 per-call 16384 会被 Math.min(16384,
+// 8192) 裁到 8192，基础设定输出被截断——这是 CLAUDE.md 禁止的 maxTokens 回归。
+//
+// 修复后 maxTokens 和 maxTokensCap 是两个独立字段：
+//   - maxTokens: agent 没传 per-call 时的 fallback
+//   - maxTokensCap: per-call 的硬上限，默认 null（不封顶）
+//
+// 如果后续有人把两个字段的语义合回去、或者把 cap 默认改成非 null，这组回归
+// 测试会立刻挂掉。
+
+describe("createLLMClient maxTokensCap regression", () => {
+  it("setting config.maxTokens alone leaves defaults.maxTokensCap null (no cap)", async () => {
+    const { createLLMClient } = await import("../llm/provider.js");
+    const { LLMConfigSchema } = await import("../models/project.js");
+
+    const client = createLLMClient(LLMConfigSchema.parse({
+      provider: "openai",
+      baseUrl: "http://localhost:0",
+      model: "test-model",
+      maxTokens: 8192, // 用户配了 fallback，但没有显式要求封顶
+    }));
+
+    expect(client.defaults.maxTokens).toBe(8192);
+    expect(client.defaults.maxTokensCap).toBeNull();
+  });
+
+  it("setting config.maxTokensCap flips cap on", async () => {
+    const { createLLMClient } = await import("../llm/provider.js");
+    const { LLMConfigSchema } = await import("../models/project.js");
+
+    const client = createLLMClient(LLMConfigSchema.parse({
+      provider: "openai",
+      baseUrl: "http://localhost:0",
+      model: "test-model",
+      maxTokens: 8192,
+      maxTokensCap: 4096, // 显式要求封顶
+    }));
+
+    expect(client.defaults.maxTokens).toBe(8192);
+    expect(client.defaults.maxTokensCap).toBe(4096);
+  });
+
+  it("defaults (no config keys) leave cap null", async () => {
+    const { createLLMClient } = await import("../llm/provider.js");
+    const { LLMConfigSchema } = await import("../models/project.js");
+
+    const client = createLLMClient(LLMConfigSchema.parse({
+      provider: "openai",
+      baseUrl: "http://localhost:0",
+      model: "test-model",
+    }));
+
+    expect(client.defaults.maxTokensCap).toBeNull();
+  });
+
+  it("per-call maxTokens 16384 reaches the API when config.maxTokens is 8192", async () => {
+    const { createLLMClient } = await import("../llm/provider.js");
+    const { LLMConfigSchema } = await import("../models/project.js");
+
+    const client = createLLMClient(LLMConfigSchema.parse({
+      provider: "openai",
+      baseUrl: "http://localhost:0",
+      model: "test-model",
+      maxTokens: 8192,
+    }));
+
+    mockStreamSimple.mockReset();
+    mockStreamSimple.mockReturnValue(makeTextStream("ok"));
+
+    await chatCompletion(client, "test-model", [
+      { role: "user", content: "architect" },
+    ], { maxTokens: 16384 });
+
+    const opts = mockStreamSimple.mock.calls[0]?.[2] as Record<string, unknown>;
+    // 16384 必须原样传到下游，不能被 config.maxTokens=8192 裁成 8192
+    expect(opts.maxTokens).toBe(16384);
+  });
+
+  it("per-call maxTokens is capped when config.maxTokensCap is set explicitly", async () => {
+    const { createLLMClient } = await import("../llm/provider.js");
+    const { LLMConfigSchema } = await import("../models/project.js");
+
+    const client = createLLMClient(LLMConfigSchema.parse({
+      provider: "openai",
+      baseUrl: "http://localhost:0",
+      model: "test-model",
+      maxTokens: 8192,
+      maxTokensCap: 4096, // 用户确实要硬上限
+    }));
+
+    mockStreamSimple.mockReset();
+    mockStreamSimple.mockReturnValue(makeTextStream("ok"));
+
+    await chatCompletion(client, "test-model", [
+      { role: "user", content: "test" },
+    ], { maxTokens: 16384 });
+
+    const opts = mockStreamSimple.mock.calls[0]?.[2] as Record<string, unknown>;
+    expect(opts.maxTokens).toBe(4096);
+  });
+});

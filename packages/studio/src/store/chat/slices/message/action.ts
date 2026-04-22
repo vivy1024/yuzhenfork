@@ -385,13 +385,6 @@ export const createMessageSlice: StateCreator<ChatStore, [], [], MessageActions>
             })),
           }));
         }
-        if (toolCall?.name === "create_book") {
-          set((state) => ({
-            sessions: updateSession(state.sessions, sessionId, () => ({
-              pendingBookArgs: { ...toolCall.arguments },
-            })),
-          }));
-        }
       } else {
         const emptyMessage = "模型未返回文本内容。请检查协议类型（chat/responses）、流式开关或上游服务兼容性。";
         if (hasStream) {

@@ -35,6 +35,7 @@ import { loadNarrativeMemorySeed, loadSnapshotCurrentStateFacts } from "../state
 import { rewriteStructuredStateFromMarkdown } from "../state/state-bootstrap.js";
 import { readFile, readdir, writeFile, mkdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { readStoryFrame, readVolumeMap, readCharacterContext, readCurrentStateWithFallback, isNewLayoutBook } from "../utils/outline-paths.js";
 import {
   parseStateDegradedReviewNote,
   resolveStateDegradedBaseStatus,
@@ -510,6 +511,170 @@ export class PipelineRunner {
     } catch (error) {
       await rm(stagingBookDir, { recursive: true, force: true }).catch(() => undefined);
       throw error;
+    }
+  }
+
+  /**
+   * Revise an existing book's foundation — 把已有书的架构稿重写（legacy 条目式升级
+   * 到段落式 / Phase 5 书按 feedback 再次调整细节），把架构稿相关文件备份到
+   * story/.backup-<phase4|phase5>-<timestamp>/。
+   *
+   * 关键约束：**只改架构稿文件**（outline/ + roles/ + 4 个 legacy shim），
+   * 不动任何运行时状态文件（current_state / pending_hooks / particle_ledger /
+   * subplot_board / emotional_arcs）—— 跟 context-transform 里给 LLM 的 upgrade
+   * hint 承诺"升级只改架构稿，不动已写的章节"保持一致。
+   *
+   * 两种来源：
+   *   - legacy 书（没有 outline/story_frame.md）：读 story_bible.md 等 4 个
+   *     flat 文件作为原内容
+   *   - Phase 5 书（outline/story_frame.md 已存在）：读 outline/ + roles/ 的
+   *     权威内容作为原内容——**不能读 flat 文件**，那些是 shim（只有指针 + 2000
+   *     字摘录）会丢信息
+   */
+  async reviseFoundation(bookId: string, feedback: string): Promise<void> {
+    const bookDir = this.state.bookDir(bookId);
+    const storyDir = join(bookDir, "story");
+    const isPhase5 = await isNewLayoutBook(bookDir);
+
+    // 1. 备份架构稿相关文件（不包含运行时状态文件，那些不会被动）
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+    const backupTag = isPhase5 ? "phase5" : "phase4";
+    const backupDir = join(storyDir, `.backup-${backupTag}-${timestamp}`);
+    await mkdir(backupDir, { recursive: true });
+
+    // 备份 legacy flat 文件（两种书都有这几个——legacy 是权威，Phase 5 是 shim）
+    const flatFiles = ["story_bible.md", "volume_outline.md", "book_rules.md", "character_matrix.md"];
+    for (const fileName of flatFiles) {
+      try {
+        const content = await readFile(join(storyDir, fileName), "utf-8");
+        await writeFile(join(backupDir, fileName), content, "utf-8");
+      } catch {
+        /* 文件不存在就跳过 */
+      }
+    }
+
+    // Phase 5 书还要备份权威来源：outline/ 和 roles/ 两个目录
+    if (isPhase5) {
+      await this.copyDirShallow(join(storyDir, "outline"), join(backupDir, "outline"));
+      await this.copyDirRecursive(join(storyDir, "roles"), join(backupDir, "roles"));
+    }
+
+    // 2. 读原内容作为 reviseFrom 输入 —— 必须从权威源读
+    const book = await this.state.loadBookConfig(bookId);
+    let oldStoryBible: string, oldVolumeOutline: string, oldBookRules: string, oldCharacterMatrix: string;
+
+    if (isPhase5) {
+      // Phase 5 书的 story_bible.md / volume_outline.md / character_matrix.md
+      // 都是 shim（只有指针 + 摘录），信息不完整。从 outline-paths helper 读
+      // 权威文件：outline/story_frame.md / outline/volume_map.md / roles/**/*.md
+      [oldStoryBible, oldVolumeOutline, oldCharacterMatrix] = await Promise.all([
+        readStoryFrame(bookDir),
+        readVolumeMap(bookDir),
+        readCharacterContext(bookDir),
+      ]);
+      // book_rules.md 在 Phase 5 下虽然是 shim，但 YAML frontmatter 已经搬到
+      // story_frame.md 顶部了（writeFoundationFiles 做的合并），这里读 shim
+      // 文件 OK——里面的"叙事指引摘录"部分是唯一遗留信息。
+      oldBookRules = await readFile(join(storyDir, "book_rules.md"), "utf-8").catch(() => "");
+    } else {
+      // legacy 书：4 个 flat 文件就是权威
+      [oldStoryBible, oldVolumeOutline, oldBookRules, oldCharacterMatrix] = await Promise.all([
+        readFile(join(storyDir, "story_bible.md"), "utf-8").catch(() => ""),
+        readFile(join(storyDir, "volume_outline.md"), "utf-8").catch(() => ""),
+        readFile(join(storyDir, "book_rules.md"), "utf-8").catch(() => ""),
+        readFile(join(storyDir, "character_matrix.md"), "utf-8").catch(() => ""),
+      ]);
+    }
+
+    // 3. 架构师按 reviseFrom + feedback 重写
+    const architect = new ArchitectAgent(this.agentCtxFor("architect", bookId));
+    const foundation = await architect.generateFoundation(book, undefined, undefined, {
+      reviseFrom: {
+        storyBible: oldStoryBible,
+        volumeOutline: oldVolumeOutline,
+        bookRules: oldBookRules,
+        characterMatrix: oldCharacterMatrix,
+        userFeedback: feedback,
+      },
+    });
+
+    // 4. 可选 foundation-reviewer 审核——挂了只 warn 不阻断
+    const reviewer = new FoundationReviewerAgent(this.agentCtxFor("foundation-reviewer", bookId));
+    const resolvedLanguage = (book.language ?? "zh") === "en" ? "en" as const : "zh" as const;
+    try {
+      const review = await reviewer.review({
+        foundation,
+        mode: "original",
+        language: resolvedLanguage,
+      } as Parameters<FoundationReviewerAgent["review"]>[0]);
+      if (!review.passed) {
+        this.config.logger?.warn?.(
+          `[reviseFoundation] 审核未通过，仍接受转换结果。反馈：${review.overallFeedback ?? ""}`,
+        );
+      }
+    } catch (error) {
+      this.config.logger?.warn?.(
+        `[reviseFoundation] 审核调用失败，跳过：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+
+    // 5. 目录补全 → 写新文件（mode="revise" 不动运行时状态 + 清空旧 role 文件）
+    const outlineDir = join(storyDir, "outline");
+    await mkdir(outlineDir, { recursive: true });
+    await mkdir(join(storyDir, "roles", "主要角色"), { recursive: true });
+    await mkdir(join(storyDir, "roles", "次要角色"), { recursive: true });
+
+    const { profile: gp } = await this.loadGenreProfile(book.genre);
+    await architect.writeFoundationFiles(
+      bookDir,
+      foundation,
+      gp.numericalSystem,
+      book.language ?? gp.language,
+      "revise",
+    );
+  }
+
+  /** Shallow copy (non-recursive) — used to back up outline/ which has no subdirs. */
+  private async copyDirShallow(src: string, dest: string): Promise<void> {
+    try {
+      await mkdir(dest, { recursive: true });
+      const entries = await readdir(src);
+      await Promise.all(
+        entries.map(async (entry) => {
+          try {
+            const content = await readFile(join(src, entry), "utf-8");
+            await writeFile(join(dest, entry), content, "utf-8");
+          } catch {
+            /* skip files we can't read */
+          }
+        }),
+      );
+    } catch {
+      /* src doesn't exist → nothing to back up */
+    }
+  }
+
+  /** Recursive copy — used to back up roles/ which has 主要角色/ + 次要角色/. */
+  private async copyDirRecursive(src: string, dest: string): Promise<void> {
+    try {
+      await mkdir(dest, { recursive: true });
+      const entries = await readdir(src, { withFileTypes: true });
+      for (const entry of entries) {
+        const srcPath = join(src, entry.name);
+        const destPath = join(dest, entry.name);
+        if (entry.isDirectory()) {
+          await this.copyDirRecursive(srcPath, destPath);
+        } else if (entry.isFile()) {
+          try {
+            const content = await readFile(srcPath, "utf-8");
+            await writeFile(destPath, content, "utf-8");
+          } catch {
+            /* skip */
+          }
+        }
+      }
+    } catch {
+      /* src doesn't exist */
     }
   }
 
@@ -1119,8 +1284,8 @@ export class PipelineRunner {
         readSafe(join(storyDir, "current_state.md")),
         readSafe(join(storyDir, "particle_ledger.md")),
         readSafe(join(storyDir, "pending_hooks.md")),
-        readSafe(join(storyDir, "story_bible.md")),
-        readSafe(join(storyDir, "volume_outline.md")),
+        readStoryFrame(bookDir, "(文件不存在)"),
+        readVolumeMap(bookDir, "(文件不存在)"),
         readSafe(join(storyDir, "book_rules.md")),
       ]);
 
@@ -1847,14 +2012,14 @@ export class PipelineRunner {
 
     const [storyBible, currentState, ledger, hooks, summaries, subplots, emotions, matrix] =
       await Promise.all([
-        readSafe(join(parentDir, "story/story_bible.md")),
-        readSafe(join(parentDir, "story/current_state.md")),
+        readStoryFrame(parentDir, "(无)"),
+        readCurrentStateWithFallback(parentDir, "(无)"),
         readSafe(join(parentDir, "story/particle_ledger.md")),
         readSafe(join(parentDir, "story/pending_hooks.md")),
         readSafe(join(parentDir, "story/chapter_summaries.md")),
         readSafe(join(parentDir, "story/subplot_board.md")),
         readSafe(join(parentDir, "story/emotional_arcs.md")),
-        readSafe(join(parentDir, "story/character_matrix.md")),
+        readCharacterContext(parentDir, "(无)"),
       ]);
 
     const response = await chatCompletion(this.config.client, this.config.model, [

@@ -139,7 +139,6 @@ export function createSessionRuntime(input: {
     stream: null,
     isStreaming: false,
     lastError: null,
-    pendingBookArgs: null,
     isDraft: input.isDraft ?? false,
   };
 }

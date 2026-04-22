@@ -2,7 +2,6 @@ import { useRef, useEffect, useMemo, useState } from "react";
 import type { Theme } from "../hooks/use-theme";
 import type { TFunction } from "../hooks/use-i18n";
 import type { SSEMessage } from "../hooks/use-sse";
-import { useApi } from "../hooks/use-api";
 import { chatSelectors, useChatStore } from "../store/chat";
 import { useServiceStore } from "../store/service";
 import {
@@ -32,7 +31,6 @@ import {
   MessageContent,
 } from "../components/ai-elements/message";
 import {
-  clearBookCreateSessionId,
   filterModelGroups,
   getBookCreateSessionId,
   setBookCreateSessionId,
@@ -58,22 +56,15 @@ export interface ChatPageProps {
 
 export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPageProps) {
   // -- Store selectors --
-  const activeSession = useChatStore(chatSelectors.activeSession);
   const messages = useChatStore(chatSelectors.activeMessages);
   const activeSessionId = useChatStore((s) => s.activeSessionId);
   const input = useChatStore((s) => s.input);
   const loading = useChatStore(chatSelectors.isActiveSessionStreaming);
-  const pendingBookArgs = activeSession?.pendingBookArgs ?? null;
-  const bookCreating = useChatStore((s) => s.bookCreating);
-  const createProgress = useChatStore((s) => s.createProgress);
   const selectedModel = useChatStore((s) => s.selectedModel);
   const selectedService = useChatStore((s) => s.selectedService);
   // -- Store actions --
   const setInput = useChatStore((s) => s.setInput);
   const sendMessage = useChatStore((s) => s.sendMessage);
-  const setPendingBookArgs = useChatStore((s) => s.setPendingBookArgs);
-  const handleCreateBook = useChatStore((s) => s.handleCreateBook);
-  const setCreateProgress = useChatStore((s) => s.setCreateProgress);
   const setSelectedModel = useChatStore((s) => s.setSelectedModel);
   const loadSessionList = useChatStore((s) => s.loadSessionList);
   const createSession = useChatStore((s) => s.createSession);
@@ -142,29 +133,12 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
     el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
   }, [input]);
 
-  // Auto-scroll on new messages or progress updates
+  // Auto-scroll on new messages
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
     }
-  }, [messages, createProgress]);
-
-  // Listen for pipeline log events during book creation
-  useEffect(() => {
-    if (!bookCreating) {
-      setCreateProgress("");
-      return;
-    }
-    const es = new EventSource("/api/v1/events");
-    es.addEventListener("log", (e: MessageEvent) => {
-      try {
-        const data = e.data ? JSON.parse(e.data) : null;
-        const msg = data?.message as string | undefined;
-        if (msg) setCreateProgress(msg);
-      } catch { /* ignore */ }
-    });
-    return () => { es.close(); };
-  }, [bookCreating, setCreateProgress]);
+  }, [messages]);
 
   // Entering a book loads its latest session; book-create mode persists its orphan session in localStorage.
   useEffect(() => {
@@ -219,15 +193,6 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
   const onSend = (text: string) => {
     if (!activeSessionId) return;
     void sendMessage(activeSessionId, text, activeBookId);
-  };
-
-  const onCreateBook = async () => {
-    if (!activeSessionId) return;
-    const newBookId = await handleCreateBook(activeSessionId, activeBookId);
-    if (newBookId) {
-      clearBookCreateSessionId();
-      nav.toBook(newBookId);
-    }
   };
 
   const handleQuickAction = (command: string) => {
@@ -312,16 +277,6 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
                               content={item.part.content}
                               timestamp={msg.timestamp}
                               theme={theme}
-                              toolCall={msg.toolCall?.name === "create_book" && pendingBookArgs
-                                ? { name: msg.toolCall.name, arguments: pendingBookArgs }
-                                : msg.toolCall}
-                              onArgsChange={msg.toolCall?.name === "create_book"
-                                ? (args) => setPendingBookArgs(args)
-                                : undefined}
-                              onConfirm={msg.toolCall?.name === "create_book"
-                                ? () => void onCreateBook()
-                                : undefined}
-                              confirming={msg.toolCall?.name === "create_book" ? bookCreating : undefined}
                             />
                           );
                         }
@@ -336,16 +291,6 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
                     content={msg.content}
                     timestamp={msg.timestamp}
                     theme={theme}
-                    toolCall={msg.toolCall?.name === "create_book" && pendingBookArgs
-                      ? { name: msg.toolCall.name, arguments: pendingBookArgs }
-                      : msg.toolCall}
-                    onArgsChange={msg.toolCall?.name === "create_book"
-                      ? (args) => setPendingBookArgs(args)
-                      : undefined}
-                    onConfirm={msg.toolCall?.name === "create_book"
-                      ? () => void onCreateBook()
-                      : undefined}
-                    confirming={msg.toolCall?.name === "create_book" ? bookCreating : undefined}
                   />
                 )}
               </div>
@@ -362,22 +307,6 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
               </Message>
             )}
 
-            {/* Book creation progress */}
-            {bookCreating && (
-              <div className="flex gap-3 items-start">
-                <div className="w-7 h-7 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
-                  <Loader2 size={14} className="text-primary animate-spin" />
-                </div>
-                <div className="bg-card border border-border/50 px-4 py-3 rounded-2xl rounded-tl-sm text-sm space-y-1">
-                  <div className="font-medium text-foreground">{isZh ? "\u6B63\u5728\u521B\u5EFA\u4E66\u7C4D..." : "Creating book..."}</div>
-                  {createProgress && (
-                    <div className="text-xs text-muted-foreground font-mono truncate max-w-md">
-                      {createProgress}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
           </div>
         )}
       </div>
@@ -396,42 +325,6 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
       {/* Input area */}
       <div className="shrink-0 border-t border-border/40 px-4 py-3">
         <div className="max-w-3xl mx-auto">
-          {pendingBookArgs && !loading ? (
-            /* create_book tool call pending — show action buttons */
-            <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={() => void onCreateBook()}
-                disabled={bookCreating}
-                className="flex items-center gap-1.5 px-5 py-2.5 rounded-xl bg-primary text-primary-foreground text-sm font-medium hover:opacity-90 active:scale-[0.98] transition-all disabled:opacity-50"
-              >
-                {bookCreating && <Loader2 size={14} className="animate-spin" />}
-                {bookCreating ? "创建中…" : "开始写这本书"}
-              </button>
-              <div className="flex-1 flex items-center gap-2 rounded-xl border border-border/40 bg-secondary/30 px-3 py-2">
-                <input
-                  type="text"
-                  value={input}
-                  onChange={(e) => setInput(e.target.value)}
-                  onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(input); } }}
-                  placeholder={isZh ? "或输入修改要求…" : "Or type changes..."}
-                  disabled={!activeSessionId}
-                  className="flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground/50"
-                />
-                {input.trim() && (
-                  <button
-                    type="button"
-                    onClick={() => onSend(input)}
-                    disabled={!activeSessionId}
-                    className="w-7 h-7 rounded-lg bg-primary text-primary-foreground flex items-center justify-center shrink-0 hover:scale-105 active:scale-95 transition-all"
-                  >
-                    <ArrowUp size={12} strokeWidth={2.5} />
-                  </button>
-                )}
-              </div>
-            </div>
-          ) : (
-            /* Normal input */
             <div className="rounded-xl bg-secondary/30 transition-all">
               <div className="flex items-center gap-2 px-3 py-2">
                 <textarea
@@ -482,7 +375,6 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
                 )}
               </div>
             </div>
-          )}
         </div>
       </div>
     </div>

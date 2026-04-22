@@ -19,6 +19,13 @@ export const LLMConfigSchema = z.object({
   model: z.string().min(1),
   temperature: z.number().min(0).max(2).default(0.7),
   maxTokens: z.number().int().min(1).default(8192),
+  // per-call 硬上限。默认 undefined → createLLMClient 里变 null → 不封顶 per-call。
+  // 只有用户确实要限制单次调用最大输出时才显式设。注意：这个字段跟 maxTokens
+  // 语义不同：maxTokens 是"agent 没传 per-call 时的 fallback"，maxTokensCap
+  // 是"给 agent per-call 加硬上限"。分开成两个字段是为了避免旧实现下
+  // config.maxTokens 同时被当 fallback 和 cap 的歧义（旧行为会把 architect
+  // per-call 16384 裁到 config.maxTokens=8192，导致基础设定输出被截断）。
+  maxTokensCap: z.number().int().min(1).optional(),
   thinkingBudget: z.number().int().min(0).default(0),
   extra: z.record(z.unknown()).optional(),
   headers: z.record(z.string()).optional(),

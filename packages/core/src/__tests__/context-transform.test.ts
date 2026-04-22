@@ -79,4 +79,30 @@ describe("createBookContextTransform", () => {
     const result = await transform(original);
     expect(result).toBe(original);
   });
+
+  it("injects upgrade hint when book is legacy layout (no outline/story_frame.md)", async () => {
+    const transform = createBookContextTransform(bookId, projectRoot);
+    const result = await transform([
+      { role: "user" as const, content: "写下一章", timestamp: Date.now() },
+    ]);
+
+    const injected = result[0] as { role: string; content: string };
+    expect(injected.content).toContain("旧的条目式格式");
+    expect(injected.content).toContain("sub_agent(architect, { revise: true");
+  });
+
+  it("does NOT inject upgrade hint when book is Phase 5 layout", async () => {
+    const outlineDir = join(projectRoot, "books", bookId, "story", "outline");
+    await mkdir(outlineDir, { recursive: true });
+    await writeFile(join(outlineDir, "story_frame.md"), "## 主题\n段落式内容");
+
+    const transform = createBookContextTransform(bookId, projectRoot);
+    const result = await transform([
+      { role: "user" as const, content: "写下一章", timestamp: Date.now() },
+    ]);
+
+    const injected = result[0] as { role: string; content: string };
+    expect(injected.content).not.toContain("旧的条目式格式");
+    expect(injected.content).not.toContain("revise: true");
+  });
 });

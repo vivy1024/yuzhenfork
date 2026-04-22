@@ -110,7 +110,6 @@ export interface SessionRuntime {
   readonly stream: EventSource | null;
   readonly isStreaming: boolean;
   readonly lastError: string | null;
-  readonly pendingBookArgs: Record<string, unknown> | null;
   // 仅前端存在、尚未持久化到磁盘的草稿会话。发送第一条消息时才调 POST /sessions 把它落盘。
   readonly isDraft: boolean;
 }
@@ -125,8 +124,6 @@ export interface MessageState {
 }
 
 export interface CreateState {
-  bookCreating: boolean;
-  createProgress: string;
   bookDataVersion: number;
   sidebarView: "panel" | "artifact";
   artifactFile: string | null;         // foundation file name, e.g. "story_bible.md"
@@ -158,10 +155,6 @@ export interface MessageActions {
 }
 
 export interface CreateActions {
-  setPendingBookArgs: (args: Record<string, unknown> | null) => void;
-  setBookCreating: (creating: boolean) => void;
-  setCreateProgress: (progress: string) => void;
-  handleCreateBook: (sessionId: string, activeBookId?: string) => Promise<string | null>;
   bumpBookDataVersion: () => void;
   openArtifact: (file: string) => void;
   openChapterArtifact: (chapterNum: number) => void;

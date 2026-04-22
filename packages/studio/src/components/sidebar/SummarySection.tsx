@@ -1,8 +1,24 @@
 import { useEffect } from "react";
+import { Streamdown } from "streamdown";
+import { cjk } from "@streamdown/cjk";
+import { code } from "@streamdown/code";
+import { math } from "@streamdown/math";
+import { mermaid } from "@streamdown/mermaid";
 import { useChatStore } from "../../store/chat";
 import type { BookSummary } from "../../store/chat";
 import { fetchJson } from "../../hooks/use-api";
 import { SidebarCard } from "./SidebarCard";
+
+const streamdownPlugins = { cjk, code, math, mermaid };
+
+const SIDEBAR_MD_CLASS =
+  "text-xs text-muted-foreground leading-relaxed " +
+  "[&>*:first-child]:mt-0 [&>*:last-child]:mb-0 " +
+  "[&>p+p]:mt-1.5 [&_strong]:text-foreground [&_strong]:font-medium " +
+  "[&_ul]:list-disc [&_ul]:pl-4 [&_ol]:list-decimal [&_ol]:pl-4 [&_li]:my-0.5 " +
+  "[&_h1]:hidden [&_h2]:text-xs [&_h2]:font-medium [&_h2]:text-foreground [&_h2]:mt-1.5 [&_h2]:mb-0.5 " +
+  "[&_h3]:text-xs [&_h3]:font-medium [&_h3]:text-foreground [&_h3]:mt-1.5 [&_h3]:mb-0.5 " +
+  "[&_code]:text-[11px] [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-secondary/60";
 
 function parseStoryBible(content: string): BookSummary {
   const sections = content.split(/^##\s+/m);
@@ -47,22 +63,24 @@ export function SummarySection({ bookId }: SummarySectionProps) {
     <>
       {summary.world && (
         <SidebarCard title="世界观">
-          <p className="text-xs text-muted-foreground leading-relaxed line-clamp-4">
+          <Streamdown className={SIDEBAR_MD_CLASS} plugins={streamdownPlugins}>
             {summary.world}
-          </p>
+          </Streamdown>
         </SidebarCard>
       )}
       {(summary.protagonist || summary.cast) && (
         <SidebarCard title="角色">
           {summary.protagonist && (
-            <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">
+            <Streamdown className={SIDEBAR_MD_CLASS} plugins={streamdownPlugins}>
               {summary.protagonist}
-            </p>
+            </Streamdown>
           )}
           {summary.cast && (
-            <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3 mt-2">
-              {summary.cast}
-            </p>
+            <div className={summary.protagonist ? "mt-2" : undefined}>
+              <Streamdown className={SIDEBAR_MD_CLASS} plugins={streamdownPlugins}>
+                {summary.cast}
+              </Streamdown>
+            </div>
           )}
         </SidebarCard>
       )}
