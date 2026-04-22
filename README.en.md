@@ -433,6 +433,10 @@ pnpm typecheck    # Type-check without emitting
   <img src="https://contrib.rocks/image?repo=Narcooo/inkos" />
 </a>
 
+## Download History
+
+[![Download History](https://skill-history.com/chart/narcooo/inkos.svg)](https://skill-history.com/narcooo/inkos)
+
 ## License
 
 [AGPL-3.0](LICENSE)

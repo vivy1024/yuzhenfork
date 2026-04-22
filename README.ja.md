@@ -397,6 +397,10 @@ pnpm test         # テストを実行
 pnpm typecheck    # 出力なしで型チェック
 ```
 
+## ダウンロード履歴
+
+[![Download History](https://skill-history.com/chart/narcooo/inkos.svg)](https://skill-history.com/narcooo/inkos)
+
 ## ライセンス
 
 [AGPL-3.0](LICENSE)

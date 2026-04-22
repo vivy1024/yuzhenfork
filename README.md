@@ -435,6 +435,10 @@ pnpm typecheck    # 类型检查
   <img src="https://contrib.rocks/image?repo=Narcooo/inkos" />
 </a>
 
+## 下载历史
+
+[![Download History](https://skill-history.com/chart/narcooo/inkos.svg)](https://skill-history.com/narcooo/inkos)
+
 ## 许可证
 
 [AGPL-3.0](LICENSE)
