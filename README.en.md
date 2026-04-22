@@ -423,9 +423,9 @@ pnpm typecheck    # Type-check without emitting
  </picture>
 </a>
 
-<div align="center">
+## Skills Download History
 
-<h2>Skills Download History</h2>
+<div align="center">
 
 <a href="https://skill-history.com/narcooo/inkos">
   <img alt="Skills Download History" src="https://skill-history.com/chart/narcooo/inkos.svg" />
