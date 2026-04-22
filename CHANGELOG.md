@@ -1,5 +1,25 @@
 # Changelog
 
+## v1.3.6
+
+### Release Focus
+
+v13 书籍创建流程迁移：建书输出升级为段落式架构稿、卷级地图与一人一卡角色目录，并补齐旧书升级路径。
+
+### Improvements
+
+- **段落式架构稿**：Architect 生成 `outline/story_frame.md`、`outline/volume_map.md` 与 `roles/` 角色卡，保留 legacy shim 兼容旧读取路径
+- **旧书升级路径**：agent architect 支持 `revise=true`，可把旧条目式架构稿转换为 Phase 5 布局；升级前会备份原架构稿，升级时不重置运行时状态文件
+- **真相文件注入**：Agent 会把当前书籍 truth files 注入上下文；旧布局书会提示可升级到段落式架构稿
+- **基础设定输出预算修复**：分离 `maxTokens` fallback 与 `maxTokensCap` 硬上限，避免 Architect 大输出被默认配置误裁
+- **README 统计**：补充 Skills Download History 图表，并同步中文、英文、日文 README
+
+### Bug Fixes
+
+- 修复 Phase 5 二次升级时读取 shim 导致信息丢失的问题
+- 修复 reviseFoundation 会重置 `current_state` / `pending_hooks` / runtime logs 的问题
+- 修复角色改名或删除后旧 role 卡残留的问题
+
 ## v1.3.5
 
 ### Improvements
