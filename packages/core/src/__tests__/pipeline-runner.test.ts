@@ -187,7 +187,7 @@ async function createRunnerFixture(
       defaults: {
         temperature: 0.7,
         maxTokens: 4096,
-        thinkingBudget: 0, maxTokensCap: null,
+        thinkingBudget: 0,
       },
     } as ConstructorParameters<typeof PipelineRunner>[0]["client"],
     model: "test-model",
@@ -240,7 +240,7 @@ describe("PipelineRunner", () => {
           defaults: {
             temperature: 0.7,
             maxTokens: 4096,
-            thinkingBudget: 0, maxTokensCap: null,
+            thinkingBudget: 0,
           },
         } as ConstructorParameters<typeof PipelineRunner>[0]["client"],
         model: "base-model",
@@ -253,7 +253,6 @@ describe("PipelineRunner", () => {
           apiKey: "base-key",
           model: "base-model",
           temperature: 0.7,
-          maxTokens: 4096,
           thinkingBudget: 0,
           apiFormat: "chat",
           stream: false,
@@ -317,8 +316,7 @@ describe("PipelineRunner", () => {
         stream: false,
         defaults: {
           temperature: 0.7,
-          maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
         },
       } as ConstructorParameters<typeof PipelineRunner>[0]["client"],
       model: "test-model",
@@ -372,8 +370,7 @@ describe("PipelineRunner", () => {
         stream: false,
         defaults: {
           temperature: 0.7,
-          maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
         },
       } as ConstructorParameters<typeof PipelineRunner>[0]["client"],
       model: "test-model",
@@ -420,8 +417,7 @@ describe("PipelineRunner", () => {
         stream: false,
         defaults: {
           temperature: 0.7,
-          maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
         },
       } as ConstructorParameters<typeof PipelineRunner>[0]["client"],
       model: "test-model",
@@ -531,8 +527,7 @@ describe("PipelineRunner", () => {
         stream: false,
         defaults: {
           temperature: 0.7,
-          maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
         },
       } as ConstructorParameters<typeof PipelineRunner>[0]["client"],
       model: "test-model",

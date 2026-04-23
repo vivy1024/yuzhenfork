@@ -1,15 +1,18 @@
 import { z } from "zod";
 
+// C1 (v2.0.0 breaking): `maxTokens` 字段已被 providers bank 接管；zod 用 strip mode 静默丢弃老配置里的 `maxTokens`。
 const LLMServiceEntrySchema = z.object({
   service: z.string().min(1),
   name: z.string().min(1).optional(),
   baseUrl: z.string().url().optional(),
   temperature: z.number().min(0).max(2).optional(),
-  maxTokens: z.number().int().min(1).optional(),
   apiFormat: z.enum(["chat", "responses"]).optional(),
   stream: z.boolean().optional(),
 });
 
+// C1 (v2.0.0 breaking): 删除 maxTokens / maxTokensCap 字段。
+// 每个模型的真实 maxOutput 来自 providers/<name>.ts 的 InkosModel.maxOutput；
+// 老配置里写的 maxTokens / maxTokensCap 会被 zod strip 静默丢弃（不报错）。
 export const LLMConfigSchema = z.object({
   provider: z.enum(["anthropic", "openai", "custom"]),
   service: z.string().default("custom"),
@@ -18,14 +21,6 @@ export const LLMConfigSchema = z.object({
   apiKey: z.string().default(""),
   model: z.string().min(1),
   temperature: z.number().min(0).max(2).default(0.7),
-  maxTokens: z.number().int().min(1).default(8192),
-  // per-call 硬上限。默认 undefined → createLLMClient 里变 null → 不封顶 per-call。
-  // 只有用户确实要限制单次调用最大输出时才显式设。注意：这个字段跟 maxTokens
-  // 语义不同：maxTokens 是"agent 没传 per-call 时的 fallback"，maxTokensCap
-  // 是"给 agent per-call 加硬上限"。分开成两个字段是为了避免旧实现下
-  // config.maxTokens 同时被当 fallback 和 cap 的歧义（旧行为会把 architect
-  // per-call 16384 裁到 config.maxTokens=8192，导致基础设定输出被截断）。
-  maxTokensCap: z.number().int().min(1).optional(),
   thinkingBudget: z.number().int().min(0).default(0),
   extra: z.record(z.unknown()).optional(),
   headers: z.record(z.string()).optional(),

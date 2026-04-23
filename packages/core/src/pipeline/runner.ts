@@ -400,7 +400,6 @@ export class PipelineRunner {
         apiKey,
         model: override.model,
         temperature: base?.temperature ?? 0.7,
-        maxTokens: base?.maxTokens ?? 8192,
         thinkingBudget: base?.thinkingBudget ?? 0,
         apiFormat,
         stream,

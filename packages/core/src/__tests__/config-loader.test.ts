@@ -112,7 +112,6 @@ describe("loadProjectConfig local provider auth", () => {
     expect(config.llm.model).toBe("kimi-k2.5");
     expect(config.llm.apiKey).toBe("sk-moon");
     expect(config.llm.temperature).toBe(1);
-    expect(config.llm.maxTokens).toBe(4096);
   });
 
   it("derives provider/baseUrl from the MiniMax preset single source of truth", async () => {

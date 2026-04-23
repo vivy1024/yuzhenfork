@@ -18,16 +18,6 @@ import { resolveServicePreset } from "./service-presets.js";
 import { getProvider } from "./providers/index.js";
 import { lookupModel } from "./providers/lookup.js";
 
-let providersDeprecationWarnedOnce = false;
-function warnOnceAboutMaxTokensDeprecation(): void {
-  if (providersDeprecationWarnedOnce) return;
-  providersDeprecationWarnedOnce = true;
-  console.warn(
-    "[inkos] config.maxTokens / maxTokensCap 已被 providers 接管：" +
-      "各模型的真实 maxOutput / contextWindow 来自 providers/<name>.ts。" +
-      "2.0.0 将彻底删除 LLMConfig.maxTokens / maxTokensCap 字段。",
-  );
-}
 
 // === Streaming Monitor Types ===
 
@@ -108,19 +98,9 @@ export interface LLMClient {
     readonly temperature: number;
     /**
      * Per-call fallback: 当 agent 调 chat() 不传 options.maxTokens 时用这个值。
-     * 不是硬上限——per-call 显式传的值会覆盖它，不会被它限制。
+     * 来自 providers bank 的 modelCard.maxOutput（v2.0.0 起）。
      */
     readonly maxTokens: number;
-    /**
-     * Per-call 硬上限。null 表示不封顶；非 null 表示给 chat() 的 per-call
-     * maxTokens 加一个 Math.min(perCall, cap) 约束。
-     *
-     * 语义必须跟 defaults.maxTokens 严格分开：maxTokens 是 fallback，
-     * maxTokensCap 是 cap。旧实现把两者用同一个数推导，导致 agent per-call 16384
-     * 被 config.maxTokens=8192 误裁（见 tests/__tests__/provider.test.ts 的
-     * "per-call maxTokens is not capped by config.maxTokens" 回归测试）。
-     */
-    readonly maxTokensCap: number | null;
     readonly thinkingBudget: number;
     readonly extra: Record<string, unknown>;
   };
@@ -154,16 +134,11 @@ export interface ChatWithToolsResult {
 // === Factory ===
 
 export function createLLMClient(config: LLMConfig): LLMClient {
-  // 提前查一次 modelCard，用于 defaults.maxTokens 推导（下面 piModel 构造再查一次是幂等的）
+  // C1 (v2.0.0)：config.maxTokens / maxTokensCap 已删除；defaults.maxTokens 完全从 modelCard 推导。
   const _earlyCard = lookupModel(config.service ?? "custom", config.model);
   const defaults = {
     temperature: config.temperature ?? 0.7,
-    // A 组起：providers 接管 — 命中 modelCard 用其 maxOutput，否则 fallback 到 config.maxTokens / 8192
-    maxTokens: _earlyCard?.maxOutput ?? config.maxTokens ?? 8192,
-    // cap: 只在用户显式配 maxTokensCap 时生效；默认 null = 不封顶 per-call。
-    // **禁止**改成 `config.maxTokens ?? null` —— 那样会让 architect 的 per-call
-    // 16384 被用户 config.maxTokens=8192 自动裁剪，基础设定输出被截断。
-    maxTokensCap: config.maxTokensCap ?? null,
+    maxTokens: _earlyCard?.maxOutput ?? 8192,
     thinkingBudget: config.thinkingBudget ?? 0,
     extra: config.extra ?? {},
   };
@@ -176,11 +151,6 @@ export function createLLMClient(config: LLMConfig): LLMClient {
   const preset = resolveServicePreset(serviceName);
   const inkosProvider = getProvider(serviceName);
   const modelCard = lookupModel(serviceName, config.model);
-
-  // A 组过渡期：命中 modelCard 时打一次性 warning（表示用户的 maxTokens 配置已被 providers 接管）
-  if (modelCard) {
-    warnOnceAboutMaxTokensDeprecation();
-  }
 
   const piApi = resolvePiApi(serviceName, config.apiFormat, (inkosProvider?.api ?? preset?.api) as PiApi) as PiApi;
   const baseUrl = config.baseUrl || inkosProvider?.baseUrl || preset?.baseUrl || "";
@@ -198,7 +168,7 @@ export function createLLMClient(config: LLMConfig): LLMClient {
     input: modelCard?.abilities?.vision ? ["text", "image"] : ["text"],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: modelCard?.contextWindowTokens ?? 128_000,
-    maxTokens: modelCard?.maxOutput ?? config.maxTokens ?? 8192,
+    maxTokens: modelCard?.maxOutput ?? 8192,
     ...(extraHeaders ? { headers: extraHeaders } : {}),
   };
 
@@ -773,14 +743,13 @@ export async function chatCompletion(
     readonly onTextDelta?: (text: string) => void;
   },
 ): Promise<LLMResponse> {
-  const perCallMax = options?.maxTokens ?? client.defaults.maxTokens;
-  const cap = client.defaults.maxTokensCap;
+  // C1 (v2.0.0)：删除 maxTokensCap 机制。per-call 显式传的 maxTokens 永远不被裁剪。
   const resolved = {
     temperature: clampTemperatureForModel(
       model,
       options?.temperature ?? client.defaults.temperature,
     ),
-    maxTokens: cap !== null ? Math.min(perCallMax, cap) : perCallMax,
+    maxTokens: options?.maxTokens ?? client.defaults.maxTokens,
     extra: client.defaults.extra,
   };
   const onStreamProgress = options?.onStreamProgress;

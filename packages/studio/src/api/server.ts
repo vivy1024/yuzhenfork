@@ -1124,7 +1124,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       baseUrl: currentConfig.llm.baseUrl,
       stream: currentConfig.llm.stream,
       temperature: currentConfig.llm.temperature,
-      maxTokens: currentConfig.llm.maxTokens,
     });
   });
 
