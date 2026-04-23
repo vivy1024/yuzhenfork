@@ -22,7 +22,6 @@ describe("listModelsForService (B8)", () => {
     const sonnet = models.find((m) => m.id === "claude-sonnet-4-6");
     expect(sonnet?.maxOutput).toBe(64_000);
     expect(sonnet?.contextWindow).toBe(1_000_000);
-    expect(sonnet?.reasoning).toBe(true);
   });
 
   it("custom service 走 live probe + bank 补元数据", async () => {
@@ -39,10 +38,11 @@ describe("listModelsForService (B8)", () => {
     expect(models.some((m) => m.id === "my-proxy-model")).toBe(true);
   });
 
-  it("INKOS_LLM_MODEL env 补丁：live/provider 都没有时补进列表", async () => {
+  it("R4：env 补丁已删除 — INKOS_LLM_MODEL 不再污染跨 service 菜单", async () => {
     process.env.INKOS_LLM_MODEL = "my-secret-model";
     const models = await listModelsForService("anthropic");
-    expect(models.some((m) => m.id === "my-secret-model")).toBe(true);
+    // my-secret-model 不在 anthropic bank → 不应该出现
+    expect(models.some((m) => m.id === "my-secret-model")).toBe(false);
   });
 
   it("live 挂了降级到 provider 内置 models（没有 fetch 错误 crash）", async () => {

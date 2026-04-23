@@ -20,14 +20,6 @@ export interface InkosModel {
   readonly maxOutput: number;
   /** 上下文窗口总 tokens */
   readonly contextWindowTokens: number;
-  /** 能力标签 */
-  readonly abilities?: {
-    readonly reasoning?: boolean;
-    readonly vision?: boolean;
-    readonly functionCall?: boolean;
-    readonly search?: boolean;
-    readonly structuredOutput?: boolean;
-  };
   /** 默认 true。false 表示 lobe 标记此模型不可用 */
   readonly enabled?: boolean;
   /** CodingPlan 专用：API 调用时用这个代替 id 作为 model 字段 */

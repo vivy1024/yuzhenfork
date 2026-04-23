@@ -16,7 +16,6 @@ export const ANTHROPIC: InkosEndpoint = {
       displayName: "Claude Opus 4.6",
       maxOutput: 128_000,
       contextWindowTokens: 1_000_000,
-      abilities: { reasoning: true, vision: true, functionCall: true, search: true, structuredOutput: true },
       enabled: true,
       releasedAt: "2026-02-05",
     },
@@ -25,7 +24,6 @@ export const ANTHROPIC: InkosEndpoint = {
       displayName: "Claude Sonnet 4.6",
       maxOutput: 64_000,
       contextWindowTokens: 1_000_000,
-      abilities: { reasoning: true, vision: true, functionCall: true, search: true, structuredOutput: true },
       enabled: true,
       releasedAt: "2026-02-17",
     },
@@ -34,7 +32,6 @@ export const ANTHROPIC: InkosEndpoint = {
       displayName: "Claude Opus 4.5",
       maxOutput: 64_000,
       contextWindowTokens: 200_000,
-      abilities: { reasoning: true, vision: true, functionCall: true, search: true, structuredOutput: true },
       releasedAt: "2025-11-24",
     },
     {
@@ -42,7 +39,6 @@ export const ANTHROPIC: InkosEndpoint = {
       displayName: "Claude Sonnet 4.5",
       maxOutput: 64_000,
       contextWindowTokens: 200_000,
-      abilities: { reasoning: true, vision: true, functionCall: true, search: true, structuredOutput: true },
       releasedAt: "2025-09-29",
     },
     {
@@ -50,7 +46,6 @@ export const ANTHROPIC: InkosEndpoint = {
       displayName: "Claude Haiku 4.5",
       maxOutput: 64_000,
       contextWindowTokens: 200_000,
-      abilities: { reasoning: true, vision: true, functionCall: true, search: true, structuredOutput: true },
       enabled: true,
       releasedAt: "2025-10-16",
     },
@@ -59,7 +54,6 @@ export const ANTHROPIC: InkosEndpoint = {
       displayName: "Claude Opus 4.1",
       maxOutput: 32_000,
       contextWindowTokens: 200_000,
-      abilities: { reasoning: true, vision: true, functionCall: true, search: true },
       releasedAt: "2025-08-05",
     },
     {
@@ -67,7 +61,6 @@ export const ANTHROPIC: InkosEndpoint = {
       displayName: "Claude Opus 4",
       maxOutput: 32_000,
       contextWindowTokens: 200_000,
-      abilities: { reasoning: true, vision: true, functionCall: true, search: true },
       releasedAt: "2025-05-23",
     },
     {
@@ -75,7 +68,6 @@ export const ANTHROPIC: InkosEndpoint = {
       displayName: "Claude Sonnet 4",
       maxOutput: 64_000,
       contextWindowTokens: 200_000,
-      abilities: { reasoning: true, vision: true, functionCall: true, search: true },
       releasedAt: "2025-05-23",
     },
     {
@@ -83,7 +75,6 @@ export const ANTHROPIC: InkosEndpoint = {
       displayName: "Claude 3 Haiku",
       maxOutput: 4096,
       contextWindowTokens: 200_000,
-      abilities: { vision: true, functionCall: true },
       releasedAt: "2024-03-07",
     },
   ],

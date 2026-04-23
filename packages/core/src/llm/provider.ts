@@ -172,8 +172,12 @@ export function createLLMClient(config: LLMConfig): LLMClient {
     api: piApi,
     provider: piProvider,
     baseUrl,
-    reasoning: modelCard?.abilities?.reasoning ?? (config.thinkingBudget ?? 0) > 0,
-    input: modelCard?.abilities?.vision ? ["text", "image"] : ["text"],
+    // 注意：piModel.reasoning 是"激活 reasoning 模式"标志（会让 pi-ai 把 system 改成 developer role 等），
+    // 不是"模型能力"标签。只有用户显式配了 thinkingBudget > 0 才启用 reasoning mode。
+    // 千万不要从 lobe abilities.reasoning 自动推导，否则 Moonshot 这类不支持 developer role 的服务
+    // 会把 content 吃掉，只返回 reasoning_content（见 R4 bug 1 诊断）。
+    reasoning: (config.thinkingBudget ?? 0) > 0,
+    input: ["text"] as ("text" | "image")[],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: modelCard?.contextWindowTokens ?? 128_000,
     maxTokens: modelCard?.maxOutput ?? 8192,
@@ -322,6 +326,27 @@ function wrapLLMError(error: unknown, context?: { readonly baseUrl?: string; rea
       `  2. 网络不通或被防火墙拦截\n` +
       `  3. API 服务暂时不可用\n` +
       `  建议：检查 INKOS_LLM_BASE_URL 是否包含完整路径（如 /v1）`,
+    );
+  }
+  // R4 Bug 2: 5xx "status code (no body)" — 尝试从 OpenAI SDK APIError 里抽 body 给用户看具体原因
+  // （如 PPIO 的 {"code":500,"reason":"MODEL_NOT_AVAILABLE","message":"model not available"}）
+  if (msg.includes("status code") && msg.includes("no body")) {
+    let detail = "";
+    if (error && typeof error === "object") {
+      const err = error as { error?: unknown; body?: unknown; message?: string };
+      const bodyLike = err.error ?? err.body;
+      if (bodyLike && typeof bodyLike === "object") {
+        const b = bodyLike as { reason?: string; message?: string; code?: number | string };
+        if (b.reason) detail = `${b.reason}${b.message ? `: ${b.message}` : ""}`;
+        else if (b.message) detail = b.message;
+      }
+    }
+    return new Error(
+      `API 返回 5xx（上游服务异常）。${detail ? `上游详情：${detail}。` : ""}\n` +
+      `可能原因：\n` +
+      `  1. 模型在 /models 列表但 inference 未上架（如 PPIO 返回 MODEL_NOT_AVAILABLE）\n` +
+      `  2. 服务端临时故障，稍后重试\n` +
+      `  3. 当前 apikey 无权限调用该模型${ctxLine}`,
     );
   }
   return error instanceof Error ? error : new Error(msg);

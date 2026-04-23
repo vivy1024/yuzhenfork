@@ -1100,8 +1100,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       name: m.name,
       ...(m.maxOutput !== undefined ? { maxOutput: m.maxOutput } : {}),
       ...(m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
-      ...(m.reasoning ? { reasoning: true } : {}),
-      ...(m.abilities ? { abilities: m.abilities } : {}),
     }));
     modelListCache.set(cacheKey, { models, at: Date.now() });
     return c.json({ models });

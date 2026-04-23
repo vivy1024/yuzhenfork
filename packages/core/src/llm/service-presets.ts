@@ -130,40 +130,28 @@ export const SERVICE_TO_PI_PROVIDER: Record<string, string> = Object.fromEntries
 export interface ModelInfo {
   readonly id: string;
   readonly name: string;
-  readonly reasoning: boolean;
   readonly contextWindow: number;
   /** 模型输出上限（来自 providers bank 或 live /models 补充） */
   readonly maxOutput?: number;
-  /** 能力标签（来自 providers bank 的 InkosModel.abilities） */
-  readonly abilities?: {
-    readonly reasoning?: boolean;
-    readonly vision?: boolean;
-    readonly functionCall?: boolean;
-    readonly search?: boolean;
-    readonly structuredOutput?: boolean;
-  };
 }
 
-function toModelInfo(inkosModel: { id: string; displayName?: string; maxOutput: number; contextWindowTokens: number; abilities?: Record<string, boolean> }): ModelInfo {
+function toModelInfo(inkosModel: { id: string; displayName?: string; maxOutput: number; contextWindowTokens: number }): ModelInfo {
   return {
     id: inkosModel.id,
     name: inkosModel.displayName ?? inkosModel.id,
-    reasoning: inkosModel.abilities?.reasoning === true,
     contextWindow: inkosModel.contextWindowTokens,
     maxOutput: inkosModel.maxOutput,
-    ...(inkosModel.abilities ? { abilities: inkosModel.abilities } : {}),
   };
 }
 
 /**
- * listModelsForService（B8 升级版）：
+ * listModelsForService（R4 精修）：
  * - 先试 live /models probe（如果 baseUrl + apiKey 具备）
- *   - 每个 live id 过 lookupModel 补元数据
  * - probe 失败或无 apiKey：fallback 到 provider.models（inkos bank）
- * - INKOS_LLM_MODEL env 补丁：保证这个 id 在列表里（用户手填的冷门模型）
+ * - 不再做 INKOS_LLM_MODEL env 补丁（会污染跨 service 菜单；bank 已足够全）
  *
  * custom / newapi / higress 等 baseUrl 空的 gateway provider：
- *   必须传 liveBaseUrl 才能做 probe；否则只依赖 env + bank。
+ *   必须传 liveBaseUrl 才能做 probe；否则只依赖 bank。
  */
 export async function listModelsForService(
   service: string,
@@ -174,7 +162,6 @@ export async function listModelsForService(
   const preset = SERVICE_PRESETS[service];
   if (!provider && !preset) return [];
 
-  const envPatch = process.env.INKOS_LLM_MODEL;
   const byId = new Map<string, ModelInfo>();
 
   // 1) 先试 live /models probe
@@ -195,7 +182,7 @@ export async function listModelsForService(
             if (card) {
               byId.set(m.id, toModelInfo(card));
             } else {
-              byId.set(m.id, { id: m.id, name: m.id, reasoning: false, contextWindow: 0 });
+              byId.set(m.id, { id: m.id, name: m.id, contextWindow: 0 });
             }
           }
         }
@@ -205,25 +192,20 @@ export async function listModelsForService(
     }
   }
 
-  // 2) provider bank fallback / 补充（保证 probe 之外的 model 也在列表里）
+  // 2) provider bank fallback / 补充
   if (provider) {
     for (const m of provider.models) {
       if (m.enabled === false) continue;
-      if (byId.has(m.id)) continue;  // live 已经提供了
+      if (byId.has(m.id)) continue;
       byId.set(m.id, toModelInfo(m));
     }
   }
 
-  // 3) 旧 knownModels fallback（兼容 A 组过渡期的 preset.knownModels）
+  // 3) 旧 knownModels fallback
   if (byId.size === 0 && preset?.knownModels) {
     for (const id of preset.knownModels) {
-      byId.set(id, { id, name: id, reasoning: false, contextWindow: 0 });
+      byId.set(id, { id, name: id, contextWindow: 0 });
     }
-  }
-
-  // 4) env 补丁
-  if (envPatch && !byId.has(envPatch)) {
-    byId.set(envPatch, { id: envPatch, name: envPatch, reasoning: false, contextWindow: 0 });
   }
 
   return Array.from(byId.values());
