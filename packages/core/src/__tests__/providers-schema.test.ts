@@ -3,7 +3,7 @@ import { getAllEndpoints, getEndpoint } from "../llm/providers/index.js";
 
 describe("providers structural integrity", () => {
   it("每个 provider 必填字段都存在", () => {
-    const gatewayProviders = new Set(["custom", "higress", "newapi"]);
+    const gatewayProviders = new Set(["custom", "newapi"]);
     for (const p of getAllEndpoints()) {
       expect(p.id).toBeTruthy();
       expect(p.label).toBeTruthy();
@@ -79,15 +79,12 @@ describe("providers structural integrity", () => {
     }
   });
 
-  it("B3：中国原厂批次 3 全部收录（7 个）", () => {
+  it("B3：中国原厂批次 3 全部收录（6 个，R5 已删 higress）", () => {
     const ids = getAllEndpoints().map((p) => p.id);
-    for (const id of ["modelscope", "giteeai", "qiniu", "higress", "infiniai", "zeroone", "ai360"]) {
+    for (const id of ["modelscope", "giteeai", "qiniu", "infiniai", "zeroone", "ai360"]) {
       expect(ids).toContain(id);
     }
-  });
-
-  it("B3：higress baseUrl 为空（gateway 占位）", () => {
-    expect(getEndpoint("higress")?.baseUrl).toBe("");
+    expect(ids).not.toContain("higress");
   });
 
   it("B4：海外/本地/自定义/聚合/GH 全部收录（7 个）", () => {
@@ -97,15 +94,14 @@ describe("providers structural integrity", () => {
     }
   });
 
-  it("B4：custom / newapi / higress baseUrl 为空", () => {
+  it("B4：custom / newapi baseUrl 为空（gateway 占位）", () => {
     expect(getEndpoint("custom")?.baseUrl).toBe("");
     expect(getEndpoint("newapi")?.baseUrl).toBe("");
-    expect(getEndpoint("higress")?.baseUrl).toBe("");
   });
 
-  it("B4：总 provider 数 = 35（不含 CodingPlan，R5 删除重复的 qwen 后）", () => {
+  it("B4：总 provider 数 = 34（不含 CodingPlan，R5 删 qwen / higress 后）", () => {
     const nonCoding = getAllEndpoints().filter((p) => !p.id.endsWith("CodingPlan"));
-    expect(nonCoding.length).toBe(35);
+    expect(nonCoding.length).toBe(34);
   });
 
   it("B6：CodingPlan 7 个 provider 全部收录", () => {
@@ -119,8 +115,8 @@ describe("providers structural integrity", () => {
     }
   });
 
-  it("B6：总 provider 数 = 42 (35 base + 7 CodingPlan)", () => {
-    expect(getAllEndpoints().length).toBe(42);
+  it("B6：总 provider 数 = 41 (34 base + 7 CodingPlan)", () => {
+    expect(getAllEndpoints().length).toBe(41);
   });
 
   it("B6：CodingPlan provider 都走 anthropic-messages", () => {

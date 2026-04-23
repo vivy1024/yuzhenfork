@@ -26,7 +26,6 @@ import { INTERNLM } from "./endpoints/internlm.js";
 import { MODELSCOPE } from "./endpoints/modelscope.js";
 import { GITEEAI } from "./endpoints/giteeai.js";
 import { QINIU } from "./endpoints/qiniu.js";
-import { HIGRESS } from "./endpoints/higress.js";
 import { INFINIAI } from "./endpoints/infiniai.js";
 import { ZEROONE } from "./endpoints/zeroone.js";
 import { AI360 } from "./endpoints/ai360.js";
@@ -57,7 +56,7 @@ const ALL_PROVIDERS: readonly InkosEndpoint[] = [
   ANTHROPIC, OPENAI, GOOGLE, DEEPSEEK, MINIMAX,
   MOONSHOT, ZHIPU, SILICONCLOUD, PPIO, BAILIAN, VOLCENGINE, HUNYUAN, BAICHUAN, STEPFUN, WENXIN,
   SPARK, SENSENOVA, TENCENTCLOUD, XIAOMI_MIMO, LONGCAT, INTERNLM,
-  MODELSCOPE, GITEEAI, QINIU, HIGRESS, INFINIAI, ZEROONE, AI360,
+  MODELSCOPE, GITEEAI, QINIU, INFINIAI, ZEROONE, AI360,
   OLLAMA, OPENROUTER, CUSTOM, MISTRAL, XAI, NEWAPI, GITHUB_COPILOT,
   // B6 CodingPlan（7 个）
   KIMI_CODING_PLAN, MINIMAX_CODING_PLAN, BAILIAN_CODING_PLAN, GLM_CODING_PLAN, VOLCENGINE_CODING_PLAN, OPENCODE_CODING_PLAN, ASTRON_CODING_PLAN,
