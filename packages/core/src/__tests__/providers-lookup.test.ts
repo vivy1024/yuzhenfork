@@ -48,6 +48,27 @@ describe("lookupModel", () => {
   });
 });
 
+describe("Layer 2 优先级（B5：PPIO vs OpenRouter 同 id）", () => {
+  it("deepseek/deepseek-r1 在 PPIO 和 OpenRouter 都有，按 PROVIDER_PRIORITY 取 ppio（第二梯队）而不是 openrouter（第三梯队）", () => {
+    const hit = lookupModel("custom", "deepseek/deepseek-r1");
+    expect(hit).toBeDefined();
+    // PPIO 的 contextWindow 是 64000，OpenRouter 的是 163840
+    expect(hit?.contextWindowTokens).toBe(64000);
+  });
+
+  it("OpenRouter 专属带后缀 id（:free）命中 openrouter provider", () => {
+    const hit = lookupModel("custom", "google/gemma-2-9b-it:free");
+    expect(hit).toBeDefined();
+    expect(hit?.maxOutput).toBe(4096);
+  });
+
+  it("PPIO 专属带斜线 id 命中 ppio provider", () => {
+    const hit = lookupModel("ppio", "deepseek/deepseek-v3");
+    expect(hit?.maxOutput).toBe(4096);
+    expect(hit?.contextWindowTokens).toBe(64000);
+  });
+});
+
 describe("listEnabledModels", () => {
   it("返回 provider 里 enabled !== false 的 models", () => {
     const models = listEnabledModels("anthropic");
