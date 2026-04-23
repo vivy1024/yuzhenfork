@@ -39,6 +39,13 @@ import { MISTRAL } from "./mistral.js";
 import { XAI } from "./xai.js";
 import { NEWAPI } from "./newapi.js";
 import { GITHUB_COPILOT } from "./githubCopilot.js";
+// B6 CodingPlan
+import { KIMI_CODING_PLAN } from "./kimiCodingPlan.js";
+import { MINIMAX_CODING_PLAN } from "./minimaxCodingPlan.js";
+import { BAILIAN_CODING_PLAN } from "./bailianCodingPlan.js";
+import { GLM_CODING_PLAN } from "./glmCodingPlan.js";
+import { VOLCENGINE_CODING_PLAN } from "./volcengineCodingPlan.js";
+import { OPENCODE_CODING_PLAN } from "./opencodeCodingPlan.js";
 
 export type { InkosProvider, InkosModel, ApiProtocol } from "./types.js";
 
@@ -52,6 +59,8 @@ const ALL_PROVIDERS: readonly InkosProvider[] = [
   SPARK, SENSENOVA, TENCENTCLOUD, XIAOMI_MIMO, LONGCAT, INTERNLM,
   MODELSCOPE, GITEEAI, QINIU, HIGRESS, INFINIAI, ZEROONE, AI360,
   OLLAMA, OPENROUTER, CUSTOM, MISTRAL, XAI, NEWAPI, GITHUB_COPILOT,
+  // B6 CodingPlan（6 个）
+  KIMI_CODING_PLAN, MINIMAX_CODING_PLAN, BAILIAN_CODING_PLAN, GLM_CODING_PLAN, VOLCENGINE_CODING_PLAN, OPENCODE_CODING_PLAN,
 ];
 
 const PROVIDERS_BY_ID: Map<string, InkosProvider> = new Map(

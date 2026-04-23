@@ -100,7 +100,31 @@ describe("providers structural integrity", () => {
     expect(getProvider("higress")?.baseUrl).toBe("");
   });
 
-  it("B4：总 provider 数 = 36", () => {
-    expect(getAllProviders().length).toBe(36);
+  it("B4：总 provider 数 = 36（不含 CodingPlan）", () => {
+    const nonCoding = getAllProviders().filter((p) => !p.id.endsWith("CodingPlan"));
+    expect(nonCoding.length).toBe(36);
+  });
+
+  it("B6：CodingPlan 6 个 provider 全部收录", () => {
+    const ids = getAllProviders().map((p) => p.id);
+    for (const id of [
+      "kimiCodingPlan", "minimaxCodingPlan", "bailianCodingPlan",
+      "glmCodingPlan", "volcengineCodingPlan", "opencodeCodingPlan",
+    ]) {
+      expect(ids).toContain(id);
+    }
+  });
+
+  it("B6：总 provider 数 = 42 (36 base + 6 CodingPlan)", () => {
+    expect(getAllProviders().length).toBe(42);
+  });
+
+  it("B6：CodingPlan provider 都走 anthropic-messages", () => {
+    for (const id of [
+      "kimiCodingPlan", "minimaxCodingPlan", "bailianCodingPlan",
+      "glmCodingPlan", "volcengineCodingPlan", "opencodeCodingPlan",
+    ]) {
+      expect(getProvider(id)?.api).toBe("anthropic-messages");
+    }
   });
 });
