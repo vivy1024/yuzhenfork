@@ -1,8 +1,11 @@
 /**
  * 小米 MiMo
  *
- * - MiMo 是小米自研模型系列，目前在 PPIO / 百炼等平台开放，小米官方暂无独立 API。
- * - 模型卡 (HF)：https://huggingface.co/XiaomiMiMo
+ * - 官网：https://api-ai.xiaomi.com/
+ * - API 端点：https://api-ai.xiaomi.com/v1 (OpenAI 兼容)
+ * - 模型卡 (HuggingFace)：https://huggingface.co/XiaomiMiMo
+ *
+ * MiMo 是小米自研模型系列，除小米官方 /v1 外，也在 PPIO / 百炼等第三方平台开放。
  */
 import type { InkosEndpoint } from "../types.js";
 

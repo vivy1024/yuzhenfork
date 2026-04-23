@@ -39,14 +39,17 @@ describe("providers structural integrity", () => {
     }
   });
 
-  it("A 组至少有 6 个核心 provider", () => {
+  it("A 组至少有 5 个核心 provider", () => {
     const ids = getAllEndpoints().map((p) => p.id);
     expect(ids).toContain("anthropic");
     expect(ids).toContain("openai");
     expect(ids).toContain("google");
     expect(ids).toContain("deepseek");
-    expect(ids).toContain("qwen");
     expect(ids).toContain("minimax");
+    // 阿里通义千问：仅保留 bailian（Anthropic 协议，工具调用更稳），
+    // 已删除重复的 qwen endpoint（OpenAI 协议同家）
+    expect(ids).toContain("bailian");
+    expect(ids).not.toContain("qwen");
   });
 
   it("B1：中国原厂批次 1 全部收录（10 个）", () => {
@@ -100,9 +103,9 @@ describe("providers structural integrity", () => {
     expect(getEndpoint("higress")?.baseUrl).toBe("");
   });
 
-  it("B4：总 provider 数 = 36（不含 CodingPlan）", () => {
+  it("B4：总 provider 数 = 35（不含 CodingPlan，R5 删除重复的 qwen 后）", () => {
     const nonCoding = getAllEndpoints().filter((p) => !p.id.endsWith("CodingPlan"));
-    expect(nonCoding.length).toBe(36);
+    expect(nonCoding.length).toBe(35);
   });
 
   it("B6：CodingPlan 7 个 provider 全部收录", () => {
@@ -116,8 +119,8 @@ describe("providers structural integrity", () => {
     }
   });
 
-  it("B6：总 provider 数 = 43 (36 base + 7 CodingPlan)", () => {
-    expect(getAllEndpoints().length).toBe(43);
+  it("B6：总 provider 数 = 42 (35 base + 7 CodingPlan)", () => {
+    expect(getAllEndpoints().length).toBe(42);
   });
 
   it("B6：CodingPlan provider 都走 anthropic-messages", () => {
