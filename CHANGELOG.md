@@ -1,5 +1,52 @@
 # Changelog
 
+## v2.0.0
+
+### Release Focus
+
+**LLM Providers 架构重写**：把 provider 元数据和 model 清单从硬编码的 `service-presets.ts` + `maxTokens=8192` 默认值，切换到 inkos 自维护的 `packages/core/src/llm/providers/<name>.ts` 单一数据源。冷启动数据取自 LobeHub model-bank，后续由 inkos 手动维护。
+
+### Provider 覆盖（42 个）
+
+- **核心 6**：anthropic, openai, google, deepseek, qwen, minimax
+- **中国原厂 23**：moonshot, zhipu, siliconcloud, ppio, bailian, volcengine, hunyuan, baichuan, stepfun, wenxin, spark, sensenova, tencentcloud, xiaomimimo, longcat, internlm, modelscope, giteeai, qiniu, higress, infiniai, zeroone, ai360
+- **海外/本地/自定义/聚合/GH 7**：ollama, openrouter, custom, mistral, xai, newapi, githubCopilot
+- **CodingPlan 6**：kimiCodingPlan, minimaxCodingPlan, bailianCodingPlan, glmCodingPlan, volcengineCodingPlan, opencodeCodingPlan
+
+### BREAKING CHANGES
+
+- **删除 `LLMConfig.maxTokens` / `LLMConfig.maxTokensCap` 字段**：各模型的真实 maxOutput 来自 providers bank；老配置文件里的这两个字段会被 zod strip 静默丢弃（不报错），用户无需手动清理。
+- **删除 `INKOS_LLM_MAX_TOKENS` 环境变量**：被 providers bank 接管；老 env 文件的此行会被忽略。
+- **删除 `LLMClient.defaults.maxTokensCap` 字段**：per-call 硬上限机制不再需要（providers 直接给出 maxOutput）。per-call `chatCompletion({ maxTokens })` 保留，不被裁剪。
+- **`inkos config set llm.maxTokens <n>` 命令失效**：key 已从允许列表移除。
+
+### New Features
+
+- **`InkosProvider` / `InkosModel` 类型** (`packages/core/src/llm/providers/types.ts`)：统一 provider + model 元数据，含 `maxOutput`、`contextWindowTokens`、`abilities` (reasoning/vision/functionCall/search/structuredOutput)、`deploymentName` (CodingPlan)。
+- **两层反查 `lookupModel`** (`packages/core/src/llm/providers/lookup.ts`)：Layer 1 已知 provider 精确查；Layer 2 全局扫按 `PROVIDER_PRIORITY` 排序，同 id 多条匹配保证结果确定（PPIO > OpenRouter）。
+- **两步验证 `verifyService`** (`packages/core/src/llm/providers/verify.ts`)：先 probe `/models` endpoint，再用 `provider.checkModel` 做 chat hello；输出 `{ probe, chat }` 两字段。
+- **`listModelsForService` 升级**：live `/models` probe + bank 交叉补元数据 + `INKOS_LLM_MODEL` env 补丁。
+- **CLI `inkos config list-models <service>`**：列出可用模型含 maxOutput / contextWindow / abilities 徽章 (R/V/F/S)。
+- **CodingPlan `deploymentName` 透传**：API 调用时 `piModel.id` 用 `modelCard.deploymentName` 代替 `config.model`（如 kimi-k2.5 → k2p5）。
+- **`api` 字段按 lobe 派生**：`sdkType === 'anthropic'` → `anthropic-messages`；`supportResponsesApi === true` → `openai-responses`；否则 `openai-completions`。**例外两条**：minimax / bailian 主条目保留 inkos 原 Anthropic 兼容端点（零破坏老配置）。
+- **Studio HTTP endpoint 升级**：`POST /api/v1/services/:service/test` 响应增加 `{ probe, chat }` 字段（保留老字段兼容）；`GET /api/v1/services/:service/models` 返回带 `maxOutput`、`contextWindow`、`abilities` 的 models。
+
+### Upgrade Path
+
+升级到 2.0.0 是**无痛的**：
+- 老配置文件里的 `maxTokens` / `maxTokensCap` 字段会被 zod 静默丢弃，不需要手动清理
+- 老 `INKOS_LLM_MAX_TOKENS` env 变量被忽略
+- API Key / baseUrl / model 等其他字段完全兼容
+- Studio / CLI / TUI 行为向下兼容，只是 maxOutput 从"用户配的数"变成"模型真实能力"（通常从 8192 升级到 64000~131072）
+
+### Internal
+
+- 统一 `temperatureRange` 为 `readonly [number, number]` 对齐只读类型保证
+- 精简 5 个 `maxTokensCap regression` 测试为 1 个 "per-call 不被裁剪" 回归测试
+- 已知跟进：Studio ServiceDetailPage 多态 UI / onChange 清 status / model picker 能力徽章 / CLI `inkos doctor` 接入 `verifyService` / TUI setup placeholder 动态化 —— 这些 UI/UX 增强归入 2.0.x 或 2.1.0 后续迭代
+
+---
+
 ## v1.3.6
 
 ### Release Focus
