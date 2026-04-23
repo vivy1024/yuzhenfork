@@ -180,7 +180,7 @@ describe("chatCompletion via pi-ai", () => {
     );
 
     expect(error.message).toContain("API 返回 400");
-    expect(error.message).toContain("检查提供方文档");
+    expect(error.message).toContain("temperature");
   });
 
   it("wraps 401 errors with an unauthorized message", async () => {
@@ -443,11 +443,11 @@ describe("chatCompletion fixed-temperature clamp (thinking models)", () => {
     warn.mockRestore();
   });
 
-  it("also clamps any model name containing 'thinking'", async () => {
+  it("clamps kimi-k2-thinking (bank-marked temperature:1)", async () => {
     const client = makeClient(0.5);
     vi.spyOn(console, "warn").mockImplementation(() => {});
 
-    await chatCompletion(client, "kimi-thinking-preview", [
+    await chatCompletion(client, "kimi-k2-thinking", [
       { role: "user", content: "hi" },
     ]);
 

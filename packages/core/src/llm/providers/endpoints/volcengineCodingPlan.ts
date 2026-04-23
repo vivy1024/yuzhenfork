@@ -36,6 +36,6 @@ export const VOLCENGINE_CODING_PLAN: InkosEndpoint = {
     { id: "minimax-m2.5", maxOutput: 131072, contextWindowTokens: 204800, enabled: true },
     { id: "glm-4.7", maxOutput: 131072, contextWindowTokens: 200000, enabled: true },
     { id: "deepseek-v3.2", maxOutput: 65536, contextWindowTokens: 262144, enabled: true },
-    { id: "kimi-k2.5", maxOutput: 32768, contextWindowTokens: 262144, enabled: true },
+    { id: "kimi-k2.5", maxOutput: 32768, contextWindowTokens: 262144, enabled: true, temperature: 1 },
   ],
 };

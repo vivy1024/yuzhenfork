@@ -23,7 +23,7 @@ export const INFINIAI: InkosEndpoint = {
     { id: "glm-4.6v", maxOutput: 4096, contextWindowTokens: 131072 },
     { id: "glm-5", maxOutput: 4096, contextWindowTokens: 198000, enabled: true, releasedAt: "2026-02-13" },
     { id: "minimax-m2.5", maxOutput: 4096, contextWindowTokens: 204800, releasedAt: "2026-02-13" },
-    { id: "kimi-k2-thinking", maxOutput: 32768, contextWindowTokens: 262144, releasedAt: "2025-11-07" },
+    { id: "kimi-k2-thinking", maxOutput: 32768, contextWindowTokens: 262144, releasedAt: "2025-11-07", temperature: 1 },
     { id: "deepseek-ocr", maxOutput: 8192, contextWindowTokens: 8192, releasedAt: "2025-10-20" },
     { id: "minimax-m2.1", maxOutput: 200000, contextWindowTokens: 200000 },
     { id: "minimax-m2", maxOutput: 200000, contextWindowTokens: 200000 },

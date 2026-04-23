@@ -23,7 +23,7 @@ export const BAILIAN_CODING_PLAN: InkosEndpoint = {
     { id: "qwen3-coder-next", maxOutput: 65536, contextWindowTokens: 262144, releasedAt: "2026-02-15" },
     { id: "glm-5", maxOutput: 131072, contextWindowTokens: 200000, enabled: true, releasedAt: "2026-02-12" },
     { id: "glm-4.7", maxOutput: 131072, contextWindowTokens: 200000, enabled: true, releasedAt: "2025-12-01" },
-    { id: "kimi-k2.5", maxOutput: 32768, contextWindowTokens: 262144, enabled: true, releasedAt: "2026-01-27" },
+    { id: "kimi-k2.5", maxOutput: 32768, contextWindowTokens: 262144, enabled: true, releasedAt: "2026-01-27", temperature: 1 },
     { id: "MiniMax-M2.5", maxOutput: 131072, contextWindowTokens: 204800, enabled: true, releasedAt: "2026-02-12" },
   ],
 };

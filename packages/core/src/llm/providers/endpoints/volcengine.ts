@@ -26,7 +26,7 @@ export const VOLCENGINE: InkosEndpoint = {
     { id: "glm-4-7", maxOutput: 16000, contextWindowTokens: 200000 },
     { id: "deepseek-v3.2", maxOutput: 32768, contextWindowTokens: 131072 },
     { id: "deepseek-v3.1", maxOutput: 32768, contextWindowTokens: 131072 },
-    { id: "kimi-k2-thinking", maxOutput: 32768, contextWindowTokens: 262144 },
+    { id: "kimi-k2-thinking", maxOutput: 32768, contextWindowTokens: 262144, temperature: 1 },
     { id: "kimi-k2", maxOutput: 32768, contextWindowTokens: 262144 },
     { id: "doubao-seed-1.6-vision", maxOutput: 32000, contextWindowTokens: 256000 },
     { id: "doubao-seed-1.6-thinking", maxOutput: 32000, contextWindowTokens: 256000 },

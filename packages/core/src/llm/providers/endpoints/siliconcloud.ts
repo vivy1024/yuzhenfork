@@ -22,7 +22,7 @@ export const SILICONCLOUD: InkosEndpoint = {
   writingTemperature: 1,
   models: [
     // --- 2026-04 新上 ---
-    { id: "Pro/moonshotai/Kimi-K2.6", maxOutput: 4096, contextWindowTokens: 262144, enabled: true, releasedAt: "2026-04-21" },
+    { id: "Pro/moonshotai/Kimi-K2.6", maxOutput: 4096, contextWindowTokens: 262144, enabled: true, releasedAt: "2026-04-21", temperature: 1 },
     { id: "Pro/zai-org/GLM-5", maxOutput: 4096, contextWindowTokens: 198000 },
     { id: "Pro/zai-org/GLM-4.7", maxOutput: 4096, contextWindowTokens: 200000 },
     { id: "Qwen/Qwen3.6-35B-A3B", maxOutput: 4096, contextWindowTokens: 262144, enabled: true, releasedAt: "2026-04-17" },
@@ -40,7 +40,7 @@ export const SILICONCLOUD: InkosEndpoint = {
     { id: "zai-org/GLM-4.6V", maxOutput: 4096, contextWindowTokens: 131072, releasedAt: "2025-12-08" },
     { id: "deepseek-ai/DeepSeek-V3.2", maxOutput: 4096, contextWindowTokens: 163840, enabled: true, releasedAt: "2025-12-01" },
     { id: "Pro/deepseek-ai/DeepSeek-V3.2", maxOutput: 4096, contextWindowTokens: 163840, releasedAt: "2025-12-01" },
-    { id: "Pro/moonshotai/Kimi-K2.5", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2026-01-27" },
+    { id: "Pro/moonshotai/Kimi-K2.5", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2026-01-27", temperature: 1 },
     { id: "qwen/qwen3.5-397b-a17b", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2026-03-03" },
     { id: "qwen/qwen3.5-122b-a10b", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2026-03-03" },
     { id: "qwen/qwen3.5-35b-a3b", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2026-03-03" },
@@ -48,8 +48,8 @@ export const SILICONCLOUD: InkosEndpoint = {
     { id: "qwen/qwen3.5-9b", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2026-03-03" },
     { id: "qwen/qwen3.5-4b", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2026-03-03" },
     { id: "Pro/zai-org/glm-4.7", maxOutput: 4096, contextWindowTokens: 200000, releasedAt: "2025-12-22" },
-    { id: "moonshotai/Kimi-K2-Thinking", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2025-11-07" },
-    { id: "Pro/moonshotai/Kimi-K2-Thinking", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2025-11-07" },
+    { id: "moonshotai/Kimi-K2-Thinking", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2025-11-07", temperature: 1 },
+    { id: "Pro/moonshotai/Kimi-K2-Thinking", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2025-11-07", temperature: 1 },
     { id: "MiniMaxAI/MiniMax-M2", maxOutput: 4096, contextWindowTokens: 131072, releasedAt: "2025-10-28" },
     { id: "Qwen/Qwen3-VL-32B-Instruct", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2025-10-21" },
     { id: "Qwen/Qwen3-VL-32B-Thinking", maxOutput: 4096, contextWindowTokens: 262144, releasedAt: "2025-10-21" },

@@ -33,9 +33,9 @@ export const PPIO: InkosEndpoint = {
     { id: "deepseek/deepseek-r1-turbo", maxOutput: 65536, contextWindowTokens: 131072 },
     { id: "deepseek/deepseek-prover-v2-671b", maxOutput: 32768, contextWindowTokens: 131072 },
     // --- Moonshot Kimi 系列 ---
-    { id: "moonshotai/kimi-k2.6", maxOutput: 32768, contextWindowTokens: 262144, enabled: true, releasedAt: "2026-04-21" },
-    { id: "moonshotai/kimi-k2.5", maxOutput: 32768, contextWindowTokens: 262144, releasedAt: "2026-01-27" },
-    { id: "moonshotai/kimi-k2-thinking", maxOutput: 65536, contextWindowTokens: 262144 },
+    { id: "moonshotai/kimi-k2.6", maxOutput: 32768, contextWindowTokens: 262144, enabled: true, releasedAt: "2026-04-21", temperature: 1 },
+    { id: "moonshotai/kimi-k2.5", maxOutput: 32768, contextWindowTokens: 262144, releasedAt: "2026-01-27", temperature: 1 },
+    { id: "moonshotai/kimi-k2-thinking", maxOutput: 65536, contextWindowTokens: 262144, temperature: 1 },
     { id: "moonshotai/kimi-k2-0905", maxOutput: 8192, contextWindowTokens: 262144 },
     { id: "moonshotai/kimi-k2-instruct", maxOutput: 8192, contextWindowTokens: 131072 },
     // --- MiniMax ---

@@ -252,30 +252,34 @@ function stripReservedKeys(extra: Record<string, unknown>): Record<string, unkno
 
 // === Fixed-Temperature Model Clamp ===
 //
-// 部分 thinking 模型（如 Moonshot kimi-k2.5、kimi-thinking-preview）强制要求
-// temperature === 1，其他值会被 API 直接 400 拒绝。为让这类模型能和 inkos
-// 已有的 per-call 温度调参（0.1 validator → 0.8 architect brainstorm）共存，
-// 在 provider 层统一夹制：命中名单就把传入的 temperature 强制改成 1，并对
-// 每个模型名打一次 warning 提示用户。
-
-function requiresFixedTemperature(model: string): boolean {
-  const lower = model.toLowerCase();
-  // kimi-k2.5 及其子变体（k2.5-preview 等），以及任何名字里带 "thinking" 的模型
-  return lower.startsWith("kimi-k2.5") || lower.includes("thinking");
-}
+// 部分 thinking 模型（如 Moonshot kimi-k2.5/k2.6、kimi-k2-thinking）的 API
+// 硬要求 temperature === 1，其他值会被直接 400 拒绝（Moonshot 返回
+// `invalid temperature: only 1 is allowed for this model`）。
+//
+// inkos 让 writer/validator/architect 各自带 per-call 温度（0.1~1.5），
+// 所以 provider 层统一夹制：如果 bank 里模型卡标了 temperature 字段，
+// 就把 per-call 温度 clamp 到那个值，并对每个模型名打一次 warning。
+//
+// 这个字段只表达"服务端硬约束"，普通模型不要标，避免误伤 per-call 调参。
 
 const warnedFixedTemperatureModels = new Set<string>();
 
-function clampTemperatureForModel(model: string, requested: number): number {
-  if (!requiresFixedTemperature(model)) return requested;
-  if (requested === 1) return 1;
+function clampTemperatureForModel(
+  service: string | undefined,
+  model: string,
+  requested: number,
+): number {
+  const card = service ? lookupModel(service, model) : undefined;
+  if (card?.temperature === undefined) return requested;
+  const locked = card.temperature;
+  if (requested === locked) return locked;
   if (!warnedFixedTemperatureModels.has(model)) {
     warnedFixedTemperatureModels.add(model);
     console.warn(
-      `[inkos] 模型 "${model}" 是 thinking 模型，强制 temperature=1（原请求值 ${requested}）`,
+      `[inkos] 模型 "${model}" API 要求 temperature=${locked}，已 clamp（原值 ${requested}）`,
     );
   }
-  return 1;
+  return locked;
 }
 
 // 仅测试用：清空 warning 去重集合。
@@ -292,12 +296,23 @@ function wrapLLMError(error: unknown, context?: { readonly baseUrl?: string; rea
     : "";
 
   if (msg.includes("400")) {
+    // 抽上游 error body 的 message / reason / code（和下方 5xx 一致），让真实错因浮到用户面前
+    let detail = "";
+    if (error && typeof error === "object") {
+      const err = error as { error?: unknown; body?: unknown; message?: string };
+      const bodyLike = err.error ?? err.body;
+      if (bodyLike && typeof bodyLike === "object") {
+        const b = bodyLike as { reason?: string; message?: string; code?: number | string; type?: string };
+        if (b.message) detail = b.type ? `${b.type}: ${b.message}` : b.message;
+        else if (b.reason) detail = b.reason;
+      }
+    }
     return new Error(
-      `API 返回 400 (请求参数错误)。可能原因：\n` +
-      `  1. 模型名称不正确（检查 INKOS_LLM_MODEL）\n` +
-      `  2. 提供方不支持某些参数（如 max_tokens、stream）\n` +
-      `  3. 消息格式不兼容（部分提供方不支持 system role）\n` +
-      `  建议：检查提供方文档，确认该接口要求流式开启、流式关闭，还是根本不支持 stream${ctxLine}`,
+      `API 返回 400（请求参数错误）。${detail ? `上游详情：${detail}。\n` : ""}` +
+      `常见原因：\n` +
+      `  1. temperature / max_tokens 超出模型约束（如 Moonshot kimi-k2.X 强制 temperature=1）\n` +
+      `  2. 模型名称不正确或未上架\n` +
+      `  3. 消息格式不兼容（部分服务不支持 system role 或 developer role）${ctxLine}`,
     );
   }
   if (msg.includes("403")) {
@@ -779,6 +794,7 @@ export async function chatCompletion(
   // C1 (v2.0.0)：删除 maxTokensCap 机制。per-call 显式传的 maxTokens 永远不被裁剪。
   const resolved = {
     temperature: clampTemperatureForModel(
+      client.service,
       model,
       options?.temperature ?? client.defaults.temperature,
     ),
@@ -821,6 +837,7 @@ export async function chatWithTools(
   try {
     const resolved = {
       temperature: clampTemperatureForModel(
+        client.service,
         model,
         options?.temperature ?? client.defaults.temperature,
       ),
