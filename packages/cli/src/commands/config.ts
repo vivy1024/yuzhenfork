@@ -24,7 +24,7 @@ configCommand
 
       const KNOWN_KEYS = new Set([
         "llm.provider", "llm.baseUrl", "llm.model", "llm.temperature",
-        "llm.maxTokens", "llm.thinkingBudget", "llm.apiFormat", "llm.stream",
+        "llm.thinkingBudget", "llm.apiFormat", "llm.stream",
         "inputGovernanceMode",
         "daemon.schedule.radarCron", "daemon.schedule.writeCron",
         "daemon.maxConcurrentBooks", "daemon.chaptersPerCycle",
@@ -109,7 +109,6 @@ configCommand
         `INKOS_LLM_MODEL=${opts.model}`,
       ];
       if (opts.temperature) lines.push(`INKOS_LLM_TEMPERATURE=${opts.temperature}`);
-      if (opts.maxTokens) lines.push(`INKOS_LLM_MAX_TOKENS=${opts.maxTokens}`);
       if (opts.thinkingBudget) lines.push(`INKOS_LLM_THINKING_BUDGET=${opts.thinkingBudget}`);
       if (opts.apiFormat) lines.push(`INKOS_LLM_API_FORMAT=${opts.apiFormat}`);
       if (opts.lang) lines.push(`INKOS_DEFAULT_LANGUAGE=${opts.lang}`);
