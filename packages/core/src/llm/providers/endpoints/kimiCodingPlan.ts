@@ -5,7 +5,6 @@ export const KIMI_CODING_PLAN: InkosProvider = {
   label: "Kimi Coding Plan",
   api: "anthropic-messages",
   baseUrl: "https://api.moonshot.cn/anthropic",
-  piProvider: "anthropic",
   checkModel: "kimi-k2.5",
   temperatureRange: [0, 1],
   defaultTemperature: 1,

@@ -5,7 +5,6 @@ export const MINIMAX_CODING_PLAN: InkosProvider = {
   label: "MiniMax Coding Plan",
   api: "anthropic-messages",
   baseUrl: "https://api.minimaxi.com/anthropic",
-  piProvider: "anthropic",
   checkModel: "MiniMax-M2.7",
   temperatureRange: [0, 2],
   defaultTemperature: 0.9,

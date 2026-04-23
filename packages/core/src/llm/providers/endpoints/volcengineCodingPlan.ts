@@ -5,7 +5,6 @@ export const VOLCENGINE_CODING_PLAN: InkosProvider = {
   label: "火山 Coding Plan",
   api: "anthropic-messages",
   baseUrl: "https://ark.cn-beijing.volces.com/api/v3/anthropic",
-  piProvider: "anthropic",
   checkModel: "doubao-seed-code",
   temperatureRange: [0, 1],
   defaultTemperature: 0.7,

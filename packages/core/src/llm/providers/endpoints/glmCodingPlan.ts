@@ -5,7 +5,6 @@ export const GLM_CODING_PLAN: InkosProvider = {
   label: "GLM Coding Plan",
   api: "anthropic-messages",
   baseUrl: "https://api.z.ai/api/anthropic",
-  piProvider: "anthropic",
   checkModel: "glm-5.1",
   temperatureRange: [0, 1],
   defaultTemperature: 0.95,

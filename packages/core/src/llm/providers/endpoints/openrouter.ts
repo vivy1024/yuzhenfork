@@ -5,7 +5,6 @@ export const OPENROUTER: InkosProvider = {
   label: "OpenRouter",
   api: "openai-responses",
   baseUrl: "https://openrouter.ai/api/v1",
-  piProvider: "openrouter",
   checkModel: "google/gemma-2-9b-it:free",
   temperatureRange: [0, 2],
   defaultTemperature: 0.7,

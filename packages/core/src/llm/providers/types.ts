@@ -44,8 +44,6 @@ export interface InkosProvider {
   readonly baseUrl: string;
   /** /models 接口的 baseUrl 跟主 baseUrl path 不同时（如百炼 dashscope） */
   readonly modelsBaseUrl?: string;
-  /** pi-ai 适配：当 api 推导跟 pi-ai 不一致时显式指定 */
-  readonly piProvider?: string;
 
   /** apikey 两步验证时发 chat hello 用的模型 id */
   readonly checkModel?: string;

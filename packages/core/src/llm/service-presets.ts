@@ -72,9 +72,8 @@ export function resolveServicePreset(service: string): ServicePreset | undefined
       ? { temperatureHint: provider?.temperatureHint ?? legacy?.temperatureHint }
       : {}),
     ...(legacy?.knownModels ? { knownModels: legacy.knownModels } : {}),
-    ...(provider?.piProvider ?? legacy?.piProvider
-      ? { piProvider: provider?.piProvider ?? legacy?.piProvider }
-      : {}),
+    // piProvider 字段已从 InkosEndpoint 移除（走 provider-to-pi-ai adapter），这里只保留 legacy fallback
+    ...(legacy?.piProvider ? { piProvider: legacy.piProvider } : {}),
     ...(provider?.modelsBaseUrl ?? legacy?.modelsBaseUrl
       ? { modelsBaseUrl: provider?.modelsBaseUrl ?? legacy?.modelsBaseUrl }
       : {}),

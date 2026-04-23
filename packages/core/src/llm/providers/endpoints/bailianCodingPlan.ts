@@ -5,7 +5,6 @@ export const BAILIAN_CODING_PLAN: InkosProvider = {
   label: "百炼 Coding Plan",
   api: "anthropic-messages",
   baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic",
-  piProvider: "anthropic",
   checkModel: "qwen-max",
   temperatureRange: [0, 2],
   defaultTemperature: 0.7,

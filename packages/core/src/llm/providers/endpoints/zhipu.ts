@@ -5,7 +5,6 @@ export const ZHIPU: InkosProvider = {
   label: "智谱 GLM",
   api: "openai-completions",
   baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-  piProvider: "zai",
   checkModel: "glm-4-flash",
   temperatureRange: [0, 1],
   defaultTemperature: 0.95,

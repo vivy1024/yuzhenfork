@@ -6,7 +6,6 @@ export const BAILIAN: InkosProvider = {
   api: "anthropic-messages",
   baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic",
   modelsBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
-  piProvider: "anthropic",
   checkModel: "qwen-turbo",
   temperatureRange: [0, 2],
   defaultTemperature: 0.7,

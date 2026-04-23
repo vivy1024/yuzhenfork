@@ -5,7 +5,6 @@ export const OPENCODE_CODING_PLAN: InkosProvider = {
   label: "OpenCode Coding Plan",
   api: "anthropic-messages",
   baseUrl: "https://opencode.ai/api/anthropic",
-  piProvider: "anthropic",
   checkModel: "glm-5.1",
   temperatureRange: [0, 1],
   defaultTemperature: 0.7,
