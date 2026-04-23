@@ -5,7 +5,7 @@ export const ZHIPU: InkosEndpoint = {
   label: "智谱 GLM",
   api: "openai-completions",
   baseUrl: "https://open.bigmodel.cn/api/paas/v4",
-  checkModel: "glm-4-flash",
+  checkModel: "glm-4.7-flash",
   temperatureRange: [0, 1],
   defaultTemperature: 0.95,
   writingTemperature: 0.95,

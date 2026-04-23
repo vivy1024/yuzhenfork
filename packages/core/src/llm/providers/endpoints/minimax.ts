@@ -6,7 +6,7 @@ export const MINIMAX: InkosEndpoint = {
   api: "anthropic-messages",
   baseUrl: "https://api.minimaxi.com/anthropic",
   checkModel: "MiniMax-M2.7",
-  temperatureRange: [0, 2],
+  temperatureRange: [0, 1],
   defaultTemperature: 0.9,
   writingTemperature: 0.9,
   models: [
