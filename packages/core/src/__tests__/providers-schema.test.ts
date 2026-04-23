@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { getAllProviders } from "../llm/providers/index.js";
+import { getAllProviders, getProvider } from "../llm/providers/index.js";
 
 describe("providers structural integrity", () => {
   it("每个 provider 必填字段都存在", () => {
@@ -41,5 +41,25 @@ describe("providers structural integrity", () => {
     expect(ids).toContain("deepseek");
     expect(ids).toContain("qwen");
     expect(ids).toContain("minimax");
+  });
+
+  it("B1：中国原厂批次 1 全部收录（10 个）", () => {
+    const ids = getAllProviders().map((p) => p.id);
+    for (const id of [
+      "moonshot", "zhipu", "siliconcloud", "ppio", "bailian",
+      "volcengine", "hunyuan", "baichuan", "stepfun", "wenxin",
+    ]) {
+      expect(ids).toContain(id);
+    }
+  });
+
+  it("B1：bailian 保留 anthropic-messages api（例外，不按 lobe 迁移）", () => {
+    expect(getProvider("bailian")?.api).toBe("anthropic-messages");
+    expect(getProvider("bailian")?.baseUrl).toContain("/anthropic");
+  });
+
+  it("B1：minimax 保留 anthropic-messages api（例外）", () => {
+    expect(getProvider("minimax")?.api).toBe("anthropic-messages");
+    expect(getProvider("minimax")?.baseUrl).toContain("/anthropic");
   });
 });

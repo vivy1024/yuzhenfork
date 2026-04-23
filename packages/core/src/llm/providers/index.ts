@@ -5,6 +5,17 @@ import { GOOGLE } from "./google.js";
 import { DEEPSEEK } from "./deepseek.js";
 import { QWEN } from "./qwen.js";
 import { MINIMAX } from "./minimax.js";
+// B1
+import { MOONSHOT } from "./moonshot.js";
+import { ZHIPU } from "./zhipu.js";
+import { SILICONCLOUD } from "./siliconcloud.js";
+import { PPIO } from "./ppio.js";
+import { BAILIAN } from "./bailian.js";
+import { VOLCENGINE } from "./volcengine.js";
+import { HUNYUAN } from "./hunyuan.js";
+import { BAICHUAN } from "./baichuan.js";
+import { STEPFUN } from "./stepfun.js";
+import { WENXIN } from "./wenxin.js";
 
 export type { InkosProvider, InkosModel, ApiProtocol } from "./types.js";
 
@@ -13,12 +24,8 @@ export type { InkosProvider, InkosModel, ApiProtocol } from "./types.js";
  * 但 Layer 2 还会按 PROVIDER_PRIORITY 显式排序，所以此处顺序不影响结果。
  */
 const ALL_PROVIDERS: readonly InkosProvider[] = [
-  ANTHROPIC,
-  OPENAI,
-  GOOGLE,
-  DEEPSEEK,
-  QWEN,
-  MINIMAX,
+  ANTHROPIC, OPENAI, GOOGLE, DEEPSEEK, QWEN, MINIMAX,
+  MOONSHOT, ZHIPU, SILICONCLOUD, PPIO, BAILIAN, VOLCENGINE, HUNYUAN, BAICHUAN, STEPFUN, WENXIN,
 ];
 
 const PROVIDERS_BY_ID: Map<string, InkosProvider> = new Map(
