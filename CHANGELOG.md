@@ -45,6 +45,19 @@
 - 精简 5 个 `maxTokensCap regression` 测试为 1 个 "per-call 不被裁剪" 回归测试
 - 已知跟进：Studio ServiceDetailPage 多态 UI / onChange 清 status / model picker 能力徽章 / CLI `inkos doctor` 接入 `verifyService` / TUI setup placeholder 动态化 —— 这些 UI/UX 增强归入 2.0.x 或 2.1.0 后续迭代
 
+### Refinement（发布前精修）
+
+- **目录分层**：42 个 endpoint 文件从 `providers/*.ts` 下沉到 `providers/endpoints/*.ts`；`types.ts` / `lookup.ts` / `verify.ts` / `provider-to-pi-ai.ts` / `index.ts` 留在 `providers/` 根
+- **类型重命名**：`InkosProvider` → `InkosEndpoint`；`getProvider` / `getAllProviders` → `getEndpoint` / `getAllEndpoints`（对齐"endpoint = service"语义）
+- **pi-ai adapter 抽出**：新增 `provider-to-pi-ai.ts`，endpoint 文件不再声明 `piProvider` 字段；adapter 按 `endpoint.id + endpoint.api` 推导 pi-ai 的 `provider` 字段（显式映射：`zhipu → zai` / `openrouter` / `githubCopilot`；`anthropic-messages` → `anthropic`；其余默认 `openai` 让 pi-ai 再按 baseUrl 嗅探）
+- **架构定位澄清**：inkos provider 层定位为 **pi-ai 的上游元数据 + 业务层**（model 精确元数据、写作温度推荐、endpoint 选择），不替代 pi-ai 的 transport 职责
+- **Tier 1 官方文档校对**：12 个主流 provider（anthropic / openai / google / deepseek / qwen / minimax / moonshot / zhipu / siliconcloud / ppio / bailian / volcengine）按官方文档核对，发现并修正：
+  - `qwen`：checkModel `qwen-turbo` → `qwen-flash`（qwen-turbo 官方已停更）；`qwen-turbo.maxOutput` 16384 → 8192；`qwen-max.contextWindowTokens` 131072 → 32768
+  - `minimax`：`temperatureRange` [0,2] → [0,1]（MiniMax Anthropic 兼容端官方上限是 1）
+  - `zhipu`：checkModel `glm-4-flash` → `glm-4.7-flash`（glm-4-flash 不在当前 models 清单，会 404）
+  - `volcengine`：`temperatureRange` [0,1] → [0,2]（火山方舟 OpenAI 兼容协议实际是 [0,2]）；`doubao-seed-2.0-{pro,lite,mini,code}.maxOutput` 128000 → 32000；`glm-4-7.maxOutput` 128000 → 16000
+- **新增测试**：`provider-to-pi-ai.test.ts` adapter 单元测试（覆盖 12+ provider 映射预期）；`providers-schema.test.ts` 补 "endpoint 无 piProvider 字段" 防回归断言
+
 ---
 
 ## v1.3.6
