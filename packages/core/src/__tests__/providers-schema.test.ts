@@ -62,4 +62,11 @@ describe("providers structural integrity", () => {
     expect(getProvider("minimax")?.api).toBe("anthropic-messages");
     expect(getProvider("minimax")?.baseUrl).toContain("/anthropic");
   });
+
+  it("B2：中国原厂批次 2 全部收录（6 个）", () => {
+    const ids = getAllProviders().map((p) => p.id);
+    for (const id of ["spark", "sensenova", "tencentcloud", "xiaomimimo", "longcat", "internlm"]) {
+      expect(ids).toContain(id);
+    }
+  });
 });

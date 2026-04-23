@@ -16,6 +16,13 @@ import { HUNYUAN } from "./hunyuan.js";
 import { BAICHUAN } from "./baichuan.js";
 import { STEPFUN } from "./stepfun.js";
 import { WENXIN } from "./wenxin.js";
+// B2
+import { SPARK } from "./spark.js";
+import { SENSENOVA } from "./sensenova.js";
+import { TENCENTCLOUD } from "./tencentcloud.js";
+import { XIAOMI_MIMO } from "./xiaomimimo.js";
+import { LONGCAT } from "./longcat.js";
+import { INTERNLM } from "./internlm.js";
 
 export type { InkosProvider, InkosModel, ApiProtocol } from "./types.js";
 
@@ -26,6 +33,7 @@ export type { InkosProvider, InkosModel, ApiProtocol } from "./types.js";
 const ALL_PROVIDERS: readonly InkosProvider[] = [
   ANTHROPIC, OPENAI, GOOGLE, DEEPSEEK, QWEN, MINIMAX,
   MOONSHOT, ZHIPU, SILICONCLOUD, PPIO, BAILIAN, VOLCENGINE, HUNYUAN, BAICHUAN, STEPFUN, WENXIN,
+  SPARK, SENSENOVA, TENCENTCLOUD, XIAOMI_MIMO, LONGCAT, INTERNLM,
 ];
 
 const PROVIDERS_BY_ID: Map<string, InkosProvider> = new Map(
