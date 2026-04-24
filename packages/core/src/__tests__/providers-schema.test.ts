@@ -39,6 +39,18 @@ describe("providers structural integrity", () => {
     }
   });
 
+  it("DeepSeek 官方 API model card 跟进 V4", () => {
+    const deepseek = getEndpoint("deepseek");
+    expect(deepseek?.checkModel).toBe("deepseek-v4-flash");
+
+    expect(deepseek?.models).toEqual([
+      { id: "deepseek-v4-flash", maxOutput: 393216, contextWindowTokens: 1_000_000, enabled: true, releasedAt: "2026-04-24" },
+      { id: "deepseek-v4-pro", maxOutput: 393216, contextWindowTokens: 1_000_000, enabled: true, releasedAt: "2026-04-24" },
+      { id: "deepseek-chat", maxOutput: 393216, contextWindowTokens: 1_000_000, releasedAt: "2026-04-24" },
+      { id: "deepseek-reasoner", maxOutput: 393216, contextWindowTokens: 1_000_000, releasedAt: "2026-04-24" },
+    ]);
+  });
+
   it("A 组至少有 5 个核心 provider", () => {
     const ids = getAllEndpoints().map((p) => p.id);
     expect(ids).toContain("anthropic");
