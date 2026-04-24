@@ -18,9 +18,14 @@ export async function loadLLMEnvLayers(
   root: string,
   processEnv: NodeJS.ProcessEnv = process.env,
 ): Promise<LLMEnvLayers> {
+  const global = await parseEnvFile(GLOBAL_ENV_PATH);
+  const project = await parseEnvFile(join(root, ".env"));
+  // Compatibility: modelOverrides.apiKeyEnv and detector config still read process.env directly.
+  hydrateProcessEnvFromEnvFiles(processEnv, global, project);
+
   return {
-    global: await parseEnvFile(GLOBAL_ENV_PATH),
-    project: await parseEnvFile(join(root, ".env")),
+    global,
+    project,
     process: { ...processEnv },
   };
 }
@@ -52,5 +57,18 @@ async function parseEnvFile(path: string): Promise<LLMEnvMap> {
     return parse(await readFile(path, "utf-8"));
   } catch {
     return {};
+  }
+}
+
+function hydrateProcessEnvFromEnvFiles(
+  processEnv: NodeJS.ProcessEnv,
+  global: LLMEnvMap,
+  project: LLMEnvMap,
+): void {
+  const fileEnv = mergeEnvMaps(global, project);
+  for (const [key, value] of Object.entries(fileEnv)) {
+    if (value !== undefined && processEnv[key] === undefined) {
+      processEnv[key] = value;
+    }
   }
 }

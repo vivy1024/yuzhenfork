@@ -193,6 +193,45 @@ describe("resolveEffectiveLLMConfig", () => {
     expect(result.llm.apiKey).toBe("sk-env");
   });
 
+  it("legacy-env 模式下 CLI --service 覆盖会切换到目标 service 的 endpoint 默认值", async () => {
+    await writeProject({
+      configSource: "env",
+      provider: "custom",
+      baseUrl: "https://api.moonshot.cn/v1",
+      model: "kimi-k2.5",
+    });
+
+    const result = await resolveEffectiveLLMConfig({
+      consumer: "cli",
+      projectRoot: root,
+      envLayers: {
+        global: {
+          INKOS_LLM_PROVIDER: "custom",
+          INKOS_LLM_BASE_URL: "https://api.moonshot.cn/v1",
+          INKOS_LLM_MODEL: "kimi-k2.5",
+          INKOS_LLM_API_KEY: "sk-moon",
+        },
+        project: {},
+        process: {
+          GOOGLE_API_KEY: "sk-google",
+        },
+      },
+      cli: {
+        service: "google",
+        model: "gemini-2.5-flash",
+        apiKeyEnv: "GOOGLE_API_KEY",
+      },
+    });
+
+    expect(result.diagnostics.configMode).toBe("legacy-env");
+    expect(result.llm.service).toBe("google");
+    expect(result.llm.provider).toBe("openai");
+    expect(result.llm.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+    expect(result.llm.apiFormat).toBe("chat");
+    expect(result.llm.model).toBe("gemini-2.5-flash");
+    expect(result.llm.apiKey).toBe("sk-google");
+  });
+
   it("保留旧 INKOS_LLM_EXTRA_* 和 INKOS_DEFAULT_LANGUAGE 行为", async () => {
     await writeProject({
       configSource: "env",

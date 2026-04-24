@@ -276,10 +276,19 @@ async function applyLegacyEnvConfig(
   }
 
   if (input.cli?.service) {
-    llm.service = input.cli.service;
+    const entry = synthesizeServiceEntry(input.cli.service);
+    if (entry) {
+      applyServiceEntry(llm, entry);
+      if (!input.cli.model) {
+        llm.model = resolveServiceModel(entry, undefined, stringValue(llm.defaultModel));
+      }
+    } else {
+      llm.service = input.cli.service;
+    }
     diagnostics.serviceSource = "cli";
   }
   if (input.cli?.model) {
+    assertModelBelongsToService(synthesizeServiceEntry(stringValue(llm.service)), input.cli.model);
     llm.model = input.cli.model;
     diagnostics.modelSource = "cli";
   }
