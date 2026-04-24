@@ -9,6 +9,7 @@ import type { InkosEndpoint } from "../types.js";
 export const MINIMAX_CODING_PLAN: InkosEndpoint = {
   id: "minimaxCodingPlan",
   label: "MiniMax Coding Plan",
+  group: "codingPlan",
   api: "anthropic-messages",
   baseUrl: "https://api.minimaxi.com/anthropic",
   checkModel: "MiniMax-M2.7",

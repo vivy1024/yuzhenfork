@@ -12,6 +12,7 @@ import type { InkosEndpoint } from "../types.js";
 export const MOONSHOT: InkosEndpoint = {
   id: "moonshot",
   label: "Moonshot (Kimi)",
+  group: "china",
   api: "openai-completions",
   baseUrl: "https://api.moonshot.cn/v1",
   checkModel: "moonshot-v1-8k",

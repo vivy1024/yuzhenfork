@@ -10,6 +10,7 @@ import type { InkosEndpoint } from "../types.js";
 export const VOLCENGINE: InkosEndpoint = {
   id: "volcengine",
   label: "火山引擎 (豆包)",
+  group: "china",
   api: "openai-completions",
   baseUrl: "https://ark.cn-beijing.volces.com/api/v3",
   checkModel: "doubao-lite-32k",

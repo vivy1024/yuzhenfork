@@ -46,7 +46,7 @@ import { VOLCENGINE_CODING_PLAN } from "./endpoints/volcengineCodingPlan.js";
 import { OPENCODE_CODING_PLAN } from "./endpoints/opencodeCodingPlan.js";
 import { ASTRON_CODING_PLAN } from "./endpoints/astronCodingPlan.js";
 
-export type { InkosEndpoint, InkosModel, ApiProtocol } from "./types.js";
+export type { InkosEndpoint, InkosModel, ApiProtocol, EndpointGroup } from "./types.js";
 
 /**
  * 所有已注册 provider 的扁平列表。顺序定义了 lookup Layer 2 的遍历顺序，

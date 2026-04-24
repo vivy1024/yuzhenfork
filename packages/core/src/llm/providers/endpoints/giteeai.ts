@@ -10,6 +10,7 @@ import type { InkosEndpoint } from "../types.js";
 export const GITEEAI: InkosEndpoint = {
   id: "giteeai",
   label: "Gitee AI",
+  group: "aggregator",
   api: "openai-completions",
   baseUrl: "https://ai.gitee.com/v1",
   checkModel: "Qwen2.5-72B-Instruct",

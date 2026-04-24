@@ -12,6 +12,7 @@ import type { InkosEndpoint } from "../types.js";
 export const ANTHROPIC: InkosEndpoint = {
   id: "anthropic",
   label: "Anthropic",
+  group: "overseas",
   api: "anthropic-messages",
   baseUrl: "https://api.anthropic.com",
   checkModel: "claude-haiku-4-5-20251001",

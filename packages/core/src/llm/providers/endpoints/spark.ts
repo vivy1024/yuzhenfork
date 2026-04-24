@@ -14,6 +14,7 @@ import type { InkosEndpoint } from "../types.js";
 export const SPARK: InkosEndpoint = {
   id: "spark",
   label: "讯飞星火",
+  group: "china",
   api: "openai-completions",
   baseUrl: "https://spark-api-open.xf-yun.com/v1",
   checkModel: "lite",

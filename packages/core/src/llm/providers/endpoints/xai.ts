@@ -11,6 +11,7 @@ import type { InkosEndpoint } from "../types.js";
 export const XAI: InkosEndpoint = {
   id: "xai",
   label: "xAI (Grok)",
+  group: "overseas",
   api: "openai-completions",
   baseUrl: "https://api.x.ai/v1",
   checkModel: "grok-2-1212",

@@ -12,6 +12,7 @@ import type { InkosEndpoint } from "../types.js";
 export const GOOGLE: InkosEndpoint = {
   id: "google",
   label: "Google Gemini",
+  group: "overseas",
   api: "openai-completions",
   baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
   checkModel: "gemini-2.5-flash",

@@ -9,6 +9,7 @@ import type { InkosEndpoint } from "../types.js";
 export const GLM_CODING_PLAN: InkosEndpoint = {
   id: "glmCodingPlan",
   label: "GLM Coding Plan",
+  group: "codingPlan",
   api: "anthropic-messages",
   baseUrl: "https://api.z.ai/api/anthropic",
   checkModel: "glm-5.1",

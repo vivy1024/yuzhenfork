@@ -15,6 +15,7 @@ import type { InkosEndpoint } from "../types.js";
 export const PPIO: InkosEndpoint = {
   id: "ppio",
   label: "PPIO",
+  group: "aggregator",
   api: "openai-completions",
   baseUrl: "https://api.ppinfra.com/v3/openai",
   checkModel: "deepseek/deepseek-v3.2",

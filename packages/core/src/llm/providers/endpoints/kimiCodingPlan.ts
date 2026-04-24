@@ -9,6 +9,7 @@ import type { InkosEndpoint } from "../types.js";
 export const KIMI_CODING_PLAN: InkosEndpoint = {
   id: "kimiCodingPlan",
   label: "Kimi Coding Plan",
+  group: "codingPlan",
   api: "anthropic-messages",
   baseUrl: "https://api.moonshot.cn/anthropic",
   checkModel: "kimi-k2.5",

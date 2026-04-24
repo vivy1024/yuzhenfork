@@ -9,6 +9,7 @@ import type { InkosEndpoint } from "../types.js";
 export const OPENCODE_CODING_PLAN: InkosEndpoint = {
   id: "opencodeCodingPlan",
   label: "OpenCode Coding Plan",
+  group: "codingPlan",
   api: "anthropic-messages",
   baseUrl: "https://opencode.ai/api/anthropic",
   checkModel: "glm-5.1",

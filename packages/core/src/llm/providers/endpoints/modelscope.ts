@@ -10,6 +10,7 @@ import type { InkosEndpoint } from "../types.js";
 export const MODELSCOPE: InkosEndpoint = {
   id: "modelscope",
   label: "魔搭社区 ModelScope",
+  group: "aggregator",
   api: "openai-completions",
   baseUrl: "https://api-inference.modelscope.cn/v1",
   checkModel: "Qwen/Qwen2.5-72B-Instruct",

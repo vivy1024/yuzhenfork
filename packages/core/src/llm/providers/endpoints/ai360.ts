@@ -10,6 +10,7 @@ import type { InkosEndpoint } from "../types.js";
 export const AI360: InkosEndpoint = {
   id: "ai360",
   label: "360 智脑",
+  group: "china",
   api: "openai-completions",
   baseUrl: "https://api.360.cn/v1",
   checkModel: "360gpt2-pro",

@@ -15,6 +15,7 @@ import type { InkosEndpoint } from "../types.js";
 export const MINIMAX: InkosEndpoint = {
   id: "minimax",
   label: "MiniMax",
+  group: "china",
   api: "anthropic-messages",
   baseUrl: "https://api.minimaxi.com/anthropic",
   checkModel: "MiniMax-M2.7",

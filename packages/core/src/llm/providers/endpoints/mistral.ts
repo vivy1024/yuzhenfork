@@ -11,6 +11,7 @@ import type { InkosEndpoint } from "../types.js";
 export const MISTRAL: InkosEndpoint = {
   id: "mistral",
   label: "Mistral AI",
+  group: "overseas",
   api: "openai-completions",
   baseUrl: "https://api.mistral.ai/v1",
   checkModel: "mistral-small-latest",

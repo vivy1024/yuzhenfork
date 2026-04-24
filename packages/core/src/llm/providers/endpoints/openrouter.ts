@@ -15,6 +15,7 @@ import type { InkosEndpoint } from "../types.js";
 export const OPENROUTER: InkosEndpoint = {
   id: "openrouter",
   label: "OpenRouter",
+  group: "aggregator",
   api: "openai-responses",
   baseUrl: "https://openrouter.ai/api/v1",
   checkModel: "google/gemma-2-9b-it:free",

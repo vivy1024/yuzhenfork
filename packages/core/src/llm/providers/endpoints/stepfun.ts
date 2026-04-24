@@ -10,6 +10,7 @@ import type { InkosEndpoint } from "../types.js";
 export const STEPFUN: InkosEndpoint = {
   id: "stepfun",
   label: "阶跃星辰",
+  group: "china",
   api: "openai-completions",
   baseUrl: "https://api.stepfun.com/v1",
   checkModel: "step-1-8k",

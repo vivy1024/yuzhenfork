@@ -10,6 +10,7 @@ import type { InkosEndpoint } from "../types.js";
 export const QINIU: InkosEndpoint = {
   id: "qiniu",
   label: "七牛云 AI",
+  group: "aggregator",
   api: "openai-completions",
   baseUrl: "https://api.qnaigc.com/v1",
   checkModel: "deepseek-v3",

@@ -11,6 +11,13 @@ export type ApiProtocol =
   | "openai-responses"
   | "anthropic-messages";
 
+export type EndpointGroup =
+  | "overseas"
+  | "china"
+  | "aggregator"
+  | "local"
+  | "codingPlan";
+
 export interface InkosModel {
   /** API 请求体里实际用的 model id（可能带斜线如 'deepseek/deepseek-v3'）。UI 也直接用 id 显示 */
   readonly id: string;
@@ -35,6 +42,8 @@ export interface InkosModel {
 export interface InkosEndpoint {
   readonly id: string;
   readonly label: string;
+  /** UI 分组。custom 不参与分组，其他 endpoint 必填。 */
+  readonly group?: EndpointGroup;
 
   readonly api: ApiProtocol;
   readonly baseUrl: string;

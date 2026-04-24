@@ -10,6 +10,7 @@ import type { InkosEndpoint } from "../types.js";
 export const BAILIAN_CODING_PLAN: InkosEndpoint = {
   id: "bailianCodingPlan",
   label: "百炼 Coding Plan",
+  group: "codingPlan",
   api: "anthropic-messages",
   baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic",
   checkModel: "qwen-max",

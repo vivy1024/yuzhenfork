@@ -15,6 +15,7 @@ import type { InkosEndpoint } from "../types.js";
 export const DEEPSEEK: InkosEndpoint = {
   id: "deepseek",
   label: "DeepSeek",
+  group: "china",
   api: "openai-completions",
   baseUrl: "https://api.deepseek.com",
   checkModel: "deepseek-chat",

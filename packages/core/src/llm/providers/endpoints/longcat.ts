@@ -9,6 +9,7 @@ import type { InkosEndpoint } from "../types.js";
 export const LONGCAT: InkosEndpoint = {
   id: "longcat",
   label: "美团 LongCat",
+  group: "china",
   api: "openai-completions",
   baseUrl: "https://api.longcat.chat/openai/v1",
   checkModel: "LongCat-Flash-Chat",

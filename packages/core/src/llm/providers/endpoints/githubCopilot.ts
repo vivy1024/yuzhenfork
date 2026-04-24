@@ -10,6 +10,7 @@ import type { InkosEndpoint } from "../types.js";
 export const GITHUB_COPILOT: InkosEndpoint = {
   id: "githubCopilot",
   label: "GitHub Copilot",
+  group: "local",
   api: "openai-responses",
   baseUrl: "https://api.githubcopilot.com",
   checkModel: "gpt-4o",

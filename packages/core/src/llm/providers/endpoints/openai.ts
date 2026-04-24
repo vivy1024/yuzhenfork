@@ -12,6 +12,7 @@ import type { InkosEndpoint } from "../types.js";
 export const OPENAI: InkosEndpoint = {
   id: "openai",
   label: "OpenAI",
+  group: "overseas",
   api: "openai-responses",
   baseUrl: "https://api.openai.com/v1",
   checkModel: "gpt-4o-mini",

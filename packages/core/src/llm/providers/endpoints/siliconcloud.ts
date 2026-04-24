@@ -14,6 +14,7 @@ import type { InkosEndpoint } from "../types.js";
 export const SILICONCLOUD: InkosEndpoint = {
   id: "siliconcloud",
   label: "硅基流动",
+  group: "aggregator",
   api: "openai-completions",
   baseUrl: "https://api.siliconflow.cn/v1",
   checkModel: "Qwen/Qwen2.5-7B-Instruct",
