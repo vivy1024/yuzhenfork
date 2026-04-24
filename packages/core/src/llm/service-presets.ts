@@ -1,4 +1,5 @@
 import { getEndpoint } from "./providers/index.js";
+import { probeModelsFromUpstream } from "./providers/probe.js";
 
 export interface ServicePreset {
   readonly providerFamily: "openai" | "anthropic";
@@ -167,28 +168,13 @@ export async function listModelsForService(
   // 1) 先试 live /models probe
   const probeBaseUrl = liveBaseUrl || provider?.modelsBaseUrl || provider?.baseUrl || resolveServiceModelsBaseUrl(service);
   if (apiKey && probeBaseUrl) {
-    try {
-      const modelsUrl = probeBaseUrl.replace(/\/$/, "") + "/models";
-      const res = await fetch(modelsUrl, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (res.ok) {
-        const json = (await res.json()) as { data?: Array<{ id: string; owned_by?: string }> };
-        if (json.data) {
-          const { lookupModel } = await import("./providers/lookup.js");
-          for (const m of json.data) {
-            const card = lookupModel(service, m.id);
-            if (card) {
-              byId.set(m.id, toModelInfo(card));
-            } else {
-              byId.set(m.id, { id: m.id, name: m.id, contextWindow: 0 });
-            }
-          }
-        }
+    const probed = await probeModelsFromUpstream(probeBaseUrl, apiKey, 10_000);
+    if (probed.length > 0) {
+      const { lookupModel } = await import("./providers/lookup.js");
+      for (const m of probed) {
+        const card = lookupModel(service, m.id);
+        byId.set(m.id, card ? toModelInfo(card) : { id: m.id, name: m.name, contextWindow: m.contextWindow });
       }
-    } catch {
-      // live 不可用，下面 fallback
     }
   }
 
