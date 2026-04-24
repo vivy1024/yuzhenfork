@@ -301,6 +301,8 @@ async function applyLegacyEnvConfig(
   }
 
   applyCommonEnv(config, llm, env);
+  if (input.cli?.apiFormat) llm.apiFormat = input.cli.apiFormat;
+  if (input.cli?.stream !== undefined) llm.stream = input.cli.stream;
 }
 
 function applyServiceEntry(llm: Record<string, unknown>, entry: ServiceConfigEntry): void {

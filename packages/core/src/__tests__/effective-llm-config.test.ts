@@ -232,6 +232,40 @@ describe("resolveEffectiveLLMConfig", () => {
     expect(result.llm.apiKey).toBe("sk-google");
   });
 
+  it("legacy-env 模式下 CLI transport 覆盖优先级高于 env", async () => {
+    await writeProject({
+      configSource: "env",
+      provider: "openai",
+      baseUrl: "https://api.example.com/v1",
+      model: "legacy-model",
+    });
+
+    const result = await resolveEffectiveLLMConfig({
+      consumer: "cli",
+      projectRoot: root,
+      envLayers: {
+        global: {
+          INKOS_LLM_PROVIDER: "openai",
+          INKOS_LLM_BASE_URL: "https://api.example.com/v1",
+          INKOS_LLM_MODEL: "legacy-model",
+          INKOS_LLM_API_KEY: "sk-env",
+          INKOS_LLM_API_FORMAT: "chat",
+          INKOS_LLM_STREAM: "true",
+        },
+        project: {},
+        process: {},
+      },
+      cli: {
+        apiFormat: "responses",
+        stream: false,
+      },
+    });
+
+    expect(result.diagnostics.configMode).toBe("legacy-env");
+    expect(result.llm.apiFormat).toBe("responses");
+    expect(result.llm.stream).toBe(false);
+  });
+
   it("保留旧 INKOS_LLM_EXTRA_* 和 INKOS_DEFAULT_LANGUAGE 行为", async () => {
     await writeProject({
       configSource: "env",
