@@ -91,6 +91,31 @@ function summarizeResult(result: unknown): string {
   return String(result).slice(0, 200);
 }
 
+const NON_TEXT_MODEL_ID_PARTS = [
+  "image",
+  "embedding",
+  "embed",
+  "rerank",
+  "tts",
+  "speech",
+  "audio",
+  "moderation",
+] as const;
+
+function isTextChatModelId(modelId: string): boolean {
+  const normalized = modelId.trim().toLowerCase();
+  if (!normalized) return false;
+  return !NON_TEXT_MODEL_ID_PARTS.some((part) => normalized.includes(part));
+}
+
+function filterTextChatModels<T extends { readonly id: string }>(models: ReadonlyArray<T>): T[] {
+  return models.filter((model) => isTextChatModelId(model.id));
+}
+
+function nonTextModelMessage(modelId: string): string {
+  return `模型 ${modelId} 不适合文本聊天/写作。请在模型选择器中改用文本模型，例如 gemini-2.5-flash、gemini-2.5-pro 或对应服务的 chat 模型。`;
+}
+
 function extractToolError(result: unknown): string {
   if (typeof result === "string") return result.slice(0, 500);
   if (result && typeof result === "object") {
@@ -1152,6 +1177,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       label: ep.label,
       models: ep.models
         .filter((m) => m.enabled !== false)
+        .filter((m) => isTextChatModelId(m.id))
         .map((m) => ({
           id: m.id,
           name: m.id,
@@ -1184,7 +1210,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const groups = await Promise.all(customs.map(async (s) => ({
       service: s.id,
       label: s.label,
-      models: await probeModelsFromUpstream(s.baseUrl, secrets.services[s.id].apiKey, 10_000),
+      models: filterTextChatModels(
+        await probeModelsFromUpstream(s.baseUrl, secrets.services[s.id].apiKey, 10_000),
+      ),
     })));
 
     return c.json({ groups });
@@ -1215,7 +1243,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       apiKey,
       isCustomServiceId(service) ? resolvedBaseUrl ?? undefined : undefined,
     );
-    const models = enriched.map((m) => ({
+    const models = filterTextChatModels(enriched).map((m) => ({
       id: m.id,
       name: m.name,
       ...(m.maxOutput !== undefined ? { maxOutput: m.maxOutput } : {}),
@@ -1440,6 +1468,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     if (!sessionId?.trim()) {
       throw new ApiError(400, "SESSION_ID_REQUIRED", "sessionId is required");
     }
+    if (reqModel && !isTextChatModelId(reqModel)) {
+      const message = nonTextModelMessage(reqModel);
+      return c.json({ error: message, response: message }, 400);
+    }
 
     broadcast("agent:start", { instruction, activeBookId, sessionId });
 
@@ -1495,7 +1527,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         const defaultModel = rawConfig.defaultModel as string | undefined;
         const servicesArr = normalizeServiceConfig(rawConfig.services);
         const firstService = servicesArr[0];
-        if (firstService?.service && defaultModel) {
+        if (firstService?.service && defaultModel && isTextChatModelId(defaultModel)) {
           try {
             const resolved = await resolveServiceModel(
               serviceConfigKey(firstService),
@@ -1517,11 +1549,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           if (svcData?.apiKey) {
             try {
               const models = await listModelsForService(svcName, svcData.apiKey);
-              if (models.length > 0) {
+              const textModels = filterTextChatModels(models);
+              if (textModels.length > 0) {
                 const configuredEntry = await resolveConfiguredServiceEntry(root, svcName);
                 const resolved = await resolveServiceModel(
                   svcName,
-                  models[0].id,
+                  textModels[0].id,
                   root,
                   await resolveConfiguredServiceBaseUrl(root, svcName),
                   configuredEntry?.apiFormat,

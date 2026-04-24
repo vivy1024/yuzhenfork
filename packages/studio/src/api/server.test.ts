@@ -736,6 +736,34 @@ describe("createStudioServer daemon lifecycle", () => {
     ]);
   });
 
+  it("filters non-text models out of connected bank model groups", async () => {
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        google: { apiKey: "sk-google" },
+      },
+    });
+    getAllEndpointsMock.mockReturnValueOnce([
+      {
+        id: "google",
+        label: "Google Gemini",
+        group: "overseas",
+        models: [
+          { id: "gemini-2.5-flash", maxOutput: 65536, contextWindowTokens: 1114112, enabled: true },
+          { id: "gemini-3.1-flash-image-preview", maxOutput: 32768, contextWindowTokens: 163840, enabled: true },
+          { id: "text-embedding-004", maxOutput: 2048, contextWindowTokens: 2048, enabled: true },
+        ],
+      },
+    ] as never);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/models");
+    expect(response.status).toBe(200);
+    const body = await response.json() as { groups: Array<{ service: string; models: Array<{ id: string }> }> };
+    expect(body.groups[0]?.models.map((m) => m.id)).toEqual(["gemini-2.5-flash"]);
+  });
+
   it("returns custom model groups through the slow probe path", async () => {
     await writeFile(join(root, "inkos.json"), JSON.stringify({
       ...projectConfig,
@@ -770,6 +798,26 @@ describe("createStudioServer daemon lifecycle", () => {
       "sk-corp",
       10_000,
     );
+  });
+
+  it("filters non-text models out of live service model lists", async () => {
+    getServiceApiKeyMock.mockResolvedValue("sk-google");
+    listModelsForServiceMock.mockResolvedValueOnce([
+      { id: "gemini-2.5-flash", name: "gemini-2.5-flash", reasoning: false, contextWindow: 1114112 },
+      { id: "gemini-3.1-flash-image-preview", name: "gemini-3.1-flash-image-preview", reasoning: false, contextWindow: 163840 },
+      { id: "text-embedding-004", name: "text-embedding-004", reasoning: false, contextWindow: 2048 },
+    ]);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/google/models?refresh=1");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      models: [
+        { id: "gemini-2.5-flash", name: "gemini-2.5-flash", contextWindow: 1114112 },
+      ],
+    });
   });
 
   it("merges service config patches instead of overwriting existing services", async () => {
@@ -1734,6 +1782,35 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(response.json()).resolves.toMatchObject({
       response: "你好，我在。",
     });
+  });
+
+  it("rejects explicit non-text models before running the agent", async () => {
+    resolveServiceModelMock.mockResolvedValue({
+      model: { id: "gemini-3.1-flash-image-preview", provider: "google", api: "openai-completions" },
+      apiKey: "sk-google",
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instruction: "nihao",
+        service: "google",
+        model: "gemini-3.1-flash-image-preview",
+        sessionId: "agent-session-1",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("不适合文本聊天"),
+      response: expect.stringContaining("gemini-3.1-flash-image-preview"),
+    });
+    expect(resolveServiceModelMock).not.toHaveBeenCalled();
+    expect(runAgentSessionMock).not.toHaveBeenCalled();
   });
 
   it("returns 500 with an error payload when the agent session fails", async () => {

@@ -24,6 +24,12 @@ describe("listModelsForService (B8)", () => {
     expect(sonnet?.contextWindow).toBe(1_000_000);
   });
 
+  it("google service 的文本模型列表不包含 image preview 模型", async () => {
+    const models = await listModelsForService("google");
+    expect(models.some((m) => m.id === "gemini-2.5-flash")).toBe(true);
+    expect(models.some((m) => m.id.includes("image"))).toBe(false);
+  });
+
   it("custom service 走 live probe + bank 补元数据", async () => {
     global.fetch = vi.fn().mockResolvedValue({
       ok: true,
