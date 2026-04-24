@@ -32,6 +32,8 @@ import {
   saveSecrets,
   getServiceApiKey,
   listModelsForService,
+  getAllEndpoints,
+  probeModelsFromUpstream,
   chatCompletion,
   buildExportArtifact,
   GLOBAL_ENV_PATH,
@@ -919,21 +921,15 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   app.get("/api/v1/services", async (c) => {
     const secrets = await loadSecrets(root);
+    const endpoints = getAllEndpoints().filter((ep) => ep.id !== "custom");
 
-    const SERVICE_KEYS = [
-      "openai", "anthropic", "deepseek", "moonshot", "minimax",
-      "bailian", "zhipu", "siliconflow", "ppio", "openrouter", "ollama",
-    ];
-
-    // Fast: only check connection status from secrets, no external API calls
-    const services = SERVICE_KEYS.map((key) => {
-      const preset = resolveServicePreset(key);
-      return {
-        service: key,
-        label: preset?.label ?? key,
-        connected: Boolean(secrets.services[key]?.apiKey),
-      };
-    });
+    // Fast: only check connection status from secrets, no external API calls.
+    const services = endpoints.map((ep) => ({
+      service: ep.id,
+      label: ep.label,
+      group: ep.group,
+      connected: Boolean(secrets.services[ep.id]?.apiKey),
+    }));
 
     // Add custom services from inkos.json
     try {
@@ -944,6 +940,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           services.push({
             service: secretKey,
             label: svc.name ?? "Custom",
+            group: undefined,
             connected: Boolean(secrets.services[secretKey]?.apiKey),
           });
         }
@@ -1070,6 +1067,54 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     });
   });
 
+  app.get("/api/v1/services/models", async (c) => {
+    const secrets = await loadSecrets(root);
+    const endpoints = getAllEndpoints()
+      .filter((ep) => ep.id !== "custom" && Boolean(secrets.services[ep.id]?.apiKey));
+
+    const groups = endpoints.map((ep) => ({
+      service: ep.id,
+      label: ep.label,
+      models: ep.models
+        .filter((m) => m.enabled !== false)
+        .map((m) => ({
+          id: m.id,
+          name: m.id,
+          ...(typeof m.maxOutput === "number" ? { maxOutput: m.maxOutput } : {}),
+          ...(m.contextWindowTokens > 0 ? { contextWindow: m.contextWindowTokens } : {}),
+        })),
+    }));
+
+    return c.json({ groups });
+  });
+
+  app.get("/api/v1/services/models/custom", async (c) => {
+    const secrets = await loadSecrets(root);
+    let config: Record<string, unknown> = {};
+    try {
+      config = await loadRawConfig(root);
+    } catch {
+      // no config file
+    }
+
+    const customs = normalizeServiceConfig((config.llm as Record<string, unknown> | undefined)?.services)
+      .filter((s) => s.service === "custom")
+      .map((s) => ({
+        id: `custom:${s.name ?? "Custom"}`,
+        baseUrl: s.baseUrl ?? "",
+        label: s.name ?? "Custom",
+      }))
+      .filter((s) => s.baseUrl && Boolean(secrets.services[s.id]?.apiKey));
+
+    const groups = await Promise.all(customs.map(async (s) => ({
+      service: s.id,
+      label: s.label,
+      models: await probeModelsFromUpstream(s.baseUrl, secrets.services[s.id].apiKey, 10_000),
+    })));
+
+    return c.json({ groups });
+  });
+
   app.get("/api/v1/services/:service/models", async (c) => {
     const service = c.req.param("service");
     const refresh = c.req.query("refresh") === "1";
@@ -1093,7 +1138,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const enriched = await listModelsForService(
       isCustomServiceId(service) ? "custom" : service,
       apiKey,
-      resolvedBaseUrl ?? undefined,
+      isCustomServiceId(service) ? resolvedBaseUrl ?? undefined : undefined,
     );
     const models = enriched.map((m) => ({
       id: m.id,

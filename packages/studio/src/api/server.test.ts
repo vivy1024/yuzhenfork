@@ -53,13 +53,13 @@ const resolveServiceModelsBaseUrlMock = vi.fn((service: string) => {
   const preset = SERVICE_PRESETS_MOCK[service];
   return preset?.modelsBaseUrl ?? preset?.baseUrl;
 });
-const listModelsForServiceMock = vi.fn(async (service: string, apiKey?: string) => {
+const listModelsForServiceMock = vi.fn(async (service: string, apiKey?: string, liveBaseUrl?: string) => {
   const preset = resolveServicePresetMock(service);
-  if (!preset || service === "custom") return [];
+  if (!preset) return [];
   if (preset.knownModels.length > 0) {
     return preset.knownModels.map((id) => ({ id, name: id, reasoning: false, contextWindow: 0 }));
   }
-  const modelsBaseUrl = resolveServiceModelsBaseUrlMock(service);
+  const modelsBaseUrl = liveBaseUrl ?? resolveServiceModelsBaseUrlMock(service);
   if (!apiKey || !modelsBaseUrl) return [];
   const res = await fetch(`${modelsBaseUrl.replace(/\/$/, "")}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -74,6 +74,36 @@ const listModelsForServiceMock = vi.fn(async (service: string, apiKey?: string) 
     contextWindow: 0,
   }));
 });
+const endpointIdsByGroup = {
+  overseas: ["anthropic", "google", "mistral", "openai", "xai"],
+  china: [
+    "ai360", "baichuan", "bailian", "deepseek", "hunyuan", "internlm", "longcat",
+    "minimax", "moonshot", "sensenova", "spark", "stepfun", "tencentcloud",
+    "volcengine", "wenxin", "xiaomimimo", "zeroone", "zhipu",
+  ],
+  aggregator: ["giteeai", "infiniai", "modelscope", "newapi", "openrouter", "ppio", "qiniu", "siliconcloud"],
+  local: ["githubCopilot", "ollama"],
+  codingPlan: [
+    "astronCodingPlan", "bailianCodingPlan", "glmCodingPlan", "kimiCodingPlan",
+    "minimaxCodingPlan", "opencodeCodingPlan", "volcengineCodingPlan",
+  ],
+} as const;
+const endpointMocks = [
+  ...Object.entries(endpointIdsByGroup).flatMap(([group, ids]) => ids.map((id) => ({
+    id,
+    label: id,
+    group,
+    models: [
+      { id: `${id}-model`, maxOutput: 4096, contextWindowTokens: 32768, enabled: true },
+      { id: `${id}-disabled`, maxOutput: 4096, contextWindowTokens: 32768, enabled: false },
+    ],
+  }))),
+  { id: "custom", label: "自定义端点", models: [] },
+];
+const getAllEndpointsMock = vi.fn(() => endpointMocks);
+const probeModelsFromUpstreamMock = vi.fn(async () => [
+  { id: "custom-model", name: "custom-model", contextWindow: 0 },
+]);
 
 const logger = {
   child: () => logger,
@@ -189,6 +219,8 @@ vi.mock("@actalk/inkos-core", () => {
     saveSecrets: saveSecretsMock,
     getServiceApiKey: getServiceApiKeyMock,
     listModelsForService: listModelsForServiceMock,
+    getAllEndpoints: getAllEndpointsMock,
+    probeModelsFromUpstream: probeModelsFromUpstreamMock,
     GLOBAL_ENV_PATH: join(tmpdir(), "inkos-global.env"),
   };
 });
@@ -355,6 +387,8 @@ describe("createStudioServer daemon lifecycle", () => {
     resolveServiceProviderFamilyMock.mockClear();
     resolveServiceModelsBaseUrlMock.mockClear();
     listModelsForServiceMock.mockClear();
+    getAllEndpointsMock.mockClear();
+    probeModelsFromUpstreamMock.mockClear();
     // Default BookSession for agent tests
     const defaultBookSession = {
       sessionId: "agent-session-1",
@@ -644,6 +678,97 @@ describe("createStudioServer daemon lifecycle", () => {
       language: "en",
       languageExplicit: true,
     });
+  });
+
+  it("returns all bank services with group fields and custom services", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1" },
+        ],
+      },
+    }, null, 2), "utf-8");
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        moonshot: { apiKey: "sk-moonshot" },
+        "custom:内网GPT": { apiKey: "sk-corp" },
+      },
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const res = await app.request("http://localhost/api/v1/services");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { services: Array<{ service: string; group?: string; connected: boolean }> };
+    const bank = body.services.filter((s) => !s.service.startsWith("custom"));
+    expect(bank.length).toBe(40);
+    expect(bank.every((s) => typeof s.group === "string")).toBe(true);
+    expect(bank.filter((s) => s.group === "overseas")).toHaveLength(5);
+    expect(bank.filter((s) => s.group === "china")).toHaveLength(18);
+    expect(bank.filter((s) => s.group === "aggregator")).toHaveLength(8);
+    expect(bank.filter((s) => s.group === "local")).toHaveLength(2);
+    expect(bank.filter((s) => s.group === "codingPlan")).toHaveLength(7);
+    expect(body.services.find((s) => s.service === "moonshot")?.connected).toBe(true);
+    expect(body.services.find((s) => s.service === "custom:内网GPT")).toMatchObject({
+      connected: true,
+    });
+  });
+
+  it("returns connected bank model groups from the local bank", async () => {
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        moonshot: { apiKey: "sk-moonshot" },
+      },
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/models");
+    expect(response.status).toBe(200);
+    const body = await response.json() as { groups: Array<{ service: string; models: Array<{ id: string }> }> };
+    expect(body.groups.map((g) => g.service)).toEqual(["moonshot"]);
+    expect(body.groups[0]?.models).toEqual([
+      { id: "moonshot-model", name: "moonshot-model", maxOutput: 4096, contextWindow: 32768 },
+    ]);
+  });
+
+  it("returns custom model groups through the slow probe path", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1" },
+        ],
+      },
+    }, null, 2), "utf-8");
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        "custom:内网GPT": { apiKey: "sk-corp" },
+      },
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/models/custom");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      groups: [
+        {
+          service: "custom:内网GPT",
+          label: "内网GPT",
+          models: [{ id: "custom-model", name: "custom-model", contextWindow: 0 }],
+        },
+      ],
+    });
+    expect(probeModelsFromUpstreamMock).toHaveBeenCalledWith(
+      "https://llm.internal.corp/v1",
+      "sk-corp",
+      10_000,
+    );
   });
 
   it("merges service config patches instead of overwriting existing services", async () => {
