@@ -8,16 +8,43 @@ export interface SecretsFile {
 const SECRETS_DIR = ".inkos";
 const SECRETS_FILE = "secrets.json";
 
-export async function loadSecrets(projectRoot: string): Promise<SecretsFile> {
+const LEGACY_SERVICE_ID_REMAP: Record<string, string> = {
+  siliconflow: "siliconcloud",
+};
+
+function migrateLegacyServiceIds(secrets: SecretsFile): { data: SecretsFile; changed: boolean } {
+  let changed = false;
+  for (const [oldId, newId] of Object.entries(LEGACY_SERVICE_ID_REMAP)) {
+    if (secrets.services[oldId] && !secrets.services[newId]) {
+      secrets.services[newId] = secrets.services[oldId];
+      delete secrets.services[oldId];
+      changed = true;
+    }
+  }
+  return { data: secrets, changed };
+}
+
+async function readSecretsRaw(projectRoot: string): Promise<SecretsFile> {
   try {
     const raw = await readFile(
       join(projectRoot, SECRETS_DIR, SECRETS_FILE),
       "utf-8",
     );
-    return JSON.parse(raw) as SecretsFile;
+    const parsed = JSON.parse(raw) as SecretsFile;
+    if (!parsed || typeof parsed !== "object" || !parsed.services) {
+      return { services: {} };
+    }
+    return parsed;
   } catch {
     return { services: {} };
   }
+}
+
+export async function loadSecrets(projectRoot: string): Promise<SecretsFile> {
+  const raw = await readSecretsRaw(projectRoot);
+  const { data, changed } = migrateLegacyServiceIds(raw);
+  if (changed) await saveSecrets(projectRoot, data);
+  return data;
 }
 
 export async function saveSecrets(
