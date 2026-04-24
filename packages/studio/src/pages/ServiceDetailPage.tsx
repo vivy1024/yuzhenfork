@@ -33,7 +33,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   const loading = useServiceStore((s) => s.servicesLoading);
   const fetchServices = useServiceStore((s) => s.fetchServices);
   const refreshServices = useServiceStore((s) => s.refreshServices);
-  const setStoreModels = useServiceStore((s) => s.setModels);
+  const setStoreModels = useServiceStore((s) => s.setLiveModels);
   const clearStoreModels = useServiceStore((s) => s.clearModels);
 
   useEffect(() => { void fetchServices(); }, [fetchServices]);

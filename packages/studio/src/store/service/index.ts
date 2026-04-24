@@ -1,2 +1,2 @@
 export { useServiceStore } from "./store";
-export type { ServiceStore, ServiceInfo, ModelInfo, ModelGroup, ModelPickerStatus } from "./types";
+export type { EndpointGroup, ServiceStore, ServiceInfo, ModelInfo, ModelGroup, ModelPickerStatus } from "./types";

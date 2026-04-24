@@ -89,30 +89,35 @@ export function ChatPage({ activeBookId, nav, theme, t, sse: _sse }: ChatPagePro
   // -- Model picker: read raw state, derive with useMemo (stable refs) --
   const services = useServiceStore((s) => s.services);
   const servicesLoading = useServiceStore((s) => s.servicesLoading);
+  const bankModelsLoading = useServiceStore((s) => s.bankModelsLoading);
+  const customModelsLoading = useServiceStore((s) => s.customModelsLoading);
   const modelsByService = useServiceStore((s) => s.modelsByService);
   const fetchServices = useServiceStore((s) => s.fetchServices);
-  const fetchModels = useServiceStore((s) => s.fetchModels);
+  const fetchBankModels = useServiceStore((s) => s.fetchBankModels);
+  const fetchCustomModels = useServiceStore((s) => s.fetchCustomModels);
 
   useEffect(() => { void fetchServices(); }, [fetchServices]);
   useEffect(() => {
-    for (const svc of services) {
-      if (svc.connected) void fetchModels(svc.service);
-    }
-  }, [services, fetchModels]);
+    void fetchBankModels();
+    void fetchCustomModels();
+  }, [fetchBankModels, fetchCustomModels]);
 
   const modelPickerStatus = useMemo(() => {
     if (servicesLoading || services.length === 0) return "loading" as const;
     const connected = services.filter((s) => s.connected);
     if (connected.length === 0) return "no-models" as const;
-    if (connected.some((s) => modelsByService[s.service]?.loading)) return "loading" as const;
-    return connected.some((s) => (modelsByService[s.service]?.models.length ?? 0) > 0)
-      ? "ready" as const : "no-models" as const;
-  }, [services, servicesLoading, modelsByService]);
+    if (bankModelsLoading) return "loading" as const;
+    if (connected.some((s) => (modelsByService[s.service]?.length ?? 0) > 0)) return "ready" as const;
+    const hasConnectedBank = connected.some((s) => !s.service.startsWith("custom"));
+    const hasConnectedCustom = connected.some((s) => s.service.startsWith("custom"));
+    if (!hasConnectedBank && hasConnectedCustom && customModelsLoading) return "loading" as const;
+    return "no-models" as const;
+  }, [services, servicesLoading, bankModelsLoading, customModelsLoading, modelsByService]);
 
   const groupedModels = useMemo(() => {
     return services
-      .filter((s) => s.connected && (modelsByService[s.service]?.models.length ?? 0) > 0)
-      .map((s) => ({ service: s.service, label: s.label, models: modelsByService[s.service]!.models }));
+      .filter((s) => s.connected && (modelsByService[s.service]?.length ?? 0) > 0)
+      .map((s) => ({ service: s.service, label: s.label, models: modelsByService[s.service]! }));
   }, [services, modelsByService]);
 
   // Auto-select first model when models load and none selected

@@ -1,46 +1,25 @@
+export type EndpointGroup =
+  | "overseas"
+  | "china"
+  | "aggregator"
+  | "local"
+  | "codingPlan";
+
 export interface ServiceInfo {
   readonly service: string;
   readonly label: string;
+  readonly group?: EndpointGroup;
   readonly connected: boolean;
 }
 
 export interface ModelInfo {
   readonly id: string;
   readonly name?: string;
+  readonly maxOutput?: number;
+  readonly contextWindow?: number;
 }
 
-export interface ServiceModelsEntry {
-  readonly models: ReadonlyArray<ModelInfo>;
-  readonly loading: boolean;
-  readonly error: string | null;
-}
-
-// -- State --
-
-export interface ServiceState {
-  /** All known services with connection status */
-  services: ReadonlyArray<ServiceInfo>;
-  servicesLoading: boolean;
-  /** Models keyed by service id, fetched on demand */
-  modelsByService: Record<string, ServiceModelsEntry>;
-}
-
-// -- Actions --
-
-export interface ServiceActions {
-  /** Fetch service list (fast — only reads secrets, no external API) */
-  fetchServices: () => Promise<void>;
-  /** Fetch models for a specific service (calls external API) */
-  fetchModels: (service: string) => Promise<void>;
-  /** Write models directly (from test connection result) */
-  setModels: (service: string, models: ReadonlyArray<ModelInfo>) => void;
-  /** Clear models for a service (key removed) */
-  clearModels: (service: string) => void;
-  /** Invalidate and re-fetch services (after saving a key) */
-  refreshServices: () => Promise<void>;
-}
-
-// -- Derived (selectors) --
+export type ModelPickerStatus = "loading" | "no-models" | "ready";
 
 export interface ModelGroup {
   readonly service: string;
@@ -48,15 +27,24 @@ export interface ModelGroup {
   readonly models: ReadonlyArray<ModelInfo>;
 }
 
-export type ModelPickerStatus = "loading" | "no-models" | "ready";
+export interface ServiceStore {
+  services: ReadonlyArray<ServiceInfo>;
+  servicesLoading: boolean;
 
-export interface ServiceSelectors {
-  /** Model picker status: loading → no-models → ready */
+  modelsByService: Record<string, ReadonlyArray<ModelInfo>>;
+  bankModelsLoading: boolean;
+  customModelsLoading: boolean;
+  liveModelsLoading: Record<string, boolean>;
+
+  fetchServices: () => Promise<void>;
+  refreshServices: () => Promise<void>;
+  fetchBankModels: () => Promise<void>;
+  fetchCustomModels: () => Promise<void>;
+  fetchLiveModels: (service: string) => Promise<void>;
+
+  setLiveModels: (service: string, models: ReadonlyArray<ModelInfo>) => void;
+  clearModels: (service: string) => void;
+
   getModelPickerStatus: () => ModelPickerStatus;
-  /** Grouped models for dropdown, derived from store state */
   getGroupedModels: () => ReadonlyArray<ModelGroup>;
 }
-
-// -- Composed --
-
-export type ServiceStore = ServiceState & ServiceActions & ServiceSelectors;
