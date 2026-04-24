@@ -1,7 +1,8 @@
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { Check, Plus, Search, X } from "lucide-react";
+import { GROUP_LABELS, GROUP_ORDER, GROUP_SHORT_LABELS } from "../constants/service-groups";
 import { useServiceStore } from "../store/service";
-import type { ServiceInfo } from "../store/service";
-import { ServiceConfigSourceCard } from "../components/ServiceConfigSourceCard";
+import type { EndpointGroup, ServiceInfo } from "../store/service";
 
 interface Nav {
   toDashboard: () => void;
@@ -10,7 +11,7 @@ interface Nav {
 
 function SkeletonCard() {
   return (
-    <div className="rounded-xl border border-border/30 p-5 animate-pulse">
+    <div className="rounded-lg border border-border/30 p-5 animate-pulse">
       <div className="flex items-center justify-between mb-3">
         <div className="h-4 w-24 bg-muted rounded" />
         <div className="w-2 h-2 rounded-full bg-muted" />
@@ -20,16 +21,104 @@ function SkeletonCard() {
   );
 }
 
+function ServiceCard({ svc, onClick }: { svc: ServiceInfo; onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className={[
+        "flex min-h-[92px] flex-col gap-2 rounded-lg border p-5 text-left transition-all hover:shadow-sm",
+        svc.connected
+          ? "border-emerald-500/30 bg-emerald-500/[0.03]"
+          : "border-dashed border-border/40",
+      ].join(" ")}
+    >
+      <div className="flex items-center justify-between gap-3">
+        <span className="truncate text-sm font-medium">{svc.label}</span>
+        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${svc.connected ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
+      </div>
+      <span className="text-xs text-muted-foreground/60">
+        {svc.connected ? "已连接" : "未配置"}
+      </span>
+    </button>
+  );
+}
+
 export function ServiceListPage({ nav }: { nav: Nav }) {
   const services = useServiceStore((s) => s.services);
   const loading = useServiceStore((s) => s.servicesLoading);
   const fetchServices = useServiceStore((s) => s.fetchServices);
-  const refreshServices = useServiceStore((s) => s.refreshServices);
 
   useEffect(() => { void fetchServices(); }, [fetchServices]);
 
+  const [query, setQuery] = useState("");
+  const [selectedGroups, setSelectedGroups] = useState<Set<EndpointGroup>>(new Set());
+  const [onlyConnected, setOnlyConnected] = useState(false);
+
+  const bankServices = useMemo(
+    () => services.filter((s) => !s.service.startsWith("custom")),
+    [services],
+  );
+  const customServices = useMemo(
+    () => services.filter((s) => s.service.startsWith("custom")),
+    [services],
+  );
+
+  const groupCounts = useMemo(() => {
+    const counts = {} as Record<EndpointGroup, number>;
+    for (const group of GROUP_ORDER) {
+      counts[group] = bankServices.filter((s) => s.group === group).length;
+    }
+    return counts;
+  }, [bankServices]);
+
+  const connectedCount = useMemo(
+    () => services.filter((s) => s.connected).length,
+    [services],
+  );
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return bankServices.filter((svc) => {
+      if (onlyConnected && !svc.connected) return false;
+      if (selectedGroups.size > 0 && (!svc.group || !selectedGroups.has(svc.group))) return false;
+      if (q && !svc.label.toLowerCase().includes(q) && !svc.service.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [bankServices, onlyConnected, query, selectedGroups]);
+
+  const filteredCustom = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (selectedGroups.size > 0) return [];
+    return customServices.filter((svc) => {
+      if (onlyConnected && !svc.connected) return false;
+      if (q && !svc.label.toLowerCase().includes(q) && !svc.service.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [customServices, onlyConnected, query, selectedGroups]);
+
+  const byGroup = useMemo(() => {
+    const map = {} as Record<EndpointGroup, ServiceInfo[]>;
+    for (const group of GROUP_ORDER) map[group] = [];
+    for (const svc of filtered) {
+      if (svc.group) map[svc.group].push(svc);
+    }
+    return map;
+  }, [filtered]);
+
+  const toggleGroup = (group: EndpointGroup) => {
+    setSelectedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  };
+
+  const canCreateCustom = selectedGroups.size === 0 && query.trim() === "" && !onlyConnected;
+  const showCustomSection = !loading && selectedGroups.size === 0 && (filteredCustom.length > 0 || canCreateCustom);
+
   return (
-    <div className="max-w-2xl mx-auto space-y-8">
+    <div className="mx-auto max-w-2xl space-y-6">
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <button
           onClick={nav.toDashboard}
@@ -43,51 +132,135 @@ export function ServiceListPage({ nav }: { nav: Nav }) {
 
       <h1 className="font-serif text-2xl">服务商管理</h1>
 
-      <ServiceConfigSourceCard onChange={() => { void refreshServices(); }} />
+      <div className="relative">
+        <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground/40" />
+        <input
+          type="text"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          placeholder="搜索服务商"
+          className="w-full rounded-lg border border-border/60 bg-background py-2 pl-9 pr-9 text-sm outline-none focus:border-primary/50"
+        />
+        {query && (
+          <button
+            onClick={() => setQuery("")}
+            className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground/50 hover:text-muted-foreground"
+            aria-label="清空搜索"
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
 
-      <div className="grid grid-cols-2 gap-3">
-        {loading
-          ? Array.from({ length: 6 }, (_, i) => <SkeletonCard key={i} />)
-          : services.map((svc) => (
+      <div className="flex flex-wrap gap-2">
+        <button
+          onClick={() => setSelectedGroups(new Set())}
+          className={[
+            "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs transition-colors",
+            selectedGroups.size === 0
+              ? "border-foreground bg-foreground text-background"
+              : "border-border/60 text-muted-foreground hover:bg-secondary/50",
+          ].join(" ")}
+        >
+          全部 {bankServices.length}
+        </button>
+        {GROUP_ORDER.map((group) => {
+          const selected = selectedGroups.has(group);
+          return (
+            <button
+              key={group}
+              onClick={() => toggleGroup(group)}
+              className={[
+                "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs transition-colors",
+                selected
+                  ? "border-foreground bg-foreground text-background"
+                  : "border-border/60 text-muted-foreground hover:bg-secondary/50",
+              ].join(" ")}
+            >
+              {selected && <Check size={12} />}
+              {GROUP_SHORT_LABELS[group]} {groupCounts[group]}
+            </button>
+          );
+        })}
+        {selectedGroups.size > 0 && (
+          <button
+            onClick={() => setSelectedGroups(new Set())}
+            className="inline-flex items-center rounded-full px-3 py-1 text-xs text-muted-foreground transition-colors hover:text-foreground"
+          >
+            清除筛选
+          </button>
+        )}
+      </div>
+
+      <label className="inline-flex cursor-pointer select-none items-center gap-2 text-xs text-muted-foreground">
+        <input
+          type="checkbox"
+          checked={onlyConnected}
+          onChange={(event) => setOnlyConnected(event.target.checked)}
+        />
+        <span>只看已连接 ({connectedCount})</span>
+      </label>
+
+      <div className="h-px bg-border/30" />
+
+      {loading && (
+        <div className="grid grid-cols-2 gap-3">
+          {Array.from({ length: 6 }, (_, i) => <SkeletonCard key={i} />)}
+        </div>
+      )}
+
+      {!loading && GROUP_ORDER.map((group) => {
+        const list = byGroup[group];
+        if (!list || list.length === 0) return null;
+        return (
+          <section key={group} className="space-y-3">
+            <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
+              {GROUP_LABELS[group]}
+            </h2>
+            <div className="grid grid-cols-2 gap-3">
+              {list.map((svc) => (
+                <ServiceCard
+                  key={svc.service}
+                  svc={svc}
+                  onClick={() => nav.toServiceDetail(svc.service)}
+                />
+              ))}
+            </div>
+          </section>
+        );
+      })}
+
+      {showCustomSection && (
+        <section className="space-y-3">
+          <h2 className="text-xs font-medium uppercase tracking-wider text-muted-foreground/70">
+            自定义服务
+          </h2>
+          <div className="grid grid-cols-2 gap-3">
+            {filteredCustom.map((svc) => (
               <ServiceCard
                 key={svc.service}
                 svc={svc}
                 onClick={() => nav.toServiceDetail(svc.service)}
               />
-            ))
-        }
-        {!loading && (
-          <button
-            onClick={() => nav.toServiceDetail("custom")}
-            className="flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed border-border/40 p-5 text-muted-foreground/60 hover:border-primary/30 hover:text-muted-foreground transition-all"
-          >
-            <span className="text-lg leading-none">+</span>
-            <span className="text-xs">自定义服务</span>
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
+            ))}
+            {canCreateCustom && (
+              <button
+                onClick={() => nav.toServiceDetail("custom")}
+                className="flex min-h-[92px] flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-border/40 p-5 text-muted-foreground/60 transition-all hover:border-primary/30 hover:text-muted-foreground"
+              >
+                <Plus size={18} />
+                <span className="text-xs">自定义服务</span>
+              </button>
+            )}
+          </div>
+        </section>
+      )}
 
-function ServiceCard({ svc, onClick }: { svc: ServiceInfo; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={[
-        "flex flex-col gap-2 rounded-xl border p-5 text-left transition-all hover:shadow-sm",
-        svc.connected
-          ? "border-emerald-500/30 bg-emerald-500/[0.03]"
-          : "border-dashed border-border/40",
-      ].join(" ")}
-    >
-      <div className="flex items-center justify-between">
-        <span className="font-medium text-sm">{svc.label}</span>
-        <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${svc.connected ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
-      </div>
-      <span className="text-xs text-muted-foreground/60">
-        {svc.connected ? "已连接" : "未配置"}
-      </span>
-    </button>
+      {!loading && filtered.length === 0 && filteredCustom.length === 0 && !canCreateCustom && (
+        <div className="rounded-lg border border-dashed border-border/40 p-8 text-center text-sm text-muted-foreground">
+          没有匹配的服务商
+        </div>
+      )}
+    </div>
   );
 }

@@ -72,7 +72,40 @@ inkos interact --json --message "继续当前书，但把节奏再收紧一点"
 
 ### 配置
 
-**方式一：全局配置（推荐，只需一次）**
+InkOS 2.0 将 LLM 配置分成两条清晰路径：**Studio 用可视化服务配置**，**CLI / daemon / 部署环境支持 env 覆盖**。两者不会互相污染。
+
+#### 方式一：Studio 服务配置（推荐）
+
+适合本地写作、Web 工作台和可视化管理。
+
+```bash
+inkos init my-novel
+cd my-novel
+inkos
+```
+
+打开 Studio 后进入「模型配置」：
+
+1. 选择服务商，例如 Google Gemini、Moonshot、MiniMax、智谱、百炼或自定义端点。
+2. 粘贴 API Key，点击「测试连接」。
+3. 选择可用模型，保存配置。
+4. 回到书籍页面开始写作。
+
+Studio 运行时只使用：
+
+```text
+provider bank 默认值
+→ inkos.json 里的 services / 当前 service / defaultModel
+→ .inkos/secrets.json 里的 service API Key
+```
+
+即使检测到 `~/.inkos/.env` 或项目 `.env`，Studio 也只会展示提示，不会用 env 覆盖 service、model、baseUrl 或 API Key。API Key 存在项目内的 `.inkos/secrets.json`，不会写进 `inkos.json`。
+
+#### 方式二：CLI / daemon / 部署环境的 env 配置
+
+适合终端批处理、服务器部署、CI、Docker、守护进程和一次性切模型。
+
+全局 env：
 
 ```bash
 inkos config set-global \
@@ -80,38 +113,49 @@ inkos config set-global \
   --base-url <API 地址> \
   --api-key <你的 API Key> \
   --model <模型名>
-
-# provider: openai / anthropic / custom（兼容 OpenAI 格式的中转站选 custom）
-# base-url: 你的 API 提供商地址
-# api-key: 你的 API Key
-# model: 你的模型名称
 ```
 
-配置保存在 `~/.inkos/.env`，所有项目共享。之后新建项目不用再配。
-
-**方式二：项目级 `.env`**
+也可以手动写 `~/.inkos/.env` 或项目 `.env`：
 
 ```bash
-inkos init my-novel     # 初始化项目
-# 编辑 my-novel/.env
-```
-
-```bash
-# 必填
-INKOS_LLM_PROVIDER=                               # openai / anthropic / custom（兼容 OpenAI 接口的都选 custom）
-INKOS_LLM_BASE_URL=                               # API 地址（支持中转站、智谱、Gemini 等）
-INKOS_LLM_API_KEY=                                 # API Key
-INKOS_LLM_MODEL=                                   # 模型名
+INKOS_LLM_PROVIDER=custom
+INKOS_LLM_BASE_URL=https://api.moonshot.cn/v1
+INKOS_LLM_API_KEY=sk-...
+INKOS_LLM_MODEL=kimi-k2.5
 
 # 可选
-# INKOS_LLM_TEMPERATURE=0.7                       # 温度
-# INKOS_LLM_MAX_TOKENS=8192                        # 最大输出 token
-# INKOS_LLM_THINKING_BUDGET=0                      # Anthropic 扩展思考预算
+INKOS_LLM_SERVICE=moonshot                         # 推荐写；不写时会尽量从 baseUrl 自动识别
+INKOS_LLM_TEMPERATURE=0.7
+INKOS_LLM_THINKING_BUDGET=0
+INKOS_DEFAULT_LANGUAGE=zh
+INKOS_LLM_EXTRA_top_p=0.9
 ```
 
-项目 `.env` 会覆盖全局配置。不需要覆盖时可以不写。
+CLI 合成顺序：
 
-**方式三：多模型路由（可选）**
+```text
+Studio/project service 配置
+→ .inkos/secrets.json service key
+→ global ~/.inkos/.env
+→ project .env
+→ 当前进程环境变量
+→ CLI 参数
+```
+
+也就是说，CLI 默认可以复用 Studio 配好的服务和密钥；如果 env 里声明了 `INKOS_LLM_SERVICE`、`INKOS_LLM_MODEL`、`INKOS_LLM_BASE_URL` 或 `INKOS_LLM_API_KEY`，则作为覆盖层生效。旧 env 只写 `baseUrl + model + apiKey` 也能继续用，InkOS 会尽量从 baseUrl 反推 service。
+
+一次性指定服务或模型：
+
+```bash
+inkos write next --service google --model gemini-2.5-flash
+inkos write next --service moonshot --model kimi-k2.5 --no-stream
+inkos agent "继续写下一章" --api-key-env MOONSHOT_API_KEY
+inkos doctor --service minimaxCodingPlan --model MiniMax-M2.7
+```
+
+`--service` 会从 provider bank 自动推导 baseUrl、协议和兼容策略；`--model` 必须属于最终 service，否则会直接报错，避免把 Kimi 模型发到 Gemini 这类错配问题。
+
+#### 方式三：多模型路由（可选）
 
 给不同 Agent 分配不同模型，按需平衡质量与成本：
 
@@ -123,6 +167,31 @@ inkos config show-models        # 查看当前路由
 ```
 
 未单独配置的 Agent 自动使用全局模型。
+
+#### 配置排查
+
+```bash
+inkos doctor
+```
+
+`doctor` 会显示当前 effective config mode、service/model/API Key 来源，并尝试 API 连通性。常见模式：
+
+| 模式 | 含义 |
+|------|------|
+| `studio-project` | Studio 运行时：只使用 Studio/project 配置和 secrets |
+| `cli-project` | CLI 运行时：以 Studio 配置为基础，再叠加 env 和 CLI 参数 |
+| `legacy-env` | 旧 env 模式：兼容老项目的纯 `.env` 配置 |
+
+如果服务测试失败，优先检查服务商、模型和协议是否匹配。Google Gemini 的 AI Studio API Key 可用于 Gemini OpenAI-compatible endpoint；InkOS 会自动禁用 Google 不支持的 OpenAI `store` 参数。MiniMax / MiniMax CodingPlan 会优先使用可工作的非流式 transport，避免流式返回 usage 但无正文的问题。
+
+### v2.0 LLM 配置更新
+
+- **Studio / CLI 配置隔离**：Studio 固定使用服务页配置和 `.inkos/secrets.json`；CLI、daemon、部署环境支持 env 覆盖和一次性命令参数。
+- **Provider bank 能力表**：内置 Google Gemini、Moonshot、MiniMax、智谱、百炼、DeepSeek、硅基流动、PPIO、OpenRouter、Ollama、CodingPlan 等服务的 baseUrl、协议、模型和兼容策略。
+- **模型归属校验**：`--service google --model kimi-k2.5` 这类错配会直接报错，避免把请求发到错误服务商。
+- **Google Gemini 兼容修复**：AI Studio API Key 可直接用于 Gemini OpenAI-compatible endpoint，InkOS 会自动禁用 Google 不支持的 OpenAI `store` 参数。
+- **MiniMax transport 探测**：MiniMax / MiniMax CodingPlan 自动使用可工作的 transport，规避流式 usage 正常但正文为空的问题。
+- **旧 env 兼容**：老的 `INKOS_LLM_BASE_URL + INKOS_LLM_MODEL + INKOS_LLM_API_KEY` 仍可用于 CLI；没有 `INKOS_LLM_SERVICE` 时会尝试从 baseUrl 反推服务商。
 
 ### v1.2 更新
 
@@ -214,7 +283,7 @@ inkos compose chapter 吞天魔帝
 
 ### 本地模型兼容
 
-支持任何 OpenAI 兼容接口（`--provider custom`）。Stream 自动降级——中转站不支持 SSE 时自动回退 sync。Fallback 解析器处理小模型不规范输出，流中断时自动恢复部分内容。
+支持任何 OpenAI 兼容接口（Studio 里新增自定义服务，或 CLI 使用 `--provider custom` / `INKOS_LLM_PROVIDER=custom`）。服务测试会尝试不同协议和流式开关组合，并保存或提示可用 transport。Fallback 解析器处理小模型不规范输出，流中断时自动恢复部分内容。
 
 ### 可靠性保障
 
@@ -222,7 +291,7 @@ inkos compose chapter 吞天魔帝
 
 伏笔系统使用 Zod schema 校验——`lastAdvancedChapter` 必须是整数，`status` 只能是 open/progressing/deferred/resolved。LLM 输出的 JSON delta 在写入前经过 `applyRuntimeStateDelta` 做 immutable 更新 + `validateRuntimeState` 结构校验。坏数据直接拒绝，不会滚雪球。
 
-用户设置的 `INKOS_LLM_MAX_TOKENS` 作为全局上限生效，`llm.extra` 中的保留键（max_tokens、temperature 等）被自动过滤，防止意外覆盖。
+模型输出上限由 provider bank 的模型卡管理；`llm.extra` / `INKOS_LLM_EXTRA_*` 中的保留键（max_tokens、temperature、model、messages、stream 等）会被自动过滤，防止意外覆盖核心请求参数。
 
 ---
 
@@ -377,13 +446,13 @@ inkos agent "先扫描市场趋势，然后根据结果创建一本新书"
 | `inkos export [id]` | 导出书籍（`--format txt/md/epub`、`--output <path>`、`--approved-only`） |
 | `inkos radar scan` | 扫描平台趋势 |
 | `inkos fanfic init` | 从原作素材创建同人书（`--from`、`--mode canon/au/ooc/cp`） |
-| `inkos config set-global` | 设置全局 LLM 配置（~/.inkos/.env） |
+| `inkos config set-global` | 设置 CLI / daemon / 部署环境的全局 LLM env（`~/.inkos/.env`） |
 | `inkos config show-global` | 查看全局配置 |
 | `inkos config set/show` | 查看/更新项目配置 |
 | `inkos config set-model <agent> <model>` | 为指定 agent 设置模型覆盖（`--base-url`、`--provider`、`--api-key-env` 支持多 Provider 路由） |
 | `inkos config remove-model <agent>` | 移除 agent 模型覆盖（回退到默认） |
 | `inkos config show-models` | 查看当前模型路由 |
-| `inkos doctor` | 诊断配置问题（含 API 连通性测试 + 提供商兼容性提示） |
+| `inkos doctor` | 诊断配置问题（显示 effective config mode、来源、API 连通性和提供商兼容性提示） |
 | `inkos detect [id] [n]` | AIGC 检测（`--all` 全部章节，`--stats` 统计） |
 | `inkos style analyze <file>` | 分析参考文本提取文风指纹 |
 | `inkos style import <file> [id]` | 导入文风指纹到指定书 |
@@ -391,10 +460,17 @@ inkos agent "先扫描市场趋势，然后根据结果创建一本新书"
 | `inkos import chapters [id] --from <path>` | 导入已有章节续写（`--split`、`--resume-from`） |
 | `inkos analytics [id]` / `inkos stats [id]` | 书籍数据分析（审计通过率、高频问题、章节排名、token 用量） |
 | `inkos update` | 更新到最新版本 |
-| `inkos studio` | 启动 Web 工作台（`-p` 指定端口，默认 4567） |
+| `inkos studio` / `inkos` | 启动 Web 工作台（`-p` 指定端口，默认 4567；Studio 使用服务页配置，不使用 env 覆盖） |
 | `inkos up / down` | 启动/停止守护进程（`-q` 静默模式，自动写入 `inkos.log`） |
 
 `[id]` 参数在项目只有一本书时可省略，自动检测。所有命令支持 `--json` 输出结构化数据。`draft` / `write next` / `plan chapter` / `compose chapter` 支持 `--context` 传入创作指导，`--words` 覆盖每章目标字数。`book create` 支持 `--brief <file>` 传入创作简报（你的脑洞/设定文档），Architect 会基于此生成设定而非凭空创作。`plan chapter` / `compose chapter` 不要求在线 LLM，可在配置 API Key 之前先检查输入治理结果。
+
+CLI 运行时还支持一次性 LLM 覆盖参数：`--service`、`--model`、`--api-key-env`、`--base-url`、`--api-format <chat|responses>`、`--stream`、`--no-stream`。例如：
+
+```bash
+inkos write next --service google --model gemini-2.5-flash
+inkos up --service moonshot --model kimi-k2.5 --api-key-env MOONSHOT_API_KEY
+```
 
 ## 路线图
 

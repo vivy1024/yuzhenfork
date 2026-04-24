@@ -45,6 +45,7 @@ const SERVICE_PRESETS_MOCK: Record<string, ServicePresetMock> = {
   anthropic: { providerFamily: "anthropic", baseUrl: "https://api.anthropic.com", modelsBaseUrl: "https://api.anthropic.com", knownModels: [] as string[] },
   minimax: { providerFamily: "anthropic", baseUrl: "https://api.minimaxi.com/anthropic", modelsBaseUrl: "https://api.minimaxi.com/anthropic", knownModels: [] as string[] },
   bailian: { providerFamily: "anthropic", baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic", modelsBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", knownModels: [] as string[] },
+  google: { providerFamily: "openai", baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", modelsBaseUrl: "https://generativelanguage.googleapis.com/v1beta/openai", knownModels: [] as string[] },
   custom: { providerFamily: "openai", baseUrl: "", knownModels: [] as string[] },
 };
 const resolveServicePresetMock = vi.fn((service: string) => SERVICE_PRESETS_MOCK[service]);
@@ -53,13 +54,13 @@ const resolveServiceModelsBaseUrlMock = vi.fn((service: string) => {
   const preset = SERVICE_PRESETS_MOCK[service];
   return preset?.modelsBaseUrl ?? preset?.baseUrl;
 });
-const listModelsForServiceMock = vi.fn(async (service: string, apiKey?: string) => {
+const listModelsForServiceMock = vi.fn(async (service: string, apiKey?: string, liveBaseUrl?: string) => {
   const preset = resolveServicePresetMock(service);
-  if (!preset || service === "custom") return [];
+  if (!preset) return [];
   if (preset.knownModels.length > 0) {
     return preset.knownModels.map((id) => ({ id, name: id, reasoning: false, contextWindow: 0 }));
   }
-  const modelsBaseUrl = resolveServiceModelsBaseUrlMock(service);
+  const modelsBaseUrl = liveBaseUrl ?? resolveServiceModelsBaseUrlMock(service);
   if (!apiKey || !modelsBaseUrl) return [];
   const res = await fetch(`${modelsBaseUrl.replace(/\/$/, "")}/models`, {
     headers: { Authorization: `Bearer ${apiKey}` },
@@ -74,6 +75,38 @@ const listModelsForServiceMock = vi.fn(async (service: string, apiKey?: string) 
     contextWindow: 0,
   }));
 });
+const endpointIdsByGroup = {
+  overseas: ["anthropic", "google", "mistral", "openai", "xai"],
+  china: [
+    "ai360", "baichuan", "bailian", "deepseek", "hunyuan", "internlm", "longcat",
+    "minimax", "moonshot", "sensenova", "spark", "stepfun", "tencentcloud",
+    "volcengine", "wenxin", "xiaomimimo", "zeroone", "zhipu",
+  ],
+  aggregator: ["giteeai", "infiniai", "modelscope", "newapi", "openrouter", "ppio", "qiniu", "siliconcloud"],
+  local: ["githubCopilot", "ollama"],
+  codingPlan: [
+    "astronCodingPlan", "bailianCodingPlan", "glmCodingPlan", "kimiCodingPlan",
+    "minimaxCodingPlan", "opencodeCodingPlan", "volcengineCodingPlan",
+  ],
+} as const;
+const endpointMocks = [
+  ...Object.entries(endpointIdsByGroup).flatMap(([group, ids]) => ids.map((id) => ({
+    id,
+    label: id,
+    group,
+    ...(id === "google" ? { checkModel: "gemini-2.5-flash" } : {}),
+    ...(id === "minimax" ? { checkModel: "MiniMax-M2.7" } : {}),
+    models: [
+      { id: `${id}-model`, maxOutput: 4096, contextWindowTokens: 32768, enabled: true },
+      { id: `${id}-disabled`, maxOutput: 4096, contextWindowTokens: 32768, enabled: false },
+    ],
+  }))),
+  { id: "custom", label: "自定义端点", models: [] },
+];
+const getAllEndpointsMock = vi.fn(() => endpointMocks);
+const probeModelsFromUpstreamMock = vi.fn(async () => [
+  { id: "custom-model", name: "custom-model", contextWindow: 0 },
+]);
 
 const logger = {
   child: () => logger,
@@ -189,6 +222,8 @@ vi.mock("@actalk/inkos-core", () => {
     saveSecrets: saveSecretsMock,
     getServiceApiKey: getServiceApiKeyMock,
     listModelsForService: listModelsForServiceMock,
+    getAllEndpoints: getAllEndpointsMock,
+    probeModelsFromUpstream: probeModelsFromUpstreamMock,
     GLOBAL_ENV_PATH: join(tmpdir(), "inkos-global.env"),
   };
 });
@@ -355,6 +390,8 @@ describe("createStudioServer daemon lifecycle", () => {
     resolveServiceProviderFamilyMock.mockClear();
     resolveServiceModelsBaseUrlMock.mockClear();
     listModelsForServiceMock.mockClear();
+    getAllEndpointsMock.mockClear();
+    probeModelsFromUpstreamMock.mockClear();
     // Default BookSession for agent tests
     const defaultBookSession = {
       sessionId: "agent-session-1",
@@ -479,7 +516,6 @@ describe("createStudioServer daemon lifecycle", () => {
       body: JSON.stringify({
         language: "en",
         temperature: 0.2,
-        maxTokens: 2048,
         stream: true,
       }),
     });
@@ -490,7 +526,6 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(project.json()).resolves.toMatchObject({
       language: "en",
       temperature: 0.2,
-      maxTokens: 2048,
       stream: true,
     });
   });
@@ -646,12 +681,151 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
+  it("returns all bank services with group fields and custom services", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1" },
+        ],
+      },
+    }, null, 2), "utf-8");
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        moonshot: { apiKey: "sk-moonshot" },
+        "custom:内网GPT": { apiKey: "sk-corp" },
+      },
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const res = await app.request("http://localhost/api/v1/services");
+    expect(res.status).toBe(200);
+    const body = await res.json() as { services: Array<{ service: string; group?: string; connected: boolean }> };
+    const bank = body.services.filter((s) => !s.service.startsWith("custom"));
+    expect(bank.length).toBe(40);
+    expect(bank.every((s) => typeof s.group === "string")).toBe(true);
+    expect(bank.filter((s) => s.group === "overseas")).toHaveLength(5);
+    expect(bank.filter((s) => s.group === "china")).toHaveLength(18);
+    expect(bank.filter((s) => s.group === "aggregator")).toHaveLength(8);
+    expect(bank.filter((s) => s.group === "local")).toHaveLength(2);
+    expect(bank.filter((s) => s.group === "codingPlan")).toHaveLength(7);
+    expect(body.services.find((s) => s.service === "moonshot")?.connected).toBe(true);
+    expect(body.services.find((s) => s.service === "custom:内网GPT")).toMatchObject({
+      connected: true,
+    });
+  });
+
+  it("returns connected bank model groups from the local bank", async () => {
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        moonshot: { apiKey: "sk-moonshot" },
+      },
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/models");
+    expect(response.status).toBe(200);
+    const body = await response.json() as { groups: Array<{ service: string; models: Array<{ id: string }> }> };
+    expect(body.groups.map((g) => g.service)).toEqual(["moonshot"]);
+    expect(body.groups[0]?.models).toEqual([
+      { id: "moonshot-model", name: "moonshot-model", maxOutput: 4096, contextWindow: 32768 },
+    ]);
+  });
+
+  it("filters non-text models out of connected bank model groups", async () => {
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        google: { apiKey: "sk-google" },
+      },
+    });
+    getAllEndpointsMock.mockReturnValueOnce([
+      {
+        id: "google",
+        label: "Google Gemini",
+        group: "overseas",
+        models: [
+          { id: "gemini-2.5-flash", maxOutput: 65536, contextWindowTokens: 1114112, enabled: true },
+          { id: "gemini-3.1-flash-image-preview", maxOutput: 32768, contextWindowTokens: 163840, enabled: true },
+          { id: "text-embedding-004", maxOutput: 2048, contextWindowTokens: 2048, enabled: true },
+        ],
+      },
+    ] as never);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/models");
+    expect(response.status).toBe(200);
+    const body = await response.json() as { groups: Array<{ service: string; models: Array<{ id: string }> }> };
+    expect(body.groups[0]?.models.map((m) => m.id)).toEqual(["gemini-2.5-flash"]);
+  });
+
+  it("returns custom model groups through the slow probe path", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1" },
+        ],
+      },
+    }, null, 2), "utf-8");
+    loadSecretsMock.mockResolvedValue({
+      services: {
+        "custom:内网GPT": { apiKey: "sk-corp" },
+      },
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/models/custom");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      groups: [
+        {
+          service: "custom:内网GPT",
+          label: "内网GPT",
+          models: [{ id: "custom-model", name: "custom-model", contextWindow: 0 }],
+        },
+      ],
+    });
+    expect(probeModelsFromUpstreamMock).toHaveBeenCalledWith(
+      "https://llm.internal.corp/v1",
+      "sk-corp",
+      10_000,
+    );
+  });
+
+  it("filters non-text models out of live service model lists", async () => {
+    loadSecretsMock.mockResolvedValue({ services: { google: { apiKey: "sk-google" } } });
+    listModelsForServiceMock.mockResolvedValueOnce([
+      { id: "gemini-2.5-flash", name: "gemini-2.5-flash", reasoning: false, contextWindow: 1114112 },
+      { id: "gemini-3.1-flash-image-preview", name: "gemini-3.1-flash-image-preview", reasoning: false, contextWindow: 163840 },
+      { id: "text-embedding-004", name: "text-embedding-004", reasoning: false, contextWindow: 2048 },
+    ]);
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/google/models?refresh=1");
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      models: [
+        { id: "gemini-2.5-flash", name: "gemini-2.5-flash", contextWindow: 1114112 },
+      ],
+    });
+  });
+
   it("merges service config patches instead of overwriting existing services", async () => {
     await writeFile(join(root, "inkos.json"), JSON.stringify({
       ...projectConfig,
       llm: {
         services: [
-          { service: "moonshot", temperature: 1, maxTokens: 4096, apiFormat: "chat", stream: true },
+          { service: "moonshot", temperature: 1, apiFormat: "chat", stream: true },
           { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9, apiFormat: "responses", stream: false },
         ],
         defaultModel: "kimi-k2.5",
@@ -668,7 +842,6 @@ describe("createStudioServer daemon lifecycle", () => {
         services: {
           moonshot: {
             temperature: 0.5,
-            maxTokens: 2048,
             apiFormat: "responses",
             stream: false,
           },
@@ -680,7 +853,7 @@ describe("createStudioServer daemon lifecycle", () => {
 
     const raw = JSON.parse(await readFile(join(root, "inkos.json"), "utf-8"));
     expect(raw.llm.services).toEqual([
-      { service: "moonshot", temperature: 0.5, maxTokens: 2048, apiFormat: "responses", stream: false },
+      { service: "moonshot", temperature: 0.5, apiFormat: "responses", stream: false },
       { service: "custom", name: "内网GPT", baseUrl: "https://llm.internal.corp/v1", temperature: 0.9, apiFormat: "responses", stream: false },
     ]);
   });
@@ -712,9 +885,11 @@ describe("createStudioServer daemon lifecycle", () => {
     const response = await app.request("http://localhost/api/v1/services/config");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      configSource: "env",
+      configSource: "studio",
+      storedConfigSource: "env",
       envConfig: {
         effectiveSource: "project",
+        runtimeUsesEnv: false,
         project: {
           detected: true,
           baseUrl: "https://project.example.com/v1",
@@ -736,7 +911,7 @@ describe("createStudioServer daemon lifecycle", () => {
       ...projectConfig,
       llm: {
         services: [
-          { service: "moonshot", temperature: 1, maxTokens: 4096 },
+          { service: "moonshot", temperature: 1 },
         ],
         defaultModel: "kimi-k2.5",
         configSource: "env",
@@ -757,9 +932,25 @@ describe("createStudioServer daemon lifecycle", () => {
     const raw = JSON.parse(await readFile(join(root, "inkos.json"), "utf-8"));
     expect(raw.llm.configSource).toBe("studio");
     expect(raw.llm.services).toEqual([
-      { service: "moonshot", temperature: 1, maxTokens: 4096 },
+      { service: "moonshot", temperature: 1 },
     ]);
     expect(raw.llm.defaultModel).toBe("kimi-k2.5");
+  });
+
+  it("rejects switching Studio runtime to env config source", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const save = await app.request("http://localhost/api/v1/services/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ configSource: "env" }),
+    });
+
+    expect(save.status).toBe(400);
+    await expect(save.json()).resolves.toMatchObject({
+      error: expect.stringContaining("Studio 运行时不支持"),
+    });
   });
 
   it("tests and lists models for custom services using baseUrl and stored config", async () => {
@@ -777,7 +968,6 @@ describe("createStudioServer daemon lifecycle", () => {
         "custom:内网GPT": { apiKey: "sk-corp" },
       },
     });
-    getServiceApiKeyMock.mockResolvedValue("sk-corp");
 
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
@@ -991,7 +1181,148 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
-  it("uses the preset models baseUrl when listing Bailian models", async () => {
+  it("uses the bank endpoint check model before the global default during service probe", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "google", apiFormat: "chat", stream: false },
+        ],
+        defaultModel: "MiniMax-M2.7",
+      },
+    }, null, 2), "utf-8");
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => "Not Found",
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
+    createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
+    chatCompletionMock.mockImplementation(async (_client: any, model: string) => {
+      if (model === "gemini-2.5-flash") {
+        return {
+          content: "pong",
+          usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+        };
+      }
+      throw new Error(`unexpected model: ${model}`);
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/google/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: "google-key",
+        apiFormat: "chat",
+        stream: false,
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      selectedModel: "gemini-2.5-flash",
+    });
+    expect(chatCompletionMock).toHaveBeenCalledWith(
+      expect.anything(),
+      "gemini-2.5-flash",
+      expect.any(Array),
+      expect.any(Object),
+    );
+    expect(chatCompletionMock.mock.calls.map((call) => call[1])).not.toContain("MiniMax-M2.7");
+  });
+
+  it("does not fall back to the global default model when a bank endpoint probe fails", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "google", apiFormat: "chat", stream: false },
+        ],
+        defaultModel: "MiniMax-M2.7",
+      },
+    }, null, 2), "utf-8");
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => "Not Found",
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
+    createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
+    chatCompletionMock.mockImplementation(async (_client: any, model: string) => {
+      throw new Error(`probe failed for ${model}`);
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/google/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: "google-key",
+        apiFormat: "chat",
+        stream: false,
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: false,
+      error: expect.stringContaining("gemini-2.5-flash"),
+    });
+    expect(new Set(chatCompletionMock.mock.calls.map((call) => call[1]))).toEqual(new Set(["gemini-2.5-flash"]));
+  });
+
+  it("returns a Google-specific diagnostic when Gemini probe returns 400", async () => {
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      ...projectConfig,
+      llm: {
+        services: [
+          { service: "google", apiFormat: "chat", stream: false },
+        ],
+      },
+    }, null, 2), "utf-8");
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 404,
+      text: async () => "Not Found",
+    });
+    vi.stubGlobal("fetch", fetchMock as typeof fetch);
+    createLLMClientMock.mockImplementation(((cfg: unknown) => cfg) as any);
+    chatCompletionMock.mockRejectedValue(
+      new Error("API 返回 400（请求参数错误）。常见原因：\n  1. temperature / max_tokens 超出模型约束（如 Moonshot kimi-k2.X 强制 temperature=1）\n  (baseUrl: https://generativelanguage.googleapis.com/v1beta/openai, model: gemini-2.5-flash)"),
+    );
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/services/google/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: "google-key",
+        apiFormat: "chat",
+        stream: false,
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    const json = await response.json() as { error?: string };
+    expect(json.error).toContain("Google Gemini 测试连接失败");
+    expect(json.error).toContain("测试模型：gemini-2.5-flash");
+    expect(json.error).toContain("API Key 是否来自 Google AI Studio");
+    expect(json.error).toContain("Gemini API");
+    expect(json.error).not.toContain("Moonshot");
+  });
+
+  it("does not return OpenAI-compatible Bailian models from the Anthropic channel connection test", async () => {
     await writeFile(join(root, "inkos.json"), JSON.stringify({
       ...projectConfig,
       llm: {
@@ -1001,14 +1332,25 @@ describe("createStudioServer daemon lifecycle", () => {
         defaultModel: "qwen-max",
       },
     }, null, 2), "utf-8");
-    getServiceApiKeyMock.mockResolvedValue("sk-bailian");
+    loadSecretsMock.mockResolvedValue({ services: { bailian: { apiKey: "sk-bailian" } } });
+    const bailianEndpoint = endpointMocks.find((ep) => ep.id === "bailian");
+    expect(bailianEndpoint).toBeDefined();
+    Object.assign(bailianEndpoint!, {
+      checkModel: "qwen-max",
+      api: "anthropic-messages",
+      baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic",
+      models: [
+        { id: "qwen-max", maxOutput: 8192, contextWindowTokens: 131072, enabled: true },
+        { id: "kimi-k2.5", maxOutput: 32768, contextWindowTokens: 262144, enabled: true },
+      ],
+    });
 
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;
       if (url === "https://dashscope.aliyuncs.com/compatible-mode/v1/models") {
         return {
           ok: true,
-          json: async () => ({ data: [{ id: "qwen-max" }] }),
+          json: async () => ({ data: [{ id: "kimi-k2.6" }, { id: "deepseek-v3.2" }] }),
           text: async (): Promise<string> => "",
         };
       }
@@ -1033,13 +1375,22 @@ describe("createStudioServer daemon lifecycle", () => {
     const { createStudioServer } = await import("./server.js");
     const app = createStudioServer(cloneProjectConfig() as never, root);
 
-    const response = await app.request("http://localhost/api/v1/services/bailian/models");
+    const response = await app.request("http://localhost/api/v1/services/bailian/test", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        apiKey: "sk-bailian",
+        apiFormat: "chat",
+        stream: false,
+      }),
+    });
 
     expect(response.status).toBe(200);
-    await expect(response.json()).resolves.toMatchObject({
-      models: [{ id: "qwen-max", name: "qwen-max" }],
-    });
-    expect(fetchMock).toHaveBeenCalledWith(
+    const body = await response.json() as { models: Array<{ id: string }> };
+    expect(body.models.map((m) => m.id)).toEqual(["qwen-max", "kimi-k2.5"]);
+    expect(body.models.some((m) => m.id === "kimi-k2.6")).toBe(false);
+    expect(body.models.some((m) => m.id === "deepseek-v3.2")).toBe(false);
+    expect(fetchMock).not.toHaveBeenCalledWith(
       "https://dashscope.aliyuncs.com/compatible-mode/v1/models",
       expect.any(Object),
     );
@@ -1468,6 +1819,35 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(response.json()).resolves.toMatchObject({
       response: "你好，我在。",
     });
+  });
+
+  it("rejects explicit non-text models before running the agent", async () => {
+    resolveServiceModelMock.mockResolvedValue({
+      model: { id: "gemini-3.1-flash-image-preview", provider: "google", api: "openai-completions" },
+      apiKey: "sk-google",
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instruction: "nihao",
+        service: "google",
+        model: "gemini-3.1-flash-image-preview",
+        sessionId: "agent-session-1",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("不适合文本聊天"),
+      response: expect.stringContaining("gemini-3.1-flash-image-preview"),
+    });
+    expect(resolveServiceModelMock).not.toHaveBeenCalled();
+    expect(runAgentSessionMock).not.toHaveBeenCalled();
   });
 
   it("returns 500 with an error payload when the agent session fails", async () => {

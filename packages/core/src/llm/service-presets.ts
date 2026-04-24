@@ -1,9 +1,12 @@
+import { getEndpoint } from "./providers/index.js";
+import { probeModelsFromUpstream } from "./providers/probe.js";
+
 export interface ServicePreset {
   readonly providerFamily: "openai" | "anthropic";
   readonly api: string;
   readonly baseUrl: string;
   readonly label: string;
-  readonly temperatureRange?: [number, number];
+  readonly temperatureRange?: readonly [number, number];
   readonly defaultTemperature?: number;
   readonly writingTemperature?: number;
   readonly temperatureHint?: string;
@@ -32,7 +35,6 @@ export const SERVICE_PRESETS: Record<string, ServicePreset> = {
     providerFamily: "anthropic",
     api: "anthropic-messages",
     baseUrl: "https://dashscope.aliyuncs.com/apps/anthropic",
-    modelsBaseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     label: "百炼 (通义千问)",
     temperatureRange: [0, 2],
     defaultTemperature: 0.7,
@@ -48,7 +50,34 @@ export const SERVICE_PRESETS: Record<string, ServicePreset> = {
 };
 
 export function resolveServicePreset(service: string): ServicePreset | undefined {
-  return SERVICE_PRESETS[service];
+  const provider = getEndpoint(service);
+  const legacy = SERVICE_PRESETS[service];
+  if (!provider && !legacy) return undefined;
+
+  return {
+    providerFamily: legacy?.providerFamily ?? (provider?.api.startsWith("anthropic") ? "anthropic" : "openai"),
+    api: (provider?.api ?? legacy?.api ?? "openai-completions") as ServicePreset["api"],
+    baseUrl: provider?.baseUrl ?? legacy?.baseUrl ?? "",
+    label: provider?.label ?? legacy?.label ?? service,
+    ...(provider?.temperatureRange ?? legacy?.temperatureRange
+      ? { temperatureRange: provider?.temperatureRange ?? legacy?.temperatureRange }
+      : {}),
+    ...(provider?.defaultTemperature !== undefined || legacy?.defaultTemperature !== undefined
+      ? { defaultTemperature: provider?.defaultTemperature ?? legacy?.defaultTemperature }
+      : {}),
+    ...(provider?.writingTemperature !== undefined || legacy?.writingTemperature !== undefined
+      ? { writingTemperature: provider?.writingTemperature ?? legacy?.writingTemperature }
+      : {}),
+    ...(provider?.temperatureHint ?? legacy?.temperatureHint
+      ? { temperatureHint: provider?.temperatureHint ?? legacy?.temperatureHint }
+      : {}),
+    ...(legacy?.knownModels ? { knownModels: legacy.knownModels } : {}),
+    // piProvider 字段已从 InkosEndpoint 移除（走 provider-to-pi-ai adapter），这里只保留 legacy fallback
+    ...(legacy?.piProvider ? { piProvider: legacy.piProvider } : {}),
+    ...((provider ? provider.modelsBaseUrl : legacy?.modelsBaseUrl)
+      ? { modelsBaseUrl: provider ? provider.modelsBaseUrl : legacy?.modelsBaseUrl }
+      : {}),
+  };
 }
 
 export function resolveServiceProviderFamily(service: string): "openai" | "anthropic" | undefined {
@@ -101,57 +130,70 @@ export const SERVICE_TO_PI_PROVIDER: Record<string, string> = Object.fromEntries
 export interface ModelInfo {
   readonly id: string;
   readonly name: string;
-  readonly reasoning: boolean;
   readonly contextWindow: number;
+  /** 模型输出上限（来自 providers bank 或 live /models 补充） */
+  readonly maxOutput?: number;
 }
 
-export async function listModelsForService(service: string, apiKey?: string): Promise<ReadonlyArray<ModelInfo>> {
+function toModelInfo(inkosModel: { id: string; maxOutput: number; contextWindowTokens: number }): ModelInfo {
+  return {
+    id: inkosModel.id,
+    name: inkosModel.id,
+    contextWindow: inkosModel.contextWindowTokens,
+    maxOutput: inkosModel.maxOutput,
+  };
+}
+
+/**
+ * listModelsForService（R4 精修）：
+ * - 先试 live /models probe（如果 baseUrl + apiKey 具备）
+ * - probe 失败或无 apiKey：fallback 到 provider.models（inkos bank）
+ * - 不再做 INKOS_LLM_MODEL env 补丁（会污染跨 service 菜单；bank 已足够全）
+ *
+ * custom / newapi / higress 等 baseUrl 空的 gateway provider：
+ *   必须传 liveBaseUrl 才能做 probe；否则只依赖 bank。
+ */
+export async function listModelsForService(
+  service: string,
+  apiKey?: string,
+  liveBaseUrl?: string,
+): Promise<ReadonlyArray<ModelInfo>> {
+  const provider = getEndpoint(service);
   const preset = SERVICE_PRESETS[service];
-  if (!preset || service === "custom") return [];
+  if (!provider && !preset) return [];
 
-  if (preset.knownModels && preset.knownModels.length > 0) {
-    return preset.knownModels.map((id) => ({ id, name: id, reasoning: false, contextWindow: 0 }));
-  }
+  const byId = new Map<string, ModelInfo>();
 
-  const modelsBaseUrl = resolveServiceModelsBaseUrl(service);
-  if (apiKey && modelsBaseUrl) {
-    try {
-      const modelsUrl = modelsBaseUrl.replace(/\/$/, "") + "/models";
-      const res = await fetch(modelsUrl, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (res.ok) {
-        const json = await res.json() as { data?: Array<{ id: string; owned_by?: string }> };
-        if (json.data && json.data.length > 0) {
-          return json.data.map((m) => ({
-            id: m.id,
-            name: m.id,
-            reasoning: false,
-            contextWindow: 0,
-          }));
-        }
+  // 1) 先试 live /models probe
+  const probeBaseUrl = liveBaseUrl || provider?.modelsBaseUrl || provider?.baseUrl || resolveServiceModelsBaseUrl(service);
+  if (apiKey && probeBaseUrl) {
+    const probed = await probeModelsFromUpstream(probeBaseUrl, apiKey, 10_000);
+    if (probed.length > 0) {
+      const { lookupModel } = await import("./providers/lookup.js");
+      for (const m of probed) {
+        const card = lookupModel(service, m.id);
+        byId.set(m.id, card ? toModelInfo(card) : { id: m.id, name: m.name, contextWindow: m.contextWindow });
       }
-    } catch {
-      // /models unavailable, fall through
     }
   }
 
-  const piProvider = SERVICE_TO_PI_PROVIDER[service];
-  if (!piProvider) return [];
-
-  try {
-    const { getModels } = await import("@mariozechner/pi-ai");
-    const models = getModels(piProvider as any);
-    return models.map((m: any) => ({
-      id: m.id,
-      name: m.name,
-      reasoning: m.reasoning ?? false,
-      contextWindow: m.contextWindow ?? 0,
-    }));
-  } catch {
-    return [];
+  // 2) provider bank fallback / 补充
+  if (provider) {
+    for (const m of provider.models) {
+      if (m.enabled === false) continue;
+      if (byId.has(m.id)) continue;
+      byId.set(m.id, toModelInfo(m));
+    }
   }
+
+  // 3) 旧 knownModels fallback
+  if (byId.size === 0 && preset?.knownModels) {
+    for (const id of preset.knownModels) {
+      byId.set(id, { id, name: id, contextWindow: 0 });
+    }
+  }
+
+  return Array.from(byId.values());
 }
 
 export async function listServicesWithModelCount(): Promise<ReadonlyArray<{ service: string; label: string; modelCount: number }>> {

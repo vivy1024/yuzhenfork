@@ -30,10 +30,6 @@ interface ServiceProbeResponse {
   readonly error?: string;
 }
 
-function toErrorMessage(error: unknown, fallback: string): string {
-  return error instanceof Error ? error.message : fallback;
-}
-
 export async function probeServiceForDetail(
   serviceId: string,
   body: {
@@ -75,60 +71,29 @@ export async function rehydrateServiceConnectionStatus(args: {
   );
   const apiKey = String(secret.apiKey ?? "");
 
-  if (!args.shouldVerify || apiKey.trim().length === 0) {
-    return {
-      apiKey,
-      status: { state: "idle" },
-      detectedModel: "",
-      detectedConfig: null,
-    };
-  }
-
-  if (args.isCustom && args.baseUrl.trim().length === 0) {
-    return {
-      apiKey,
-      status: { state: "idle" },
-      detectedModel: "",
-      detectedConfig: null,
-    };
-  }
-
-  try {
-    const result = await probeServiceForDetail(
-      args.effectiveServiceId,
-      {
-        apiKey: apiKey.trim(),
-        apiFormat: args.apiFormat,
-        stream: args.stream,
-        ...(args.isCustom ? { baseUrl: args.baseUrl.trim() } : {}),
-      },
-      { fetchJsonImpl },
-    );
-    if (!result.ok) {
-      return {
-        apiKey,
-        status: { state: "error", message: result.error ?? "连接失败" },
-        detectedModel: "",
-        detectedConfig: null,
-      };
-    }
-    return {
-      apiKey,
-      status: { state: "connected", models: result.models ?? [] },
-      detectedModel: result.selectedModel ?? "",
-      detectedConfig: result.detected ?? null,
-    };
-  } catch (error) {
-    return {
-      apiKey,
-      status: { state: "error", message: toErrorMessage(error, "连接失败") },
-      detectedModel: "",
-      detectedConfig: null,
-    };
-  }
+  return {
+    apiKey,
+    status: { state: "idle" },
+    detectedModel: "",
+    detectedConfig: null,
+  };
 }
 
-export async function saveServiceConfigWithValidation(args: {
+export function matchServiceConfigEntryForDetail(
+  entries: ReadonlyArray<Record<string, unknown>>,
+  serviceId: string,
+): Record<string, unknown> | undefined {
+  return entries.find((entry) => {
+    if (typeof entry.service !== "string") return false;
+    if (serviceId.startsWith("custom:")) {
+      return entry.service === "custom" && `custom:${String(entry.name ?? "")}` === serviceId;
+    }
+    if (serviceId === "custom") return false;
+    return entry.service === serviceId;
+  });
+}
+
+export async function saveServiceConfig(args: {
   readonly effectiveServiceId: string;
   readonly serviceId: string;
   readonly isCustom: boolean;
@@ -138,7 +103,6 @@ export async function saveServiceConfigWithValidation(args: {
   readonly apiFormat: "chat" | "responses";
   readonly stream: boolean;
   readonly temperature: string;
-  readonly maxTokens: string;
   readonly detectedModel: string;
   readonly fetchJsonImpl?: JsonFetcher;
 }): Promise<{
@@ -149,20 +113,6 @@ export async function saveServiceConfigWithValidation(args: {
   const fetchJsonImpl = args.fetchJsonImpl ?? fetchJson;
   const trimmedKey = args.apiKey.trim();
   const trimmedBaseUrl = args.baseUrl.trim();
-
-  let probeResult: ServiceProbeResponse | null = null;
-  if (trimmedKey) {
-    probeResult = await probeServiceForDetail(
-      args.effectiveServiceId,
-      {
-        apiKey: trimmedKey,
-        apiFormat: args.apiFormat,
-        stream: args.stream,
-        ...(args.isCustom ? { baseUrl: trimmedBaseUrl } : {}),
-      },
-      { fetchJsonImpl },
-    );
-  }
 
   await fetchJsonImpl(`/services/${encodeURIComponent(args.effectiveServiceId)}/secret`, {
     method: "PUT",
@@ -175,34 +125,25 @@ export async function saveServiceConfigWithValidation(args: {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       service: args.effectiveServiceId,
-      ...(probeResult?.selectedModel ? { defaultModel: probeResult.selectedModel } : args.detectedModel ? { defaultModel: args.detectedModel } : {}),
+      ...(args.detectedModel ? { defaultModel: args.detectedModel } : {}),
       services: [
         {
           service: args.isCustom ? "custom" : args.serviceId,
           temperature: parseFloat(args.temperature),
-          maxTokens: parseInt(args.maxTokens, 10),
-          apiFormat: probeResult?.detected?.apiFormat ?? args.apiFormat,
-          stream: typeof probeResult?.detected?.stream === "boolean" ? probeResult.detected.stream : args.stream,
+          apiFormat: args.apiFormat,
+          stream: args.stream,
           ...(args.isCustom ? {
             name: args.resolvedCustomName,
-            baseUrl: probeResult?.detected?.baseUrl ?? trimmedBaseUrl,
+            baseUrl: trimmedBaseUrl,
           } : {}),
         },
       ],
     }),
   });
 
-  if (!probeResult) {
-    return {
-      status: { state: "saved" },
-      detectedModel: "",
-      detectedConfig: null,
-    };
-  }
-
   return {
-    status: { state: "connected", models: probeResult.models ?? [] },
-    detectedModel: probeResult.selectedModel ?? "",
-    detectedConfig: probeResult.detected ?? null,
+    status: { state: "saved" },
+    detectedModel: "",
+    detectedConfig: null,
   };
 }

@@ -101,7 +101,7 @@ describe("WriterAgent", () => {
         defaults: {
           temperature: 0.7,
           maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
           extra: {},
         },
       },
@@ -289,7 +289,7 @@ describe("WriterAgent", () => {
         defaults: {
           temperature: 0.7,
           maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
           extra: {},
         },
       },
@@ -438,7 +438,7 @@ describe("WriterAgent", () => {
         defaults: {
           temperature: 0.7,
           maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
           extra: {},
         },
       },
@@ -587,7 +587,7 @@ describe("WriterAgent", () => {
         defaults: {
           temperature: 0.7,
           maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
           extra: {},
         },
       },
@@ -712,7 +712,7 @@ describe("WriterAgent", () => {
         defaults: {
           temperature: 0.7,
           maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
           extra: {},
         },
       },
@@ -833,7 +833,7 @@ describe("WriterAgent", () => {
         defaults: {
           temperature: 0.7,
           maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
           extra: {},
         },
       },
@@ -957,7 +957,7 @@ describe("WriterAgent", () => {
         defaults: {
           temperature: 0.7,
           maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
           extra: {},
         },
       },
@@ -1100,7 +1100,7 @@ describe("WriterAgent", () => {
         defaults: {
           temperature: 0.7,
           maxTokens: 4096,
-          thinkingBudget: 0, maxTokensCap: null,
+          thinkingBudget: 0,
           extra: {},
         },
       },

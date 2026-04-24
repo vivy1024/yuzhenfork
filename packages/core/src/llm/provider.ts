@@ -15,6 +15,9 @@ import type {
   ToolCall as PiToolCall,
 } from "@mariozechner/pi-ai";
 import { resolveServicePreset } from "./service-presets.js";
+import { getEndpoint } from "./providers/index.js";
+import { lookupModel } from "./providers/lookup.js";
+
 
 // === Streaming Monitor Types ===
 
@@ -95,19 +98,9 @@ export interface LLMClient {
     readonly temperature: number;
     /**
      * Per-call fallback: 当 agent 调 chat() 不传 options.maxTokens 时用这个值。
-     * 不是硬上限——per-call 显式传的值会覆盖它，不会被它限制。
+     * 来自 providers bank 的 modelCard.maxOutput（v2.0.0 起）。
      */
     readonly maxTokens: number;
-    /**
-     * Per-call 硬上限。null 表示不封顶；非 null 表示给 chat() 的 per-call
-     * maxTokens 加一个 Math.min(perCall, cap) 约束。
-     *
-     * 语义必须跟 defaults.maxTokens 严格分开：maxTokens 是 fallback，
-     * maxTokensCap 是 cap。旧实现把两者用同一个数推导，导致 agent per-call 16384
-     * 被 config.maxTokens=8192 误裁（见 tests/__tests__/provider.test.ts 的
-     * "per-call maxTokens is not capped by config.maxTokens" 回归测试）。
-     */
-    readonly maxTokensCap: number | null;
     readonly thinkingBudget: number;
     readonly extra: Record<string, unknown>;
   };
@@ -141,14 +134,11 @@ export interface ChatWithToolsResult {
 // === Factory ===
 
 export function createLLMClient(config: LLMConfig): LLMClient {
+  // C1 (v2.0.0)：config.maxTokens / maxTokensCap 已删除；defaults.maxTokens 完全从 modelCard 推导。
+  const _earlyCard = lookupModel(config.service ?? "custom", config.model);
   const defaults = {
     temperature: config.temperature ?? 0.7,
-    // fallback: agent 没传 per-call 时用这个
-    maxTokens: config.maxTokens ?? 8192,
-    // cap: 只在用户显式配 maxTokensCap 时生效；默认 null = 不封顶 per-call。
-    // **禁止**改成 `config.maxTokens ?? null` —— 那样会让 architect 的 per-call
-    // 16384 被用户 config.maxTokens=8192 自动裁剪，基础设定输出会被截断。
-    maxTokensCap: config.maxTokensCap ?? null,
+    maxTokens: _earlyCard?.maxOutput ?? 8192,
     thinkingBudget: config.thinkingBudget ?? 0,
     extra: config.extra ?? {},
   };
@@ -159,24 +149,41 @@ export function createLLMClient(config: LLMConfig): LLMClient {
   // --- Build pi-ai Model object ---
   const serviceName = config.service ?? "custom";
   const preset = resolveServicePreset(serviceName);
-  const piApi = resolvePiApi(serviceName, config.apiFormat, preset?.api) as PiApi;
-  const baseUrl = config.baseUrl || preset?.baseUrl || "";
+  const inkosProvider = getEndpoint(serviceName);
+  const modelCard = lookupModel(serviceName, config.model);
+
+  const piApi = resolvePiApi(serviceName, config.apiFormat, (inkosProvider?.api ?? preset?.api) as PiApi) as PiApi;
+  const baseUrl = config.baseUrl || inkosProvider?.baseUrl || preset?.baseUrl || "";
   const extraHeaders = config.headers ?? parseEnvHeaders();
+  const compat = resolveProviderCompat(inkosProvider, baseUrl);
 
   const provider = config.provider === "anthropic" ? "anthropic" : "openai";
+  // pi-ai provider 字段：大多数情况 pi-ai 会按 baseUrl 自动嗅探（openrouter.ai / api.z.ai /
+  // api.x.ai / deepseek.com / anthropic.com 等）。这里只列 pi-ai 嗅探不到、需要显式指定的少数情况。
+  let piProvider: string;
+  if (inkosProvider?.id === "zhipu") piProvider = "zai";
+  else if (inkosProvider?.id === "openrouter") piProvider = "openrouter";
+  else if (inkosProvider?.id === "githubCopilot") piProvider = "githubCopilot";
+  else if (inkosProvider?.api === "anthropic-messages") piProvider = "anthropic";
+  else piProvider = provider;
 
   const piModel: PiModel<PiApi> = {
-    id: config.model,
+    id: modelCard?.deploymentName ?? config.model,
     name: config.model,
     api: piApi,
-    provider,
+    provider: piProvider,
     baseUrl,
+    // 注意：piModel.reasoning 是"激活 reasoning 模式"标志（会让 pi-ai 把 system 改成 developer role 等），
+    // 不是"模型能力"标签。只有用户显式配了 thinkingBudget > 0 才启用 reasoning mode。
+    // 千万不要从 lobe abilities.reasoning 自动推导，否则 Moonshot 这类不支持 developer role 的服务
+    // 会把 content 吃掉，只返回 reasoning_content（见 R4 bug 1 诊断）。
     reasoning: (config.thinkingBudget ?? 0) > 0,
     input: ["text"] as ("text" | "image")[],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128_000,
-    maxTokens: config.maxTokens ?? 8192,
+    contextWindow: modelCard?.contextWindowTokens ?? 128_000,
+    maxTokens: modelCard?.maxOutput ?? 8192,
     ...(extraHeaders ? { headers: extraHeaders } : {}),
+    ...(compat ? { compat } : {}),
   };
 
   return {
@@ -200,6 +207,17 @@ function resolvePiApi(
     return apiFormat === "responses" ? "openai-responses" : "openai-completions";
   }
   return (presetApi ?? "openai-completions") as PiApi;
+}
+
+function resolveProviderCompat(
+  provider: ReturnType<typeof getEndpoint>,
+  baseUrl: string,
+): Record<string, unknown> | undefined {
+  const compat = {
+    ...(provider?.compat ?? {}),
+    ...(baseUrl.includes("generativelanguage.googleapis.com") ? { supportsStore: false } : {}),
+  };
+  return Object.keys(compat).length > 0 ? compat : undefined;
 }
 
 function parseEnvHeaders(): Record<string, string> | undefined {
@@ -247,30 +265,34 @@ function stripReservedKeys(extra: Record<string, unknown>): Record<string, unkno
 
 // === Fixed-Temperature Model Clamp ===
 //
-// 部分 thinking 模型（如 Moonshot kimi-k2.5、kimi-thinking-preview）强制要求
-// temperature === 1，其他值会被 API 直接 400 拒绝。为让这类模型能和 inkos
-// 已有的 per-call 温度调参（0.1 validator → 0.8 architect brainstorm）共存，
-// 在 provider 层统一夹制：命中名单就把传入的 temperature 强制改成 1，并对
-// 每个模型名打一次 warning 提示用户。
-
-function requiresFixedTemperature(model: string): boolean {
-  const lower = model.toLowerCase();
-  // kimi-k2.5 及其子变体（k2.5-preview 等），以及任何名字里带 "thinking" 的模型
-  return lower.startsWith("kimi-k2.5") || lower.includes("thinking");
-}
+// 部分 thinking 模型（如 Moonshot kimi-k2.5/k2.6、kimi-k2-thinking）的 API
+// 硬要求 temperature === 1，其他值会被直接 400 拒绝（Moonshot 返回
+// `invalid temperature: only 1 is allowed for this model`）。
+//
+// inkos 让 writer/validator/architect 各自带 per-call 温度（0.1~1.5），
+// 所以 provider 层统一夹制：如果 bank 里模型卡标了 temperature 字段，
+// 就把 per-call 温度 clamp 到那个值，并对每个模型名打一次 warning。
+//
+// 这个字段只表达"服务端硬约束"，普通模型不要标，避免误伤 per-call 调参。
 
 const warnedFixedTemperatureModels = new Set<string>();
 
-function clampTemperatureForModel(model: string, requested: number): number {
-  if (!requiresFixedTemperature(model)) return requested;
-  if (requested === 1) return 1;
+function clampTemperatureForModel(
+  service: string | undefined,
+  model: string,
+  requested: number,
+): number {
+  const card = service ? lookupModel(service, model) : undefined;
+  if (card?.temperature === undefined) return requested;
+  const locked = card.temperature;
+  if (requested === locked) return locked;
   if (!warnedFixedTemperatureModels.has(model)) {
     warnedFixedTemperatureModels.add(model);
     console.warn(
-      `[inkos] 模型 "${model}" 是 thinking 模型，强制 temperature=1（原请求值 ${requested}）`,
+      `[inkos] 模型 "${model}" API 要求 temperature=${locked}，已 clamp（原值 ${requested}）`,
     );
   }
-  return 1;
+  return locked;
 }
 
 // 仅测试用：清空 warning 去重集合。
@@ -287,12 +309,23 @@ function wrapLLMError(error: unknown, context?: { readonly baseUrl?: string; rea
     : "";
 
   if (msg.includes("400")) {
+    // 抽上游 error body 的 message / reason / code（和下方 5xx 一致），让真实错因浮到用户面前
+    let detail = "";
+    if (error && typeof error === "object") {
+      const err = error as { error?: unknown; body?: unknown; message?: string };
+      const bodyLike = err.error ?? err.body;
+      if (bodyLike && typeof bodyLike === "object") {
+        const b = bodyLike as { reason?: string; message?: string; code?: number | string; type?: string };
+        if (b.message) detail = b.type ? `${b.type}: ${b.message}` : b.message;
+        else if (b.reason) detail = b.reason;
+      }
+    }
     return new Error(
-      `API 返回 400 (请求参数错误)。可能原因：\n` +
-      `  1. 模型名称不正确（检查 INKOS_LLM_MODEL）\n` +
-      `  2. 提供方不支持某些参数（如 max_tokens、stream）\n` +
-      `  3. 消息格式不兼容（部分提供方不支持 system role）\n` +
-      `  建议：检查提供方文档，确认该接口要求流式开启、流式关闭，还是根本不支持 stream${ctxLine}`,
+      `API 返回 400（请求参数错误）。${detail ? `上游详情：${detail}。\n` : ""}` +
+      `常见原因：\n` +
+      `  1. temperature / max_tokens 超出模型约束（如 Moonshot kimi-k2.X 强制 temperature=1）\n` +
+      `  2. 模型名称不正确或未上架\n` +
+      `  3. 消息格式不兼容（部分服务不支持 system role 或 developer role）${ctxLine}`,
     );
   }
   if (msg.includes("403")) {
@@ -321,6 +354,27 @@ function wrapLLMError(error: unknown, context?: { readonly baseUrl?: string; rea
       `  2. 网络不通或被防火墙拦截\n` +
       `  3. API 服务暂时不可用\n` +
       `  建议：检查 INKOS_LLM_BASE_URL 是否包含完整路径（如 /v1）`,
+    );
+  }
+  // R4 Bug 2: 5xx "status code (no body)" — 尝试从 OpenAI SDK APIError 里抽 body 给用户看具体原因
+  // （如 PPIO 的 {"code":500,"reason":"MODEL_NOT_AVAILABLE","message":"model not available"}）
+  if (msg.includes("status code") && msg.includes("no body")) {
+    let detail = "";
+    if (error && typeof error === "object") {
+      const err = error as { error?: unknown; body?: unknown; message?: string };
+      const bodyLike = err.error ?? err.body;
+      if (bodyLike && typeof bodyLike === "object") {
+        const b = bodyLike as { reason?: string; message?: string; code?: number | string };
+        if (b.reason) detail = `${b.reason}${b.message ? `: ${b.message}` : ""}`;
+        else if (b.message) detail = b.message;
+      }
+    }
+    return new Error(
+      `API 返回 5xx（上游服务异常）。${detail ? `上游详情：${detail}。` : ""}\n` +
+      `可能原因：\n` +
+      `  1. 模型在 /models 列表但 inference 未上架（如 PPIO 返回 MODEL_NOT_AVAILABLE）\n` +
+      `  2. 服务端临时故障，稍后重试\n` +
+      `  3. 当前 apikey 无权限调用该模型${ctxLine}`,
     );
   }
   return error instanceof Error ? error : new Error(msg);
@@ -750,14 +804,14 @@ export async function chatCompletion(
     readonly onTextDelta?: (text: string) => void;
   },
 ): Promise<LLMResponse> {
-  const perCallMax = options?.maxTokens ?? client.defaults.maxTokens;
-  const cap = client.defaults.maxTokensCap;
+  // C1 (v2.0.0)：删除 maxTokensCap 机制。per-call 显式传的 maxTokens 永远不被裁剪。
   const resolved = {
     temperature: clampTemperatureForModel(
+      client.service,
       model,
       options?.temperature ?? client.defaults.temperature,
     ),
-    maxTokens: cap !== null ? Math.min(perCallMax, cap) : perCallMax,
+    maxTokens: options?.maxTokens ?? client.defaults.maxTokens,
     extra: client.defaults.extra,
   };
   const onStreamProgress = options?.onStreamProgress;
@@ -796,6 +850,7 @@ export async function chatWithTools(
   try {
     const resolved = {
       temperature: clampTemperatureForModel(
+        client.service,
         model,
         options?.temperature ?? client.defaults.temperature,
       ),

@@ -30,8 +30,9 @@ import {
   resolveServiceModel,
   loadSecrets,
   saveSecrets,
-  getServiceApiKey,
   listModelsForService,
+  getAllEndpoints,
+  probeModelsFromUpstream,
   chatCompletion,
   buildExportArtifact,
   GLOBAL_ENV_PATH,
@@ -89,6 +90,31 @@ function summarizeResult(result: unknown): string {
   return String(result).slice(0, 200);
 }
 
+const NON_TEXT_MODEL_ID_PARTS = [
+  "image",
+  "embedding",
+  "embed",
+  "rerank",
+  "tts",
+  "speech",
+  "audio",
+  "moderation",
+] as const;
+
+function isTextChatModelId(modelId: string): boolean {
+  const normalized = modelId.trim().toLowerCase();
+  if (!normalized) return false;
+  return !NON_TEXT_MODEL_ID_PARTS.some((part) => normalized.includes(part));
+}
+
+function filterTextChatModels<T extends { readonly id: string }>(models: ReadonlyArray<T>): T[] {
+  return models.filter((model) => isTextChatModelId(model.id));
+}
+
+function nonTextModelMessage(modelId: string): string {
+  return `模型 ${modelId} 不适合文本聊天/写作。请在模型选择器中改用文本模型，例如 gemini-2.5-flash、gemini-2.5-pro 或对应服务的 chat 模型。`;
+}
+
 function extractToolError(result: unknown): string {
   if (typeof result === "string") return result.slice(0, 500);
   if (result && typeof result === "object") {
@@ -130,7 +156,6 @@ interface ServiceConfigEntry {
   name?: string;
   baseUrl?: string;
   temperature?: number;
-  maxTokens?: number;
   apiFormat?: "chat" | "responses";
   stream?: boolean;
 }
@@ -149,6 +174,7 @@ interface EnvConfigStatus {
   project: EnvConfigSummary;
   global: EnvConfigSummary;
   effectiveSource: "project" | "global" | null;
+  runtimeUsesEnv: false;
 }
 
 interface ServiceProbeResult {
@@ -183,7 +209,6 @@ function normalizeServiceEntry(serviceId: string, value: Record<string, unknown>
       name: decodeURIComponent(serviceId.slice("custom:".length)),
       ...(typeof value.baseUrl === "string" && value.baseUrl.length > 0 ? { baseUrl: value.baseUrl } : {}),
       ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
-      ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
       ...(value.apiFormat === "chat" || value.apiFormat === "responses" ? { apiFormat: value.apiFormat } : {}),
       ...(typeof value.stream === "boolean" ? { stream: value.stream } : {}),
     };
@@ -195,7 +220,6 @@ function normalizeServiceEntry(serviceId: string, value: Record<string, unknown>
       ...(typeof value.name === "string" && value.name.length > 0 ? { name: value.name } : {}),
       ...(typeof value.baseUrl === "string" && value.baseUrl.length > 0 ? { baseUrl: value.baseUrl } : {}),
       ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
-      ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
       ...(value.apiFormat === "chat" || value.apiFormat === "responses" ? { apiFormat: value.apiFormat } : {}),
       ...(typeof value.stream === "boolean" ? { stream: value.stream } : {}),
     };
@@ -204,7 +228,6 @@ function normalizeServiceEntry(serviceId: string, value: Record<string, unknown>
   return {
     service: serviceId,
     ...(typeof value.temperature === "number" ? { temperature: value.temperature } : {}),
-    ...(typeof value.maxTokens === "number" ? { maxTokens: value.maxTokens } : {}),
     ...(value.apiFormat === "chat" || value.apiFormat === "responses" ? { apiFormat: value.apiFormat } : {}),
     ...(typeof value.stream === "boolean" ? { stream: value.stream } : {}),
   };
@@ -223,7 +246,6 @@ function normalizeServiceConfig(raw: unknown): ServiceConfigEntry[] {
         ...(typeof entry.name === "string" && entry.name.length > 0 ? { name: entry.name } : {}),
         ...(typeof entry.baseUrl === "string" && entry.baseUrl.length > 0 ? { baseUrl: entry.baseUrl } : {}),
         ...(typeof entry.temperature === "number" ? { temperature: entry.temperature } : {}),
-        ...(typeof entry.maxTokens === "number" ? { maxTokens: entry.maxTokens } : {}),
         ...(entry.apiFormat === "chat" || entry.apiFormat === "responses" ? { apiFormat: entry.apiFormat } : {}),
         ...(typeof entry.stream === "boolean" ? { stream: entry.stream } : {}),
       }));
@@ -301,6 +323,7 @@ async function readEnvConfigStatus(root: string): Promise<EnvConfigStatus> {
     project,
     global,
     effectiveSource: project.detected ? "project" : global.detected ? "global" : null,
+    runtimeUsesEnv: false,
   };
 }
 
@@ -363,6 +386,7 @@ function buildModelCandidates(args: {
   configModel?: string;
   envModel?: string | null;
   discoveredModels: Array<{ id: string; name: string }>;
+  includeGenericFallbacks?: boolean;
 }): string[] {
   const seen = new Set<string>();
   const candidates: string[] = [];
@@ -378,6 +402,7 @@ function buildModelCandidates(args: {
   push(args.configModel);
   push(args.envModel ?? undefined);
   for (const model of args.discoveredModels) push(model.id);
+  if (args.includeGenericFallbacks === false) return candidates;
   push("gpt-5.4");
   push("gpt-4o");
   push("claude-sonnet-4-6");
@@ -386,14 +411,72 @@ function buildModelCandidates(args: {
   return candidates;
 }
 
+function formatServiceProbeError(args: {
+  readonly service: string;
+  readonly label?: string;
+  readonly baseUrl: string;
+  readonly model?: string;
+  readonly apiFormat?: "chat" | "responses";
+  readonly stream?: boolean;
+  readonly error: string;
+}): string {
+  const rawDetail = args.error
+    .replace(/\n\s*\(baseUrl:[\s\S]*?\)$/m, "")
+    .trim();
+  const upstreamDetail = rawDetail.includes("上游详情：")
+    ? rawDetail
+    : "";
+  const context = [
+    `服务商：${args.label ?? args.service}`,
+    `测试模型：${args.model ?? "未确定"}`,
+    `协议：${args.apiFormat === "responses" ? "Responses" : "Chat / Completions"}${typeof args.stream === "boolean" ? `，${args.stream ? "流式" : "非流式"}` : ""}`,
+    `Base URL：${args.baseUrl}`,
+  ].join("\n");
+
+  if (args.service === "google") {
+    return [
+      "Google Gemini 测试连接失败。",
+      context,
+      "",
+      "请优先检查：",
+      "1. API Key 是否来自 Google AI Studio 的 Gemini API key，而不是 OAuth、Vertex AI 或其它 Google 服务凭据。",
+      "2. 该 key 所属项目是否已启用 Gemini API，并且没有被限制到其它 API、来源或服务。",
+      "3. 当前地区/账号是否允许访问 Gemini API。",
+      "4. 如果 key 曾经泄露，请在 AI Studio 重新生成后再保存。",
+      upstreamDetail ? `\n上游返回：${upstreamDetail}` : "",
+    ].filter(Boolean).join("\n");
+  }
+
+  if (args.service === "moonshot" || args.service === "kimiCodingPlan") {
+    return [
+      `${args.label ?? args.service} 测试连接失败。`,
+      context,
+      "",
+      "请优先检查模型是否可用，以及 kimi-k2.x 这类模型是否需要 temperature=1。",
+      rawDetail ? `\n上游返回：${rawDetail}` : "",
+    ].filter(Boolean).join("\n");
+  }
+
+  return [
+    `${args.label ?? args.service} 测试连接失败。`,
+    context,
+    "",
+    "请检查 API Key、模型可用性、账号额度，以及协议类型是否匹配该服务商。",
+    rawDetail ? `\n上游返回：${rawDetail}` : "",
+  ].filter(Boolean).join("\n");
+}
+
 async function fetchModelsFromServiceBaseUrl(
   serviceId: string,
   baseUrl: string,
   apiKey: string,
 ): Promise<{ models: Array<{ id: string; name: string }>; error?: string; authFailed?: boolean }> {
+  const endpoint = isCustomServiceId(serviceId)
+    ? undefined
+    : getAllEndpoints().find((ep) => ep.id === serviceId);
   const modelsBaseUrl = isCustomServiceId(serviceId)
     ? baseUrl
-    : resolveServiceModelsBaseUrl(serviceId) ?? baseUrl;
+    : endpoint?.modelsBaseUrl ?? (endpoint ? baseUrl : resolveServiceModelsBaseUrl(serviceId) ?? baseUrl);
   const modelsUrl = modelsBaseUrl.replace(/\/$/, "") + "/models";
   try {
     const res = await fetch(modelsUrl, {
@@ -448,14 +531,29 @@ async function probeServiceCapabilities(args: {
     };
   }
   const discoveredModels = modelsResponse.models;
-  // For services with knownModels, use their first model as top candidate — not the global default
+  // For bank services, probe with the service's own check model first — not the global default.
+  const endpoint = getAllEndpoints().find((ep) => ep.id === baseService);
   const preset = resolveServicePreset(baseService);
-  const serviceFirstModel = preset?.knownModels?.[0];
+  const serviceFirstModel =
+    endpoint?.checkModel
+    ?? preset?.knownModels?.[0]
+    ?? endpoint?.models.find((model) => model.enabled !== false)?.id;
+  const useEndpointCheckModel = !isCustomServiceId(args.service) && Boolean(endpoint?.checkModel);
+  const configService = typeof llm.service === "string" ? llm.service : undefined;
+  const configModel = !useEndpointCheckModel && configService === args.service
+    ? typeof llm.defaultModel === "string"
+      ? llm.defaultModel
+      : typeof llm.model === "string"
+        ? llm.model
+        : undefined
+    : undefined;
+  const useCustomFallbacks = isCustomServiceId(args.service);
   const modelCandidates = buildModelCandidates({
     preferredModel: args.preferredModel ?? serviceFirstModel,
-    configModel: typeof llm.defaultModel === "string" ? llm.defaultModel : typeof llm.model === "string" ? llm.model : undefined,
-    envModel,
-    discoveredModels,
+    configModel,
+    envModel: useCustomFallbacks ? envModel : undefined,
+    discoveredModels: useEndpointCheckModel ? [] : discoveredModels,
+    includeGenericFallbacks: useCustomFallbacks,
   });
 
   if (modelCandidates.length === 0) {
@@ -488,7 +586,12 @@ async function probeServiceCapabilities(args: {
         await chatCompletion(client, model, [{ role: "user", content: "ping" }], { maxTokens: 2048 });
         const models = discoveredModels.length > 0
           ? discoveredModels
-          : preset?.knownModels?.map((id) => ({ id, name: id })) ?? [{ id: model, name: model }];
+          : endpoint?.models
+            .filter((m) => m.enabled !== false)
+            .filter((m) => isTextChatModelId(m.id))
+            .map((m) => ({ id: m.id, name: m.id }))
+            ?? preset?.knownModels?.map((id) => ({ id, name: id }))
+            ?? [{ id: model, name: model }];
         return {
           ok: true,
           models,
@@ -499,7 +602,15 @@ async function probeServiceCapabilities(args: {
           modelsSource: discoveredModels.length > 0 ? "api" : "fallback",
         };
       } catch (error) {
-        lastError = error instanceof Error ? error.message : String(error);
+        lastError = formatServiceProbeError({
+          service: baseService,
+          label: endpoint?.label ?? preset?.label,
+          baseUrl: args.baseUrl,
+          model,
+          apiFormat: plan.apiFormat,
+          stream: plan.stream,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
     }
   }
@@ -567,7 +678,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   async function loadCurrentProjectConfig(
     options?: { readonly requireApiKey?: boolean },
   ): Promise<ProjectConfig> {
-    const freshConfig = await loadProjectConfig(root, options);
+    const freshConfig = await loadProjectConfig(root, { ...options, consumer: "studio" });
     cachedConfig = freshConfig;
     return freshConfig;
   }
@@ -919,21 +1030,15 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   app.get("/api/v1/services", async (c) => {
     const secrets = await loadSecrets(root);
+    const endpoints = getAllEndpoints().filter((ep) => ep.id !== "custom");
 
-    const SERVICE_KEYS = [
-      "openai", "anthropic", "deepseek", "moonshot", "minimax",
-      "bailian", "zhipu", "siliconflow", "ppio", "openrouter", "ollama",
-    ];
-
-    // Fast: only check connection status from secrets, no external API calls
-    const services = SERVICE_KEYS.map((key) => {
-      const preset = resolveServicePreset(key);
-      return {
-        service: key,
-        label: preset?.label ?? key,
-        connected: Boolean(secrets.services[key]?.apiKey),
-      };
-    });
+    // Fast: only check connection status from secrets, no external API calls.
+    const services = endpoints.map((ep) => ({
+      service: ep.id,
+      label: ep.label,
+      group: ep.group,
+      connected: Boolean(secrets.services[ep.id]?.apiKey),
+    }));
 
     // Add custom services from inkos.json
     try {
@@ -944,6 +1049,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           services.push({
             service: secretKey,
             label: svc.name ?? "Custom",
+            group: undefined,
             connected: Boolean(secrets.services[secretKey]?.apiKey),
           });
         }
@@ -961,7 +1067,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     return c.json({
       services,
       defaultModel: llm.defaultModel ?? null,
-      configSource: normalizeConfigSource(llm.configSource),
+      configSource: "studio" satisfies LLMConfigSource,
+      storedConfigSource: normalizeConfigSource(llm.configSource),
       envConfig,
     });
   });
@@ -978,6 +1085,11 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     }
     if (body.defaultModel !== undefined) {
       llm.defaultModel = body.defaultModel;
+    }
+    if (body.configSource === "env") {
+      return c.json({
+        error: "Studio 运行时不支持切换到 env；env 只在 CLI/daemon/部署运行时作为覆盖层使用。",
+      }, 400);
     }
     if (body.configSource !== undefined) {
       llm.configSource = normalizeConfigSource(body.configSource);
@@ -1016,8 +1128,20 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       preferredStream: stream,
     });
 
+    // B12: 升级响应 shape 为 { probe, chat, ... }，同时保留老字段供 UI 过渡期兼容
+    const probeStatus = {
+      ok: probe.ok,
+      models: probe.models?.length ?? 0,
+      ...(probe.ok ? {} : { error: probe.error ?? "连接失败" }),
+    };
+
     if (!probe.ok) {
-      return c.json({ ok: false, error: probe.error ?? "连接失败" }, 400);
+      return c.json({
+        ok: false,
+        error: probe.error ?? "连接失败",
+        probe: probeStatus,
+        chat: null,
+      }, 400);
     }
 
     return c.json({
@@ -1031,6 +1155,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         baseUrl: probe.baseUrl,
         modelsSource: probe.modelsSource,
       },
+      // B12 新字段：两步验证状态
+      probe: probeStatus,
+      chat: null,  // probeServiceCapabilities 本身只做 probe，chat hello 在 Studio 的 follow-up 调用里单独触发
     });
   });
 
@@ -1055,15 +1182,66 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     });
   });
 
+  app.get("/api/v1/services/models", async (c) => {
+    const secrets = await loadSecrets(root);
+    const endpoints = getAllEndpoints()
+      .filter((ep) => ep.id !== "custom" && Boolean(secrets.services[ep.id]?.apiKey));
+
+    const groups = endpoints.map((ep) => ({
+      service: ep.id,
+      label: ep.label,
+      models: ep.models
+        .filter((m) => m.enabled !== false)
+        .filter((m) => isTextChatModelId(m.id))
+        .map((m) => ({
+          id: m.id,
+          name: m.id,
+          ...(typeof m.maxOutput === "number" ? { maxOutput: m.maxOutput } : {}),
+          ...(m.contextWindowTokens > 0 ? { contextWindow: m.contextWindowTokens } : {}),
+        })),
+    }));
+
+    return c.json({ groups });
+  });
+
+  app.get("/api/v1/services/models/custom", async (c) => {
+    const secrets = await loadSecrets(root);
+    let config: Record<string, unknown> = {};
+    try {
+      config = await loadRawConfig(root);
+    } catch {
+      // no config file
+    }
+
+    const customs = normalizeServiceConfig((config.llm as Record<string, unknown> | undefined)?.services)
+      .filter((s) => s.service === "custom")
+      .map((s) => ({
+        id: `custom:${s.name ?? "Custom"}`,
+        baseUrl: s.baseUrl ?? "",
+        label: s.name ?? "Custom",
+      }))
+      .filter((s) => s.baseUrl && Boolean(secrets.services[s.id]?.apiKey));
+
+    const groups = await Promise.all(customs.map(async (s) => ({
+      service: s.id,
+      label: s.label,
+      models: filterTextChatModels(
+        await probeModelsFromUpstream(s.baseUrl, secrets.services[s.id].apiKey, 10_000),
+      ),
+    })));
+
+    return c.json({ groups });
+  });
+
   app.get("/api/v1/services/:service/models", async (c) => {
     const service = c.req.param("service");
     const refresh = c.req.query("refresh") === "1";
-    const apiKey = c.req.query("apiKey") || await getServiceApiKey(root, service);
+    const secrets = await loadSecrets(root);
+    const apiKey = c.req.query("apiKey") || secrets.services[service]?.apiKey || "";
 
     // No key = no models
     if (!apiKey) return c.json({ models: [] });
 
-    const preset = resolveServicePreset(isCustomServiceId(service) ? "custom" : service);
     const resolvedBaseUrl = await resolveConfiguredServiceBaseUrl(root, service);
 
     // Cache by service + resolved baseUrl + apiKey fingerprint; valid for 10 min unless ?refresh=1
@@ -1075,33 +1253,18 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       }
     }
 
-    // Fast path: services with knownModels return immediately
-    if (preset?.knownModels && preset.knownModels.length > 0) {
-      const models = preset.knownModels.map((id) => ({ id, name: id }));
-      modelListCache.set(cacheKey, { models, at: Date.now() });
-      return c.json({ models });
-    }
-
-    // Simple /models API call + fallback to pi-ai built-in list (no slow probe)
-    if (!resolvedBaseUrl) return c.json({ models: [] });
-
-    const modelsBase = preset?.modelsBaseUrl ?? resolvedBaseUrl;
-    let models: Array<{ id: string; name: string }> = [];
-    try {
-      const modelsUrl = modelsBase.replace(/\/$/, "") + "/models";
-      const res = await fetch(modelsUrl, {
-        headers: { Authorization: `Bearer ${apiKey}` },
-        signal: AbortSignal.timeout(10_000),
-      });
-      if (res.ok) {
-        const json = await res.json() as { data?: Array<{ id: string }> };
-        models = (json.data ?? []).map((m) => ({ id: m.id, name: m.id }));
-      }
-    } catch { /* timeout or network error */ }
-    if (models.length === 0) {
-      const builtIn = await listModelsForService(service, apiKey);
-      models = builtIn.map((m) => ({ id: m.id, name: m.name }));
-    }
+    // B13: 走 listModelsForService 走 live probe + bank 交叉，返回带元数据的 models
+    const enriched = await listModelsForService(
+      isCustomServiceId(service) ? "custom" : service,
+      apiKey,
+      isCustomServiceId(service) ? resolvedBaseUrl ?? undefined : undefined,
+    );
+    const models = filterTextChatModels(enriched).map((m) => ({
+      id: m.id,
+      name: m.name,
+      ...(m.maxOutput !== undefined ? { maxOutput: m.maxOutput } : {}),
+      ...(m.contextWindow > 0 ? { contextWindow: m.contextWindow } : {}),
+    }));
     modelListCache.set(cacheKey, { models, at: Date.now() });
     return c.json({ models });
   });
@@ -1123,7 +1286,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       baseUrl: currentConfig.llm.baseUrl,
       stream: currentConfig.llm.stream,
       temperature: currentConfig.llm.temperature,
-      maxTokens: currentConfig.llm.maxTokens,
     });
   });
 
@@ -1138,9 +1300,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       // Merge LLM settings
       if (updates.temperature !== undefined) {
         existing.llm.temperature = updates.temperature;
-      }
-      if (updates.maxTokens !== undefined) {
-        existing.llm.maxTokens = updates.maxTokens;
       }
       if (updates.stream !== undefined) {
         existing.llm.stream = updates.stream;
@@ -1325,6 +1484,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     if (!sessionId?.trim()) {
       throw new ApiError(400, "SESSION_ID_REQUIRED", "sessionId is required");
     }
+    if (reqModel && !isTextChatModelId(reqModel)) {
+      const message = nonTextModelMessage(reqModel);
+      return c.json({ error: message, response: message }, 400);
+    }
 
     broadcast("agent:start", { instruction, activeBookId, sessionId });
 
@@ -1380,7 +1543,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         const defaultModel = rawConfig.defaultModel as string | undefined;
         const servicesArr = normalizeServiceConfig(rawConfig.services);
         const firstService = servicesArr[0];
-        if (firstService?.service && defaultModel) {
+        if (firstService?.service && defaultModel && isTextChatModelId(defaultModel)) {
           try {
             const resolved = await resolveServiceModel(
               serviceConfigKey(firstService),
@@ -1402,11 +1565,12 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           if (svcData?.apiKey) {
             try {
               const models = await listModelsForService(svcName, svcData.apiKey);
-              if (models.length > 0) {
+              const textModels = filterTextChatModels(models);
+              if (textModels.length > 0) {
                 const configuredEntry = await resolveConfiguredServiceEntry(root, svcName);
                 const resolved = await resolveServiceModel(
                   svcName,
-                  models[0].id,
+                  textModels[0].id,
                   root,
                   await resolveConfiguredServiceBaseUrl(root, svcName),
                   configuredEntry?.apiFormat,
@@ -2376,7 +2540,7 @@ export async function startStudioServer(
   port = 4567,
   options?: { readonly staticDir?: string },
 ): Promise<void> {
-  const config = await loadProjectConfig(root, { requireApiKey: false });
+  const config = await loadProjectConfig(root, { consumer: "studio", requireApiKey: false });
 
   const app = createStudioServer(config, root);
 

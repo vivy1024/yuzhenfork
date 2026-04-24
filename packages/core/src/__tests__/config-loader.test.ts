@@ -5,14 +5,17 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadProjectConfig } from "../utils/config-loader.js";
 
 const ENV_KEYS = [
+  "INKOS_LLM_SERVICE",
   "INKOS_LLM_PROVIDER",
   "INKOS_LLM_BASE_URL",
   "INKOS_LLM_MODEL",
   "INKOS_LLM_API_KEY",
   "INKOS_LLM_TEMPERATURE",
-  "INKOS_LLM_MAX_TOKENS",
   "INKOS_LLM_THINKING_BUDGET",
   "INKOS_LLM_API_FORMAT",
+  "INKOS_LLM_STREAM",
+  "INKOS_LLM_EXTRA_top_p",
+  "INKOS_DEFAULT_LANGUAGE",
 ] as const;
 
 describe("loadProjectConfig local provider auth", () => {
@@ -104,7 +107,7 @@ describe("loadProjectConfig local provider auth", () => {
       "utf-8",
     );
 
-    const config = await loadProjectConfig(root);
+    const config = await loadProjectConfig(root, { consumer: "studio" });
 
     expect(config.llm.service).toBe("moonshot");
     expect(config.llm.provider).toBe("openai");
@@ -112,7 +115,6 @@ describe("loadProjectConfig local provider auth", () => {
     expect(config.llm.model).toBe("kimi-k2.5");
     expect(config.llm.apiKey).toBe("sk-moon");
     expect(config.llm.temperature).toBe(1);
-    expect(config.llm.maxTokens).toBe(4096);
   });
 
   it("derives provider/baseUrl from the MiniMax preset single source of truth", async () => {
@@ -228,6 +230,59 @@ describe("loadProjectConfig local provider auth", () => {
     expect(config.llm.baseUrl).toBe("https://llm.internal.corp/v1");
     expect(config.llm.model).toBe("corp-chat");
     expect(config.llm.apiKey).toBe("sk-corp");
+  });
+
+  it("does not mix stale top-level env-era model/baseUrl with selected Studio service", async () => {
+    root = await mkdtemp(join(tmpdir(), "inkos-config-loader-studio-stale-top-level-"));
+    for (const key of ENV_KEYS) {
+      previousEnv.set(key, process.env[key]);
+      process.env[key] = "";
+    }
+
+    await writeFile(join(root, "inkos.json"), JSON.stringify({
+      name: "studio-stale-project",
+      version: "0.1.0",
+      language: "zh",
+      llm: {
+        configSource: "studio",
+        service: "google",
+        model: "kimi-k2.5",
+        baseUrl: "https://api.moonshot.cn/v1",
+        apiKey: "sk-moon-inline",
+        services: [
+          { service: "google", temperature: 0.7, apiFormat: "chat", stream: true },
+          { service: "moonshot", temperature: 1, apiFormat: "chat", stream: true },
+        ],
+        defaultModel: "gemini-2.5-flash",
+      },
+      notify: [],
+    }, null, 2), "utf-8");
+    await writeFile(join(root, ".env"), [
+      "INKOS_LLM_PROVIDER=custom",
+      "INKOS_LLM_BASE_URL=https://api.moonshot.cn/v1",
+      "INKOS_LLM_MODEL=kimi-k2.5",
+      "INKOS_LLM_API_KEY=sk-env-moon",
+    ].join("\n"), "utf-8");
+    await mkdir(join(root, ".inkos"), { recursive: true });
+    await writeFile(
+      join(root, ".inkos", "secrets.json"),
+      JSON.stringify({
+        services: {
+          google: { apiKey: "sk-google" },
+          moonshot: { apiKey: "sk-moon" },
+        },
+      }, null, 2),
+      "utf-8",
+    );
+
+    const config = await loadProjectConfig(root, { consumer: "studio", requireApiKey: false });
+
+    expect(config.llm.configSource).toBe("studio");
+    expect(config.llm.service).toBe("google");
+    expect(config.llm.provider).toBe("openai");
+    expect(config.llm.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+    expect(config.llm.model).toBe("gemini-2.5-flash");
+    expect(config.llm.apiKey).toBe("sk-google");
   });
 
   it("falls back to env when Studio config is still the empty bootstrap state", async () => {

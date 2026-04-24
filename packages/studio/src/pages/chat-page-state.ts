@@ -40,3 +40,22 @@ export function filterModelGroups(
     }))
     .filter((group) => group.models.length > 0);
 }
+
+export function pickModelSelection(
+  groupedModels: ReadonlyArray<ChatPageModelGroup>,
+  selectedModel: string | null,
+  selectedService: string | null,
+): { model: string; service: string } | null {
+  const selectedStillAvailable = selectedModel && selectedService
+    ? groupedModels.some((group) =>
+        group.service === selectedService
+        && group.models.some((model) => model.id === selectedModel),
+      )
+    : false;
+  if (selectedStillAvailable) return null;
+
+  const firstGroup = groupedModels.find((group) => group.models.length > 0);
+  const firstModel = firstGroup?.models[0];
+  if (!firstGroup || !firstModel) return null;
+  return { model: firstModel.id, service: firstGroup.service };
+}

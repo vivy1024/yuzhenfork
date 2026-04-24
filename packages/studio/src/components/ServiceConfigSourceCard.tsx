@@ -16,10 +16,12 @@ interface ServiceConfigPayload {
   services: Array<Record<string, unknown>>;
   defaultModel: string | null;
   configSource: ConfigSource;
+  storedConfigSource?: ConfigSource;
   envConfig: {
     project: EnvConfigSummary;
     global: EnvConfigSummary;
     effectiveSource: EnvScope;
+    runtimeUsesEnv: boolean;
   };
 }
 
@@ -76,6 +78,7 @@ export function ServiceConfigSourceCard({ onChange }: { onChange?: () => void })
   }
 
   const { configSource, envConfig } = data;
+  const storedConfigSource = data.storedConfigSource ?? configSource;
   const activeEnvSummary = envConfig.effectiveSource === "project" ? envConfig.project : envConfig.global;
   const envLabel = envConfig.effectiveSource === "project" ? "项目 .env" : envConfig.effectiveSource === "global" ? "全局 ~/.inkos/.env" : null;
   const envDetected = envConfig.project.detected || envConfig.global.detected;
@@ -86,8 +89,8 @@ export function ServiceConfigSourceCard({ onChange }: { onChange?: () => void })
         <div>
           <div className="text-sm font-medium">LLM 配置来源</div>
           <div className="text-xs text-muted-foreground/70 mt-1">
-            当前策略：
-            <span className="text-foreground"> {configSource === "env" ? "优先使用 .env" : "优先使用 Studio 配置"}</span>
+            Studio 运行时：
+            <span className="text-foreground"> 使用服务页配置和 Studio 密钥</span>
           </div>
         </div>
         <div className="flex items-center gap-2">
@@ -99,16 +102,14 @@ export function ServiceConfigSourceCard({ onChange }: { onChange?: () => void })
           >
             {saving === "studio" ? "切换中…" : "使用 Studio 配置"}
           </button>
-          <button
-            type="button"
-            onClick={() => void switchSource("env")}
-            disabled={saving !== null || configSource === "env"}
-            className="rounded-lg border border-border/50 px-3 py-1.5 text-xs hover:bg-secondary/50 disabled:opacity-50"
-          >
-            {saving === "env" ? "切换中…" : "使用 .env 优先"}
-          </button>
         </div>
       </div>
+
+      {storedConfigSource === "env" ? (
+        <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.04] p-3 text-xs text-muted-foreground/80">
+          检测到旧配置标记为 `.env` 优先。Studio 运行时不会使用它；CLI、daemon 和部署环境仍可按 env 覆盖层使用。
+        </div>
+      ) : null}
 
       {envDetected ? (
         <div className="rounded-lg border border-amber-500/25 bg-amber-500/[0.04] p-3 text-xs text-muted-foreground/80 space-y-1.5">
@@ -121,9 +122,7 @@ export function ServiceConfigSourceCard({ onChange }: { onChange?: () => void })
           {activeEnvSummary.provider ? <div>Provider: <span className="font-mono text-foreground">{activeEnvSummary.provider}</span></div> : null}
           <div>API Key: <span className="text-foreground">{activeEnvSummary.hasApiKey ? "已设置" : "未设置"}</span></div>
           <div className="text-muted-foreground/70 pt-1">
-            {configSource === "env"
-              ? "当前请求会优先使用这套 .env 配置。切到 Studio 配置后，将改用服务页里的 service/baseUrl/model。"
-              : "当前虽然检测到 .env，但已切到 Studio 配置；Studio 和 Agent 请求会忽略这套 LLM 覆盖。"}
+            当前虽然检测到 .env，但 Studio 和 Agent 请求会忽略这套 LLM 覆盖；CLI、daemon 和部署环境可以使用它。
           </div>
         </div>
       ) : (
