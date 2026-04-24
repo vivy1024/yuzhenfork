@@ -37,6 +37,28 @@ export interface InkosModel {
    * 不是"推荐值"。普通模型不要设这个字段。
    */
   readonly temperature?: number;
+  /** 生命周期状态；enabled=false 仍保留为兼容旧数据的硬下线标记。 */
+  readonly status?: "active" | "deprecated" | "disabled" | "nonText";
+  readonly replacement?: string;
+  readonly capabilities?: {
+    readonly text?: boolean;
+    readonly imageInput?: boolean;
+    readonly imageOutput?: boolean;
+    readonly tools?: boolean;
+    readonly reasoning?: boolean;
+  };
+}
+
+export interface ProviderCompat {
+  /** OpenAI Responses store 参数是否被兼容层接受；Google Gemini OpenAI-compatible 不接受。 */
+  readonly supportsStore?: boolean;
+  readonly supportsSystemRole?: boolean;
+  readonly supportsDeveloperRole?: boolean;
+}
+
+export interface ProviderTransportDefaults {
+  readonly apiFormat?: "chat" | "responses";
+  readonly stream?: boolean;
 }
 
 export interface InkosEndpoint {
@@ -57,6 +79,8 @@ export interface InkosEndpoint {
   readonly defaultTemperature?: number;
   readonly writingTemperature?: number;
   readonly temperatureHint?: string;
+  readonly compat?: ProviderCompat;
+  readonly transportDefaults?: ProviderTransportDefaults;
 
   readonly models: readonly InkosModel[];
 }

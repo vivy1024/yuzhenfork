@@ -2,6 +2,10 @@ import { getEndpoint } from "./index.js";
 import { resolveServiceModelsBaseUrl } from "../service-presets.js";
 
 export interface VerifyResult {
+  readonly recommendedTransport?: {
+    readonly apiFormat?: "chat" | "responses";
+    readonly stream?: boolean;
+  };
   readonly probe: {
     readonly ok: boolean;
     readonly models: number;
@@ -62,9 +66,10 @@ export async function verifyService(
   const probeResult = await probe(service, apiKey, opts?.baseUrl);
 
   const provider = getEndpoint(service);
+  const recommendedTransport = provider?.transportDefaults;
   const checkModel = opts?.checkModel ?? provider?.checkModel;
   if (!checkModel) {
-    return { probe: probeResult, chat: null };
+    return { recommendedTransport, probe: probeResult, chat: null };
   }
 
   const start = Date.now();
@@ -81,9 +86,10 @@ export async function verifyService(
       stream: false,
     }));
     await chatCompletion(client, checkModel, [{ role: "user", content: "hi" }], { maxTokens: 10 });
-    return { probe: probeResult, chat: { ok: true, latencyMs: Date.now() - start } };
+    return { recommendedTransport, probe: probeResult, chat: { ok: true, latencyMs: Date.now() - start } };
   } catch (error) {
     return {
+      recommendedTransport,
       probe: probeResult,
       chat: {
         ok: false,

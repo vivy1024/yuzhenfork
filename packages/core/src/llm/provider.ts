@@ -155,10 +155,7 @@ export function createLLMClient(config: LLMConfig): LLMClient {
   const piApi = resolvePiApi(serviceName, config.apiFormat, (inkosProvider?.api ?? preset?.api) as PiApi) as PiApi;
   const baseUrl = config.baseUrl || inkosProvider?.baseUrl || preset?.baseUrl || "";
   const extraHeaders = config.headers ?? parseEnvHeaders();
-  const compat = piApi === "openai-completions"
-    && (inkosProvider?.id === "google" || baseUrl.includes("generativelanguage.googleapis.com"))
-    ? { supportsStore: false }
-    : undefined;
+  const compat = resolveProviderCompat(inkosProvider, baseUrl);
 
   const provider = config.provider === "anthropic" ? "anthropic" : "openai";
   // pi-ai provider 字段：大多数情况 pi-ai 会按 baseUrl 自动嗅探（openrouter.ai / api.z.ai /
@@ -210,6 +207,17 @@ function resolvePiApi(
     return apiFormat === "responses" ? "openai-responses" : "openai-completions";
   }
   return (presetApi ?? "openai-completions") as PiApi;
+}
+
+function resolveProviderCompat(
+  provider: ReturnType<typeof getEndpoint>,
+  baseUrl: string,
+): Record<string, unknown> | undefined {
+  const compat = {
+    ...(provider?.compat ?? {}),
+    ...(baseUrl.includes("generativelanguage.googleapis.com") ? { supportsStore: false } : {}),
+  };
+  return Object.keys(compat).length > 0 ? compat : undefined;
 }
 
 function parseEnvHeaders(): Record<string, string> | undefined {

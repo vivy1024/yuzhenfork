@@ -30,7 +30,6 @@ import {
   resolveServiceModel,
   loadSecrets,
   saveSecrets,
-  getServiceApiKey,
   listModelsForService,
   getAllEndpoints,
   probeModelsFromUpstream,
@@ -175,6 +174,7 @@ interface EnvConfigStatus {
   project: EnvConfigSummary;
   global: EnvConfigSummary;
   effectiveSource: "project" | "global" | null;
+  runtimeUsesEnv: false;
 }
 
 interface ServiceProbeResult {
@@ -323,6 +323,7 @@ async function readEnvConfigStatus(root: string): Promise<EnvConfigStatus> {
     project,
     global,
     effectiveSource: project.detected ? "project" : global.detected ? "global" : null,
+    runtimeUsesEnv: false,
   };
 }
 
@@ -669,7 +670,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   async function loadCurrentProjectConfig(
     options?: { readonly requireApiKey?: boolean },
   ): Promise<ProjectConfig> {
-    const freshConfig = await loadProjectConfig(root, options);
+    const freshConfig = await loadProjectConfig(root, { ...options, consumer: "studio" });
     cachedConfig = freshConfig;
     return freshConfig;
   }
@@ -1058,7 +1059,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     return c.json({
       services,
       defaultModel: llm.defaultModel ?? null,
-      configSource: normalizeConfigSource(llm.configSource),
+      configSource: "studio" satisfies LLMConfigSource,
+      storedConfigSource: normalizeConfigSource(llm.configSource),
       envConfig,
     });
   });
@@ -1075,6 +1077,11 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     }
     if (body.defaultModel !== undefined) {
       llm.defaultModel = body.defaultModel;
+    }
+    if (body.configSource === "env") {
+      return c.json({
+        error: "Studio 运行时不支持切换到 env；env 只在 CLI/daemon/部署运行时作为覆盖层使用。",
+      }, 400);
     }
     if (body.configSource !== undefined) {
       llm.configSource = normalizeConfigSource(body.configSource);
@@ -1221,7 +1228,8 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
   app.get("/api/v1/services/:service/models", async (c) => {
     const service = c.req.param("service");
     const refresh = c.req.query("refresh") === "1";
-    const apiKey = c.req.query("apiKey") || await getServiceApiKey(root, service);
+    const secrets = await loadSecrets(root);
+    const apiKey = c.req.query("apiKey") || secrets.services[service]?.apiKey || "";
 
     // No key = no models
     if (!apiKey) return c.json({ models: [] });
@@ -2524,7 +2532,7 @@ export async function startStudioServer(
   port = 4567,
   options?: { readonly staticDir?: string },
 ): Promise<void> {
-  const config = await loadProjectConfig(root, { requireApiKey: false });
+  const config = await loadProjectConfig(root, { consumer: "studio", requireApiKey: false });
 
   const app = createStudioServer(config, root);
 

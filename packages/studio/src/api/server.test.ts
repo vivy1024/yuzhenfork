@@ -801,7 +801,7 @@ describe("createStudioServer daemon lifecycle", () => {
   });
 
   it("filters non-text models out of live service model lists", async () => {
-    getServiceApiKeyMock.mockResolvedValue("sk-google");
+    loadSecretsMock.mockResolvedValue({ services: { google: { apiKey: "sk-google" } } });
     listModelsForServiceMock.mockResolvedValueOnce([
       { id: "gemini-2.5-flash", name: "gemini-2.5-flash", reasoning: false, contextWindow: 1114112 },
       { id: "gemini-3.1-flash-image-preview", name: "gemini-3.1-flash-image-preview", reasoning: false, contextWindow: 163840 },
@@ -885,9 +885,11 @@ describe("createStudioServer daemon lifecycle", () => {
     const response = await app.request("http://localhost/api/v1/services/config");
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
-      configSource: "env",
+      configSource: "studio",
+      storedConfigSource: "env",
       envConfig: {
         effectiveSource: "project",
+        runtimeUsesEnv: false,
         project: {
           detected: true,
           baseUrl: "https://project.example.com/v1",
@@ -935,6 +937,22 @@ describe("createStudioServer daemon lifecycle", () => {
     expect(raw.llm.defaultModel).toBe("kimi-k2.5");
   });
 
+  it("rejects switching Studio runtime to env config source", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const save = await app.request("http://localhost/api/v1/services/config", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ configSource: "env" }),
+    });
+
+    expect(save.status).toBe(400);
+    await expect(save.json()).resolves.toMatchObject({
+      error: expect.stringContaining("Studio 运行时不支持"),
+    });
+  });
+
   it("tests and lists models for custom services using baseUrl and stored config", async () => {
     await writeFile(join(root, "inkos.json"), JSON.stringify({
       ...projectConfig,
@@ -950,7 +968,6 @@ describe("createStudioServer daemon lifecycle", () => {
         "custom:内网GPT": { apiKey: "sk-corp" },
       },
     });
-    getServiceApiKeyMock.mockResolvedValue("sk-corp");
 
     const fetchMock = vi.fn()
       .mockResolvedValueOnce({
@@ -1315,7 +1332,7 @@ describe("createStudioServer daemon lifecycle", () => {
         defaultModel: "qwen-max",
       },
     }, null, 2), "utf-8");
-    getServiceApiKeyMock.mockResolvedValue("sk-bailian");
+    loadSecretsMock.mockResolvedValue({ services: { bailian: { apiKey: "sk-bailian" } } });
 
     const fetchMock = vi.fn(async (input: string | URL | Request) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : input.url;

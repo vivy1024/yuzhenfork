@@ -13,6 +13,7 @@ export const MINIMAX_CODING_PLAN: InkosEndpoint = {
   api: "anthropic-messages",
   baseUrl: "https://api.minimaxi.com/anthropic",
   checkModel: "MiniMax-M2.7",
+  transportDefaults: { stream: false },
   temperatureRange: [0, 2],
   defaultTemperature: 0.9,
   writingTemperature: 0.9,

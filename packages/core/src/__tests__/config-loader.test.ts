@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { loadProjectConfig } from "../utils/config-loader.js";
 
 const ENV_KEYS = [
+  "INKOS_LLM_SERVICE",
   "INKOS_LLM_PROVIDER",
   "INKOS_LLM_BASE_URL",
   "INKOS_LLM_MODEL",
@@ -12,6 +13,9 @@ const ENV_KEYS = [
   "INKOS_LLM_TEMPERATURE",
   "INKOS_LLM_THINKING_BUDGET",
   "INKOS_LLM_API_FORMAT",
+  "INKOS_LLM_STREAM",
+  "INKOS_LLM_EXTRA_top_p",
+  "INKOS_DEFAULT_LANGUAGE",
 ] as const;
 
 describe("loadProjectConfig local provider auth", () => {
@@ -103,7 +107,7 @@ describe("loadProjectConfig local provider auth", () => {
       "utf-8",
     );
 
-    const config = await loadProjectConfig(root);
+    const config = await loadProjectConfig(root, { consumer: "studio" });
 
     expect(config.llm.service).toBe("moonshot");
     expect(config.llm.provider).toBe("openai");
@@ -271,7 +275,7 @@ describe("loadProjectConfig local provider auth", () => {
       "utf-8",
     );
 
-    const config = await loadProjectConfig(root, { requireApiKey: false });
+    const config = await loadProjectConfig(root, { consumer: "studio", requireApiKey: false });
 
     expect(config.llm.configSource).toBe("studio");
     expect(config.llm.service).toBe("google");

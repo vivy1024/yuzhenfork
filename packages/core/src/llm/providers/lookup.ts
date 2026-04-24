@@ -54,3 +54,17 @@ export function listEnabledModels(serviceId: string): InkosModel[] {
   if (!provider) return [];
   return provider.models.filter((m) => m.enabled !== false);
 }
+
+export function isActiveTextModel(model: InkosModel): boolean {
+  if (model.enabled === false) return false;
+  if (model.status === "disabled" || model.status === "deprecated" || model.status === "nonText") return false;
+  if (model.capabilities?.text === false) return false;
+  if (model.capabilities?.imageOutput === true && model.capabilities?.text !== true) return false;
+  return true;
+}
+
+export function listActiveTextModels(serviceId: string): InkosModel[] {
+  const provider = getEndpoint(serviceId);
+  if (!provider) return [];
+  return provider.models.filter(isActiveTextModel);
+}
