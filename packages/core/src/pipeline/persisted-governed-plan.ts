@@ -149,9 +149,11 @@ async function loadLegacyIntentPlan(
     return null;
   }
 
-  const goal = extractSection(intentMarkdown, "Goal") ?? `Chapter ${chapterNumber}`;
+  const rawGoal = extractSection(intentMarkdown, "Goal");
+  if (!rawGoal || !isMeaningfulLegacyValue(rawGoal)) return null;
+  const goal = rawGoal;
   const outlineNodeRaw = extractSection(intentMarkdown, "Outline Node");
-  const outlineNode = outlineNodeRaw && !/^\(?not found\)?$/i.test(outlineNodeRaw)
+  const outlineNode = outlineNodeRaw && isMeaningfulLegacyValue(outlineNodeRaw)
     ? outlineNodeRaw
     : undefined;
 
@@ -194,6 +196,15 @@ function extractListSection(markdown: string, heading: string): string[] {
     .filter((line) => line.startsWith("-"))
     .map((line) => line.replace(/^-\s*/, "").trim())
     .filter((line) => line.length > 0 && line.toLowerCase() !== "none");
+}
+
+function isMeaningfulLegacyValue(value: string): boolean {
+  const normalized = value.trim();
+  if (!normalized) return false;
+  if (/^\(?not found\)?$/i.test(normalized)) return false;
+  if (/^(?:none|null|undefined|n\/a)$/i.test(normalized)) return false;
+  if (/^[*_`\-\s]+$/.test(normalized)) return false;
+  return true;
 }
 
 function escapeRegExp(value: string): string {

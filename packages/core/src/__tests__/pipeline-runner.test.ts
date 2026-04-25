@@ -798,10 +798,10 @@ describe("PipelineRunner", () => {
     try {
       await runner.writeDraft(bookId);
 
-      // Phase 1: persisted plans disabled, planner is always invoked.
-      expect(planChapter).toHaveBeenCalledTimes(1);
+      expect(planChapter).toHaveBeenCalledTimes(0);
       const writeInput = writeChapter.mock.calls[0]?.[0];
       expect(writeInput?.chapterIntent).toBeDefined();
+      expect(writeInput?.chapterIntent).toContain("Bring the focus back to the mentor conflict.");
     } finally {
       await rm(root, { recursive: true, force: true });
     }
