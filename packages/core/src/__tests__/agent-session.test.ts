@@ -219,6 +219,55 @@ describe("runAgentSession cache — bookId switch", () => {
     expect(agentInstances).toHaveLength(1);
   });
 
+  it("enables system file read by default for the session read tool", async () => {
+    const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
+    const pipeline = {} as any;
+    const outsidePath = join(projectRoot, "outside.md");
+    await writeFile(outsidePath, "outside content", "utf-8");
+
+    await runAgentSession(
+      { sessionId: "s1", bookId: null, language: "zh", pipeline, projectRoot, model },
+      "hi",
+    );
+
+    const readTool = agentInstances[0].state.tools.find((tool: any) => tool.name === "read");
+    const result = await readTool.execute("tool-read-default-session", { path: outsidePath });
+
+    expect(result.content[0]?.type).toBe("text");
+    if (result.content[0]?.type === "text") {
+      expect(result.content[0].text).toContain("outside content");
+    }
+  });
+
+  it("can explicitly disable system file read for the session read tool", async () => {
+    const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
+    const pipeline = {} as any;
+    const outsidePath = join(projectRoot, "outside.md");
+    await writeFile(outsidePath, "outside content", "utf-8");
+
+    await runAgentSession(
+      {
+        sessionId: "s1",
+        bookId: null,
+        language: "zh",
+        pipeline,
+        projectRoot,
+        model,
+        allowSystemFileRead: false,
+      },
+      "hi",
+    );
+
+    const readTool = agentInstances[0].state.tools.find((tool: any) => tool.name === "read");
+    const result = await readTool.execute("tool-read-disabled-session", { path: outsidePath });
+
+    expect(result.content[0]?.type).toBe("text");
+    if (result.content[0]?.type === "text") {
+      expect(result.content[0].text).toContain("Path traversal blocked");
+      expect(result.content[0].text).not.toContain("outside content");
+    }
+  });
+
   it("把真实 Agent 的 message_end 写入 JSONL，并在 cache 失效后恢复 raw AgentMessage", async () => {
     const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
     const pipeline = {} as any;

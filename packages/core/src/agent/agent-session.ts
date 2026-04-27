@@ -44,6 +44,8 @@ export interface AgentSessionConfig {
   model: Model<Api> | { provider: string; modelId: string };
   /** Optional API key. When omitted, falls back to env-based key lookup. */
   apiKey?: string;
+  /** Allow the read tool to read absolute paths outside projectRoot/books. Defaults to true; set INKOS_AGENT_ALLOW_SYSTEM_READ=0 to disable. */
+  allowSystemFileRead?: boolean;
   /** Optional listener for streaming events (for SSE forwarding). */
   onEvent?: (event: AgentEvent) => void;
 }
@@ -68,6 +70,7 @@ interface CachedAgent {
   agent: Agent;
   bookId: string | null;
   modelId: string | null;
+  allowSystemFileRead: boolean;
   lastCommittedSeq: number;
   lastActive: number;
 }
@@ -125,6 +128,13 @@ function modelIdFromSpec(spec: AgentSessionConfig["model"]): string | null {
   if ("id" in spec && typeof spec.id === "string") return spec.id;
   if ("modelId" in spec && typeof spec.modelId === "string") return spec.modelId;
   return null;
+}
+
+function envFlagEnabled(value: string | undefined, defaultValue: boolean): boolean {
+  if (value === undefined) return defaultValue;
+  if (value === "1" || value.toLowerCase() === "true") return true;
+  if (value === "0" || value.toLowerCase() === "false") return false;
+  return defaultValue;
 }
 
 async function latestCommittedSeq(projectRoot: string, sessionId: string): Promise<number> {
@@ -307,6 +317,7 @@ export async function runAgentSession(
   // a spurious cache eviction because `null !== undefined`.
   const bookId: string | null = config.bookId ?? null;
   const requestedModelId = modelIdFromSpec(config.model);
+  const allowSystemFileRead = config.allowSystemFileRead ?? envFlagEnabled(process.env.INKOS_AGENT_ALLOW_SYSTEM_READ, true);
 
   // ----- Resolve or create Agent -----
   let cached = agentCache.get(sessionId);
@@ -323,8 +334,9 @@ export async function runAgentSession(
       cached.modelId !== requestedModelId
     );
     const bookChanged = cached.bookId !== bookId;
+    const readPermissionChanged = cached.allowSystemFileRead !== allowSystemFileRead;
 
-    if (modelChanged || bookChanged) {
+    if (modelChanged || bookChanged || readPermissionChanged) {
       agentCache.delete(sessionId);
       cached = undefined;
     }
@@ -344,7 +356,7 @@ export async function runAgentSession(
         systemPrompt: buildAgentSystemPrompt(bookId, language),
         tools: [
           createSubAgentTool(pipeline, bookId, projectRoot),
-          createReadTool(projectRoot),
+          createReadTool(projectRoot, { allowSystemPaths: allowSystemFileRead }),
           createWriteTruthFileTool(pipeline, projectRoot, bookId),
           createRenameEntityTool(pipeline, projectRoot, bookId),
           createPatchChapterTextTool(pipeline, projectRoot, bookId),
@@ -367,6 +379,7 @@ export async function runAgentSession(
       agent,
       bookId,
       modelId: model.id ?? requestedModelId,
+      allowSystemFileRead,
       lastCommittedSeq: await latestCommittedSeq(projectRoot, sessionId),
       lastActive: Date.now(),
     };

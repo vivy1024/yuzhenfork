@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { StateManager } from "../state/manager.js";
 import {
+  createReadTool,
   createSubAgentTool,
   createPatchChapterTextTool,
   createRenameEntityTool,
@@ -197,6 +198,37 @@ describe("agent deterministic writing tools", () => {
     expect(result.content[0]?.type).toBe("text");
     if (result.content[0]?.type === "text") {
       expect(result.content[0].text).toContain(".md");
+    }
+  });
+
+  it("keeps read tool scoped to books by default", async () => {
+    const outsidePath = join(root, "outside.md");
+    await writeFile(outsidePath, "outside secret", "utf-8");
+    const tool = createReadTool(root);
+
+    const result = await tool.execute("tool-read-default", {
+      path: outsidePath,
+    });
+
+    expect(result.content[0]?.type).toBe("text");
+    if (result.content[0]?.type === "text") {
+      expect(result.content[0].text).toContain("Path traversal blocked");
+      expect(result.content[0].text).not.toContain("outside secret");
+    }
+  });
+
+  it("reads absolute system paths when explicitly enabled", async () => {
+    const outsidePath = join(root, "outside.md");
+    await writeFile(outsidePath, "outside secret", "utf-8");
+    const tool = createReadTool(root, { allowSystemPaths: true });
+
+    const result = await tool.execute("tool-read-system", {
+      path: outsidePath,
+    });
+
+    expect(result.content[0]?.type).toBe("text");
+    if (result.content[0]?.type === "text") {
+      expect(result.content[0].text).toContain("outside secret");
     }
   });
 
