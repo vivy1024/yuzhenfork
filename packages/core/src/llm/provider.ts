@@ -167,13 +167,16 @@ export function createLLMClient(config: LLMConfig): LLMClient {
   const piApi = resolvePiApi(serviceName, config.apiFormat, (inkosProvider?.api ?? preset?.api) as PiApi) as PiApi;
   const baseUrl = config.baseUrl || inkosProvider?.baseUrl || preset?.baseUrl || "";
   const extraHeaders = config.headers ?? parseEnvHeaders();
-  const compat = resolveProviderCompat(inkosProvider, baseUrl);
+  const compat = piApi === "openai-completions"
+    ? resolveProviderCompat(inkosProvider, baseUrl)
+    : undefined;
 
   const provider = config.provider === "anthropic" ? "anthropic" : "openai";
   // pi-ai provider 字段：大多数情况 pi-ai 会按 baseUrl 自动嗅探（openrouter.ai / api.z.ai /
   // api.x.ai / deepseek.com / anthropic.com 等）。这里只列 pi-ai 嗅探不到、需要显式指定的少数情况。
   let piProvider: string;
-  if (inkosProvider?.id === "zhipu") piProvider = "zai";
+  if (inkosProvider?.id === "google") piProvider = "google";
+  else if (inkosProvider?.id === "zhipu") piProvider = "zai";
   else if (inkosProvider?.id === "openrouter") piProvider = "openrouter";
   else if (inkosProvider?.id === "githubCopilot") piProvider = "githubCopilot";
   else if (inkosProvider?.api === "anthropic-messages") piProvider = "anthropic";

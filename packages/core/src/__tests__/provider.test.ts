@@ -594,7 +594,7 @@ describe("createLLMClient with providers lookup", () => {
     expect(client._piModel?.id).toBe("kimi-k2-thinking");
   });
 
-  it("Google Gemini OpenAI-compatible endpoint disables OpenAI store parameter", async () => {
+  it("Google Gemini uses native google-generative-ai provider", async () => {
     const { createLLMClient } = await import("../llm/provider.js");
     const { LLMConfigSchema } = await import("../models/project.js");
     const client = createLLMClient(LLMConfigSchema.parse({
@@ -602,8 +602,11 @@ describe("createLLMClient with providers lookup", () => {
       service: "google",
       model: "gemini-2.5-flash",
       apiKey: "test",
-      baseUrl: "https://generativelanguage.googleapis.com/v1beta/openai",
+      baseUrl: "https://generativelanguage.googleapis.com/v1beta",
     }));
-    expect(client._piModel?.compat).toMatchObject({ supportsStore: false });
+    expect(client._piModel?.api).toBe("google-generative-ai");
+    expect(client._piModel?.provider).toBe("google");
+    expect(client._piModel?.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
+    expect(client._piModel?.compat).toBeUndefined();
   });
 });

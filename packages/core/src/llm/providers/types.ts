@@ -9,7 +9,8 @@
 export type ApiProtocol =
   | "openai-completions"
   | "openai-responses"
-  | "anthropic-messages";
+  | "anthropic-messages"
+  | "google-generative-ai";
 
 export type EndpointGroup =
   | "overseas"

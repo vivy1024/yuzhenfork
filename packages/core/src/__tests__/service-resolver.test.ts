@@ -84,7 +84,7 @@ describe("resolveServiceModel", () => {
     expect(result.temperatureRange).toEqual([0, 2]);
   });
 
-  it("preserves Google OpenAI-compatible overrides on resolved model", async () => {
+  it("resolves Google to native google-generative-ai model", async () => {
     await mkdir(join(root, ".inkos"), { recursive: true });
     await writeFile(
       join(root, ".inkos", "secrets.json"),
@@ -93,12 +93,10 @@ describe("resolveServiceModel", () => {
 
     const result = await resolveServiceModel("google", "gemini-pro-latest", root);
 
-    expect(result.model.api).toBe("openai-completions");
-    expect(result.model.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
-    expect(result.model.compat).toMatchObject({
-      supportsStore: false,
-      requiresAssistantAfterToolResult: true,
-    });
+    expect(result.model.api).toBe("google-generative-ai");
+    expect(result.model.provider).toBe("google");
+    expect(result.model.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
+    expect(result.model.compat).toBeUndefined();
   });
 
   it("preserves DeepSeek tool-result bridge compatibility on resolved model", async () => {

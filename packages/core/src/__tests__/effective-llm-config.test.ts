@@ -50,7 +50,7 @@ describe("resolveEffectiveLLMConfig", () => {
     expect(result.llm.configSource).toBe("studio");
     expect(result.diagnostics.configMode).toBe("studio-project");
     expect(result.llm.service).toBe("google");
-    expect(result.llm.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+    expect(result.llm.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
     expect(result.llm.model).toBe("gemini-2.5-flash");
     expect(result.llm.apiKey).toBe("sk-google");
     expect(result.diagnostics.apiKeySource).toBe("studio-secret");
@@ -226,7 +226,7 @@ describe("resolveEffectiveLLMConfig", () => {
     expect(result.diagnostics.configMode).toBe("legacy-env");
     expect(result.llm.service).toBe("google");
     expect(result.llm.provider).toBe("openai");
-    expect(result.llm.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+    expect(result.llm.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
     expect(result.llm.apiFormat).toBe("chat");
     expect(result.llm.model).toBe("gemini-2.5-flash");
     expect(result.llm.apiKey).toBe("sk-google");
@@ -346,7 +346,7 @@ describe("resolveEffectiveLLMConfig", () => {
 
     expect(result.llm.service).toBe("google");
     expect(result.llm.provider).toBe("openai");
-    expect(result.llm.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+    expect(result.llm.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
     expect(result.llm.model).toBe("gemini-2.5-flash");
     expect(result.llm.apiKey).toBe("sk-google");
     expect(result.diagnostics.serviceSource).toBe("cli");

@@ -85,6 +85,7 @@ export function resolveServiceProviderFamily(service: string): "openai" | "anthr
 }
 
 export function resolveServicePiProvider(service: string): string | undefined {
+  if (service === "google") return "google";
   const preset = resolveServicePreset(service);
   if (!preset) return undefined;
   return preset.piProvider ?? preset.providerFamily;
@@ -126,6 +127,7 @@ export const SERVICE_TO_PI_PROVIDER: Record<string, string> = Object.fromEntries
     .filter(([service]) => service !== "custom")
     .map(([service, preset]) => [service, preset.piProvider ?? preset.providerFamily]),
 ) as Record<string, string>;
+SERVICE_TO_PI_PROVIDER.google = "google";
 
 export interface ModelInfo {
   readonly id: string;

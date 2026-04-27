@@ -280,7 +280,7 @@ describe("loadProjectConfig local provider auth", () => {
     expect(config.llm.configSource).toBe("studio");
     expect(config.llm.service).toBe("google");
     expect(config.llm.provider).toBe("openai");
-    expect(config.llm.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta/openai");
+    expect(config.llm.baseUrl).toBe("https://generativelanguage.googleapis.com/v1beta");
     expect(config.llm.model).toBe("gemini-2.5-flash");
     expect(config.llm.apiKey).toBe("sk-google");
   });
