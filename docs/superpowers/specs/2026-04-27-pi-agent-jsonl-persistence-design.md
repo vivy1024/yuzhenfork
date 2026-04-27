@@ -96,12 +96,18 @@ type MessageEvent = {
   piTurnIndex?: number
   toolCallId?: string
   sourceToolAssistantUuid?: string
+  legacyDisplay?: {
+    thinking?: string
+    toolExecutions?: unknown[]
+  }
 
   message: AgentMessage
 }
 ```
 
 `message` 必须保留 pi-agent-core 原始 `AgentMessage`。assistant 的 `thinking`、`text`、`toolCall` content block，以及 `toolResult.content`、`toolResult.details`、`toolResult.isError` 都必须完整写入。
+
+`legacyDisplay` 只服务于旧 JSON 迁移后的 UI 派生，例如旧 `InteractionMessage.thinking`。它不进入模型恢复路径，避免把没有 provider signature 的旧 thinking 伪造成可回放给模型的 signed thinking block。
 
 ### 4.3 请求事件
 
@@ -278,6 +284,8 @@ UI 状态从 transcript event 派生：
 8. 迁移成功后，运行时只写 JSONL。
 
 旧 JSON 文件可以继续留在磁盘上。迁移后它不再被更新。
+
+如果 Studio plain chat fallback 需要补写 assistant 文本，使用 synthetic committed request 写入 transcript。该补写仍然产生 `request_started -> message -> request_committed`，不恢复 legacy JSON 写入路径。
 
 ## 12. 错误处理
 
