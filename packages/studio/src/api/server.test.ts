@@ -1953,6 +1953,62 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
+  it("returns the agent final assistant error without replacing it with an empty-response probe", async () => {
+    const upstreamError = "400 The `reasoning_content` in the thinking mode must be passed back to the API.";
+    runAgentSessionMock.mockResolvedValueOnce({
+      responseText: "",
+      errorMessage: upstreamError,
+      messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: upstreamError }],
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "nihao", activeBookId: "demo-book", sessionId: "agent-session-1" }),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "AGENT_LLM_ERROR",
+        message: upstreamError,
+      },
+      response: upstreamError,
+    });
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+  });
+
+  it("returns malformed Gemini function-call errors without replacing them with an empty-response probe", async () => {
+    const upstreamError = "Provider finish_reason: function_call_filter: MALFORMED_FUNCTION_CALL";
+    runAgentSessionMock.mockResolvedValueOnce({
+      responseText: "",
+      errorMessage: upstreamError,
+      messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: upstreamError }],
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "nihao", activeBookId: "demo-book", sessionId: "agent-session-1" }),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "AGENT_LLM_ERROR",
+        message: upstreamError,
+      },
+      response: upstreamError,
+    });
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+  });
+
   it("falls back to plain chat when the tool-agent returns empty text", async () => {
     runAgentSessionMock.mockResolvedValueOnce({
       responseText: "",

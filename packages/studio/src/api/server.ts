@@ -1928,6 +1928,16 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       };
 
       if (!result.responseText) {
+        if (result.errorMessage) {
+          if (resolveCreatedBookIdFromToolExecs(collectedToolExecs)) {
+            await finalizeCreatedBook();
+          }
+          return c.json({
+            error: { code: "AGENT_LLM_ERROR", message: result.errorMessage },
+            response: result.errorMessage,
+          }, 502);
+        }
+
         try {
           const fallbackClient = createLLMClient({
             ...config.llm,
