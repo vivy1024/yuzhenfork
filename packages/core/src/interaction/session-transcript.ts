@@ -1,6 +1,9 @@
+import { randomUUID } from "node:crypto";
 import { appendFile, mkdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { TranscriptEventSchema, type TranscriptEvent } from "./session-transcript-schema.js";
+import type { TranscriptRole } from "./session-transcript-schema.js";
 
 const SESSIONS_DIR = ".inkos/sessions";
 const appendQueues = new Map<string, Promise<void>>();
@@ -63,4 +66,100 @@ export async function appendTranscriptEvent(
   });
   appendQueues.set(key, next.catch(() => undefined));
   await next;
+}
+
+function transcriptRoleForMessage(message: AgentMessage): TranscriptRole | null {
+  if (!message || typeof message !== "object" || !("role" in message)) return null;
+  const role = (message as { role?: unknown }).role;
+  return role === "user" || role === "assistant" || role === "toolResult" || role === "system"
+    ? role
+    : null;
+}
+
+function messageTimestamp(message: AgentMessage): number {
+  if (message && typeof message === "object") {
+    const timestamp = (message as { timestamp?: unknown }).timestamp;
+    if (typeof timestamp === "number" && Number.isFinite(timestamp) && timestamp >= 0) {
+      return Math.floor(timestamp);
+    }
+  }
+  return Date.now();
+}
+
+function toolCallIdForMessage(message: AgentMessage): string | undefined {
+  if (!message || typeof message !== "object") return undefined;
+  if ((message as { role?: unknown }).role === "toolResult") {
+    const toolCallId = (message as { toolCallId?: unknown }).toolCallId;
+    return typeof toolCallId === "string" && toolCallId.length > 0 ? toolCallId : undefined;
+  }
+
+  const content = (message as { content?: unknown }).content;
+  if (!Array.isArray(content)) return undefined;
+  const block = content.find(
+    (item): item is { type: "toolCall"; id: string } =>
+      !!item &&
+      typeof item === "object" &&
+      (item as { type?: unknown }).type === "toolCall" &&
+      typeof (item as { id?: unknown }).id === "string",
+  );
+  return block?.id;
+}
+
+export async function appendManualSessionMessages(
+  projectRoot: string,
+  sessionId: string,
+  messages: ReadonlyArray<AgentMessage>,
+  input = "",
+): Promise<void> {
+  const persistedMessages = messages
+    .map((message) => ({ message, role: transcriptRoleForMessage(message) }))
+    .filter((entry): entry is { message: AgentMessage; role: TranscriptRole } => entry.role !== null);
+  if (persistedMessages.length === 0) return;
+
+  const requestId = randomUUID();
+  let seq = await nextTranscriptSeq(projectRoot, sessionId);
+  await appendTranscriptEvent(projectRoot, {
+    type: "request_started",
+    version: 1,
+    sessionId,
+    requestId,
+    seq: seq++,
+    timestamp: Date.now(),
+    input,
+  });
+
+  let parentUuid: string | null = null;
+  let lastAssistantUuid: string | null = null;
+  for (const { message, role } of persistedMessages) {
+    const uuid = randomUUID();
+    const isToolResult = role === "toolResult";
+    const toolCallId = toolCallIdForMessage(message);
+    await appendTranscriptEvent(projectRoot, {
+      type: "message",
+      version: 1,
+      sessionId,
+      requestId,
+      uuid,
+      parentUuid: isToolResult && lastAssistantUuid ? lastAssistantUuid : parentUuid,
+      seq: seq++,
+      role,
+      timestamp: messageTimestamp(message),
+      ...(toolCallId ? { toolCallId } : {}),
+      ...(isToolResult && lastAssistantUuid
+        ? { sourceToolAssistantUuid: lastAssistantUuid }
+        : {}),
+      message,
+    });
+    if (role === "assistant") lastAssistantUuid = uuid;
+    parentUuid = uuid;
+  }
+
+  await appendTranscriptEvent(projectRoot, {
+    type: "request_committed",
+    version: 1,
+    sessionId,
+    requestId,
+    seq,
+    timestamp: Date.now(),
+  });
 }

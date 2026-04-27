@@ -27,6 +27,7 @@ const createAndPersistBookSessionMock = vi.fn();
 const loadBookSessionMock = vi.fn();
 const persistBookSessionMock = vi.fn();
 const appendBookSessionMessageMock = vi.fn();
+const appendManualSessionMessagesMock = vi.fn();
 const renameBookSessionMock = vi.fn();
 const deleteBookSessionMock = vi.fn();
 const migrateBookSessionMock = vi.fn();
@@ -210,6 +211,7 @@ vi.mock("@actalk/inkos-core", () => {
     loadBookSession: loadBookSessionMock,
     persistBookSession: persistBookSessionMock,
     appendBookSessionMessage: appendBookSessionMessageMock,
+    appendManualSessionMessages: appendManualSessionMessagesMock,
     isNewLayoutBook: vi.fn(async () => false),
     renameBookSession: renameBookSessionMock,
     deleteBookSession: deleteBookSessionMock,
@@ -380,6 +382,7 @@ describe("createStudioServer daemon lifecycle", () => {
     loadBookSessionMock.mockReset();
     persistBookSessionMock.mockReset();
     appendBookSessionMessageMock.mockReset();
+    appendManualSessionMessagesMock.mockReset();
     renameBookSessionMock.mockReset();
     deleteBookSessionMock.mockReset();
     migrateBookSessionMock.mockReset();
@@ -410,6 +413,7 @@ describe("createStudioServer daemon lifecycle", () => {
     appendBookSessionMessageMock.mockImplementation(
       (session: unknown, _msg: unknown) => session,
     );
+    appendManualSessionMessagesMock.mockResolvedValue(undefined);
     renameBookSessionMock.mockResolvedValue(null);
     deleteBookSessionMock.mockResolvedValue(undefined);
     migrateBookSessionMock.mockImplementation(async (_root: string, _sessionId: string, bookId: string) => ({
@@ -1759,8 +1763,59 @@ describe("createStudioServer daemon lifecycle", () => {
         projectRoot: root,
       }),
       "continue",
-      expect.any(Array),
     );
+  });
+
+  it("does not append or persist legacy BookSession messages after agent success", async () => {
+    runAgentSessionMock.mockResolvedValueOnce({
+      responseText: "Agent response.",
+      messages: [
+        { role: "user", content: "continue", timestamp: 1 },
+        { role: "assistant", content: [{ type: "text", text: "Agent response." }], timestamp: 2 },
+      ],
+    });
+    loadBookSessionMock
+      .mockResolvedValueOnce({
+        sessionId: "agent-session-1",
+        bookId: "demo-book",
+        title: null,
+        messages: [],
+        events: [],
+        draftRounds: [],
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      .mockResolvedValueOnce({
+        sessionId: "agent-session-1",
+        bookId: "demo-book",
+        title: "continue",
+        messages: [
+          { role: "user", content: "continue", timestamp: 1 },
+          { role: "assistant", content: "Agent response.", timestamp: 2 },
+        ],
+        events: [],
+        draftRounds: [],
+        createdAt: 1,
+        updatedAt: 2,
+      });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "continue", activeBookId: "demo-book", sessionId: "agent-session-1" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(appendBookSessionMessageMock).not.toHaveBeenCalled();
+    expect(persistBookSessionMock).not.toHaveBeenCalled();
+    expect(runAgentSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "agent-session-1" }),
+      "continue",
+    );
+    expect(loadBookSessionMock).toHaveBeenCalledTimes(2);
   });
 
   it("allows /api/agent to use explicit service+model when Studio config has no defaultModel", async () => {

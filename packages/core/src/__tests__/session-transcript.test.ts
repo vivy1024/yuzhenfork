@@ -3,11 +3,13 @@ import { mkdtemp, rm, readFile, mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
+  appendManualSessionMessages,
   appendTranscriptEvent,
   nextTranscriptSeq,
   readTranscriptEvents,
   transcriptPath,
 } from "../interaction/session-transcript.js";
+import { restoreAgentMessagesFromTranscript } from "../interaction/session-transcript-restore.js";
 import type {
   MessageEvent,
   RequestCommittedEvent,
@@ -128,5 +130,38 @@ describe("session transcript codec", () => {
     await appendTranscriptEvent(projectRoot, committed);
 
     await expect(nextTranscriptSeq(projectRoot, "s1")).resolves.toBe(8);
+  });
+
+  it("appendManualSessionMessages 写入 committed request 并保留 raw assistant message", async () => {
+    await appendManualSessionMessages(projectRoot, "s1", [{
+      role: "assistant",
+      content: [{ type: "text", text: "fallback" }],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: "fake",
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+      },
+      stopReason: "stop",
+      timestamp: 10,
+    }], "fallback-input");
+
+    const events = await readTranscriptEvents(projectRoot, "s1");
+    expect(events.map((event) => event.type)).toEqual([
+      "request_started",
+      "message",
+      "request_committed",
+    ]);
+    expect(events[0]).toMatchObject({ type: "request_started", input: "fallback-input" });
+
+    const restored = await restoreAgentMessagesFromTranscript(projectRoot, "s1");
+    expect(restored).toMatchObject([
+      { role: "assistant", content: [{ type: "text", text: "fallback" }] },
+    ]);
   });
 });

@@ -15,8 +15,7 @@ import {
   resolveSessionActiveBook,
   listBookSessions,
   loadBookSession,
-  persistBookSession,
-  appendBookSessionMessage,
+  appendManualSessionMessages,
   createAndPersistBookSession,
   renameBookSession,
   deleteBookSession,
@@ -1672,11 +1671,18 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       }
       let bookSession = loadedBookSession;
       const streamSessionId = loadedBookSession.sessionId;
-
-      // Build initial message context from persisted session
-      const initialMessages = bookSession.messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+      const titleBeforeRun = bookSession.title;
+      let sessionTitleBroadcasted = false;
+      const refreshBookSessionFromTranscript = async (): Promise<void> => {
+        const refreshed = await loadBookSession(root, bookSession.sessionId);
+        if (refreshed) {
+          bookSession = refreshed;
+        }
+        if (!sessionTitleBroadcasted && titleBeforeRun === null && bookSession.title) {
+          broadcast("session:title", { sessionId: bookSession.sessionId, title: bookSession.title });
+          sessionTitleBroadcasted = true;
+        }
+      };
 
       // Resolve model — multi-service resolution
       let resolvedModel: ResolvedModel["model"] | undefined;
@@ -1889,7 +1895,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           },
         },
         instruction,
-        initialMessages,
       );
 
       let broadcastedCreatedBookId: string | null = null;
@@ -1921,33 +1926,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         return createdBookId;
       };
 
-      // Persist user + assistant messages to BookSession
-      bookSession = appendBookSessionMessage(bookSession, {
-        role: "user",
-        content: instruction,
-        timestamp: Date.now(),
-      });
-      // 第一条用户消息就是 session 的标题：如果 title 还是 null，用消息内容（单行、≤20字）写入。
-      // 后续消息不覆盖；用户手动改名通过 renameBookSession 覆盖。
-      if (bookSession.title === null) {
-        const oneLine = instruction.trim().replace(/\s+/g, " ");
-        const title = oneLine.length > 20 ? `${oneLine.slice(0, 20)}…` : oneLine;
-        if (title) {
-          bookSession = { ...bookSession, title };
-          broadcast("session:title", { sessionId: bookSession.sessionId, title });
-        }
-      }
-      if (result.responseText) {
-        const lastAssistant = result.messages?.filter((m: any) => m.role === "assistant").pop();
-        const thinking = lastAssistant?.thinking;
-        bookSession = appendBookSessionMessage(bookSession, {
-          role: "assistant",
-          content: result.responseText,
-          ...(thinking ? { thinking } : {}),
-          ...(collectedToolExecs.length > 0 ? { toolExecutions: collectedToolExecs } : {}),
-          timestamp: Date.now() + 1,
-        });
-      }
       if (!result.responseText) {
         try {
           const fallbackClient = createLLMClient({
@@ -1969,12 +1947,24 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             { maxTokens: 256 },
           );
           if (fallback.content?.trim()) {
-            bookSession = appendBookSessionMessage(bookSession, {
+            await appendManualSessionMessages(root, bookSession.sessionId, [{
               role: "assistant",
-              content: fallback.content,
-              timestamp: Date.now() + 1,
-            });
-            await persistBookSession(root, bookSession);
+              content: [{ type: "text", text: fallback.content }],
+              api: "anthropic-messages",
+              provider: configuredEntry?.service ?? reqService ?? config.llm.provider,
+              model: reqModel ?? config.llm.model,
+              usage: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 0,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            }], instruction);
+            await refreshBookSessionFromTranscript();
             const createdBookId = await finalizeCreatedBook();
             return c.json({
               response: fallback.content,
@@ -2007,7 +1997,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         } catch (probeError) {
           const probeMessage = probeError instanceof Error ? probeError.message : String(probeError);
           if (resolveCreatedBookIdFromToolExecs(collectedToolExecs)) {
-            await persistBookSession(root, bookSession);
             await finalizeCreatedBook();
           }
           return c.json({
@@ -2018,7 +2007,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
         const emptyMessage = "模型未返回文本内容。请检查协议类型（chat/responses）、流式开关或上游服务兼容性。";
         if (resolveCreatedBookIdFromToolExecs(collectedToolExecs)) {
-          await persistBookSession(root, bookSession);
           await finalizeCreatedBook();
         }
         return c.json({
@@ -2026,7 +2014,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           response: emptyMessage,
         }, 502);
       }
-      await persistBookSession(root, bookSession);
+      await refreshBookSessionFromTranscript();
       await finalizeCreatedBook();
 
       broadcast("agent:complete", { instruction, activeBookId, sessionId: bookSession.sessionId });

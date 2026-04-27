@@ -142,6 +142,23 @@ export {
   createAndPersistBookSession,
   SessionAlreadyMigratedError,
 } from "./interaction/book-session-store.js";
+export {
+  appendManualSessionMessages,
+  appendTranscriptEvent,
+  readTranscriptEvents,
+  nextTranscriptSeq,
+  transcriptPath,
+  legacyBookSessionPath,
+} from "./interaction/session-transcript.js";
+export type {
+  TranscriptEvent,
+  MessageEvent,
+  RequestCommittedEvent,
+  RequestFailedEvent,
+  RequestStartedEvent,
+  SessionCreatedEvent,
+  SessionMetadataUpdatedEvent,
+} from "./interaction/session-transcript-schema.js";
 export { routeInteractionRequest } from "./interaction/request-router.js";
 export {
   routeNaturalLanguageIntent,
