@@ -1,5 +1,11 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { readTranscriptEvents } from "./session-transcript.js";
+import {
+  BookSessionSchema,
+  type BookSession,
+  type InteractionMessage,
+  type ToolExecution,
+} from "./session.js";
 import type { MessageEvent, TranscriptEvent } from "./session-transcript-schema.js";
 
 function isObject(value: unknown): value is Record<string, unknown> {
@@ -101,4 +107,113 @@ export async function restoreAgentMessagesFromTranscript(
   return cleanRestoredAgentMessages(
     committedMessageEvents(events).map((event) => event.message as AgentMessage),
   );
+}
+
+function textFromContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content
+    .filter(
+      (block): block is { type: string; text: string } =>
+        isObject(block) && block.type === "text" && typeof block.text === "string",
+    )
+    .map((block) => block.text)
+    .join("");
+}
+
+function thinkingFromContent(content: unknown): string | undefined {
+  if (!Array.isArray(content)) return undefined;
+  const value = content
+    .filter((block): block is Record<string, unknown> => isObject(block) && block.type === "thinking")
+    .map((block) => typeof block.thinking === "string" ? block.thinking : "")
+    .join("");
+  return value || undefined;
+}
+
+function firstUserMessageTitle(messages: InteractionMessage[]): string | null {
+  for (const message of messages) {
+    if (message.role !== "user") continue;
+    const oneLine = message.content.trim().replace(/\s+/g, " ");
+    if (!oneLine) return null;
+    return oneLine.length > 20 ? `${oneLine.slice(0, 20)}…` : oneLine;
+  }
+  return null;
+}
+
+function messageEventToInteractionMessage(event: MessageEvent): InteractionMessage | null {
+  const raw = event.message as Record<string, unknown>;
+  if (!isObject(raw)) return null;
+  if (event.role === "toolResult") return null;
+
+  if (event.role === "user") {
+    const content = textFromContent(raw.content);
+    return content ? { role: "user", content, timestamp: event.timestamp } : null;
+  }
+
+  if (event.role === "assistant") {
+    const content = textFromContent(raw.content);
+    const thinking = thinkingFromContent(raw.content) ?? event.legacyDisplay?.thinking;
+    if (!content && !thinking) return null;
+    return {
+      role: "assistant",
+      content,
+      ...(thinking ? { thinking } : {}),
+      ...(event.legacyDisplay?.toolExecutions
+        ? { toolExecutions: event.legacyDisplay.toolExecutions as ToolExecution[] }
+        : {}),
+      timestamp: event.timestamp,
+    };
+  }
+
+  if (event.role === "system") {
+    const content = textFromContent(raw.content);
+    return content ? { role: "system", content, timestamp: event.timestamp } : null;
+  }
+
+  return null;
+}
+
+export async function deriveBookSessionFromTranscript(
+  projectRoot: string,
+  sessionId: string,
+): Promise<BookSession | null> {
+  const events = await readTranscriptEvents(projectRoot, sessionId);
+  if (events.length === 0) return null;
+
+  const created = events.find((event) => event.type === "session_created");
+  let bookId = created?.type === "session_created" ? created.bookId : null;
+  let title = created?.type === "session_created" ? created.title : null;
+  const createdAt = created?.type === "session_created"
+    ? created.createdAt
+    : events[0]?.timestamp ?? Date.now();
+  let updatedAt = created?.type === "session_created"
+    ? created.updatedAt
+    : events[events.length - 1]?.timestamp ?? createdAt;
+
+  for (const event of events) {
+    if (event.type !== "session_metadata_updated") continue;
+    if ("bookId" in event && event.bookId !== undefined) bookId = event.bookId;
+    if ("title" in event && event.title !== undefined) title = event.title;
+    updatedAt = event.updatedAt;
+  }
+
+  const messages = committedMessageEvents(events)
+    .map(messageEventToInteractionMessage)
+    .filter((message): message is InteractionMessage => message !== null)
+    .sort((a, b) => a.timestamp - b.timestamp);
+
+  if (title === null) {
+    title = firstUserMessageTitle(messages);
+  }
+
+  return BookSessionSchema.parse({
+    sessionId,
+    bookId,
+    title,
+    messages,
+    draftRounds: [],
+    events: [],
+    createdAt,
+    updatedAt,
+  });
 }

@@ -13,7 +13,7 @@ import {
   SessionAlreadyMigratedError,
 } from "../interaction/book-session-store.js";
 import { createBookSession, appendBookSessionMessage } from "../interaction/session.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 
 describe("book-session-store", () => {
   let tempDir: string;
@@ -81,6 +81,31 @@ describe("book-session-store", () => {
 
       const loaded = await loadBookSession(tempDir, session.sessionId);
       expect(loaded!.title).toBe("测试标题");
+    });
+
+    it("读取 legacy JSON 时迁移为 JSONL 并保留 UI thinking", async () => {
+      const session = {
+        ...createBookSession("book-a", "legacy-1"),
+        messages: [
+          { role: "user" as const, content: "继续", timestamp: 10 },
+          { role: "assistant" as const, content: "好的", thinking: "旧思考", timestamp: 11 },
+        ],
+      };
+      await persistBookSession(tempDir, session);
+
+      const loaded = await loadBookSession(tempDir, "legacy-1");
+
+      expect(loaded).toMatchObject({
+        sessionId: "legacy-1",
+        bookId: "book-a",
+        messages: [
+          { role: "user", content: "继续" },
+          { role: "assistant", content: "好的", thinking: "旧思考" },
+        ],
+      });
+      await expect(readFile(join(tempDir, ".inkos", "sessions", "legacy-1.jsonl"), "utf-8"))
+        .resolves
+        .toContain("request_committed");
     });
   });
 

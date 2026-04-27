@@ -3,7 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { appendTranscriptEvent } from "../interaction/session-transcript.js";
-import { restoreAgentMessagesFromTranscript } from "../interaction/session-transcript-restore.js";
+import {
+  deriveBookSessionFromTranscript,
+  restoreAgentMessagesFromTranscript,
+} from "../interaction/session-transcript-restore.js";
 import type { MessageEvent } from "../interaction/session-transcript-schema.js";
 
 const usage = {
@@ -209,5 +212,84 @@ describe("session transcript restore", () => {
     const restored = await restoreAgentMessagesFromTranscript(projectRoot, "s1");
 
     expect((restored[0] as any).content).toEqual([{ type: "text", text: "回答" }]);
+  });
+
+  it("从 transcript 派生 BookSession UI 视图", async () => {
+    await appendTranscriptEvent(projectRoot, {
+      type: "session_created",
+      version: 1,
+      sessionId: "s1",
+      seq: 1,
+      timestamp: 1,
+      bookId: "book-a",
+      title: null,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await appendTranscriptEvent(projectRoot, {
+      type: "request_started",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r1",
+      seq: 2,
+      timestamp: 2,
+      input: "第一条问题",
+    });
+    await appendTranscriptEvent(projectRoot, {
+      type: "message",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r1",
+      uuid: "u1",
+      parentUuid: null,
+      seq: 3,
+      role: "user",
+      timestamp: 3,
+      message: { role: "user", content: "第一条问题", timestamp: 3 },
+    } as MessageEvent);
+    await appendTranscriptEvent(projectRoot, {
+      type: "message",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r1",
+      uuid: "a1",
+      parentUuid: "u1",
+      seq: 4,
+      role: "assistant",
+      timestamp: 4,
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "思考" },
+          { type: "text", text: "回答" },
+        ],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "claude",
+        usage,
+        stopReason: "stop",
+        timestamp: 4,
+      },
+    } as MessageEvent);
+    await appendTranscriptEvent(projectRoot, {
+      type: "request_committed",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r1",
+      seq: 5,
+      timestamp: 5,
+    });
+
+    const session = await deriveBookSessionFromTranscript(projectRoot, "s1");
+
+    expect(session).toMatchObject({
+      sessionId: "s1",
+      bookId: "book-a",
+      title: "第一条问题",
+      messages: [
+        { role: "user", content: "第一条问题" },
+        { role: "assistant", content: "回答", thinking: "思考" },
+      ],
+    });
   });
 });

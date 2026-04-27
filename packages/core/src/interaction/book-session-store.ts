@@ -2,6 +2,7 @@ import { readFile, writeFile, readdir, mkdir, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { BookSessionSchema, createBookSession } from "./session.js";
 import type { BookSession } from "./session.js";
+import { migrateLegacyBookSessionToTranscript } from "./session-transcript-legacy.js";
 
 const SESSIONS_DIR = ".inkos/sessions";
 
@@ -44,7 +45,9 @@ export async function loadBookSession(
 ): Promise<BookSession | null> {
   try {
     const raw = await readFile(sessionPath(projectRoot, sessionId), "utf-8");
-    return BookSessionSchema.parse(JSON.parse(raw));
+    const session = BookSessionSchema.parse(JSON.parse(raw));
+    await migrateLegacyBookSessionToTranscript(projectRoot, session);
+    return session;
   } catch {
     return null;
   }
