@@ -9,6 +9,7 @@ import {
   renameBookSession,
   deleteBookSession,
   migrateBookSession,
+  createAndPersistBookSession,
   extractFirstUserMessageTitle,
   SessionAlreadyMigratedError,
 } from "../interaction/book-session-store.js";
@@ -106,6 +107,40 @@ describe("book-session-store", () => {
       await expect(readFile(join(tempDir, ".inkos", "sessions", "legacy-1.jsonl"), "utf-8"))
         .resolves
         .toContain("request_committed");
+    });
+
+    it("createAndPersistBookSession 为新 session 写 JSONL 而不是 legacy JSON", async () => {
+      const session = await createAndPersistBookSession(tempDir, "book-a", "123456-abcdef");
+
+      expect(session.sessionId).toBe("123456-abcdef");
+      await expect(readFile(join(tempDir, ".inkos", "sessions", "123456-abcdef.jsonl"), "utf-8"))
+        .resolves
+        .toContain("session_created");
+      await expect(readFile(join(tempDir, ".inkos", "sessions", "123456-abcdef.json"), "utf-8"))
+        .rejects
+        .toThrow();
+    });
+
+    it("renameBookSession 追加 metadata event 并从 JSONL 派生新标题", async () => {
+      await createAndPersistBookSession(tempDir, "book-a", "123456-abcdef");
+
+      const renamed = await renameBookSession(tempDir, "123456-abcdef", "新标题");
+
+      expect(renamed!.title).toBe("新标题");
+      const loaded = await loadBookSession(tempDir, "123456-abcdef");
+      expect(loaded!.title).toBe("新标题");
+    });
+
+    it("listBookSessions 同时列出 JSONL session 和未迁移 legacy JSON session", async () => {
+      await createAndPersistBookSession(tempDir, "book-a", "123456-abcdef");
+      const dir = join(tempDir, ".inkos", "sessions");
+      await mkdir(dir, { recursive: true });
+      const legacy = { ...createBookSession("book-a", "legacy-1"), updatedAt: 999 };
+      await writeFile(join(dir, "legacy-1.json"), JSON.stringify(legacy));
+
+      const list = await listBookSessions(tempDir, "book-a");
+
+      expect(list.map((entry) => entry.sessionId).sort()).toEqual(["123456-abcdef", "legacy-1"]);
     });
   });
 
