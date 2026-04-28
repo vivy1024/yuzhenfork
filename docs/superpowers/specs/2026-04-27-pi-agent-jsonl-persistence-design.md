@@ -225,6 +225,11 @@ tool result 必须作为一等 `message` event 进入 transcript。
 
 JSONL transcript 通过持久化原始 message 消除这种差异。恢复后的 `Agent.state.messages` 包含 committed request 结束时内存中存在的 user、assistant、toolResult message。
 
+`restoreAgentMessagesFromTranscript()` 只恢复 committed 且清理后的 raw `AgentMessage`。
+provider-specific 兼容投影发生在 `adaptRestoredAgentMessagesForModel()`：
+跨模型会把外来 tool call/result 文本化；只有目标 provider 的 `compat.requiresAssistantAfterToolResult`
+为 true 时，才在 restored `toolResult` 后补 synthetic assistant bridge。
+
 `sourceToolAssistantUuid` 在可获得时指向发出对应 tool call 的 assistant message。后续图恢复可以借此把 tool result 绑定到来源 tool use，降低对顺序恢复的依赖。
 
 ## 9. 缓存角色

@@ -7,6 +7,7 @@ import {
   adaptRestoredAgentMessagesForModel,
   deriveBookSessionFromTranscript,
   restoreAgentMessagesFromTranscript,
+  TOOL_RESULT_BRIDGE_TEXT,
 } from "../interaction/session-transcript-restore.js";
 import type { MessageEvent } from "../interaction/session-transcript-schema.js";
 
@@ -156,7 +157,7 @@ describe("session transcript restore", () => {
 
     const restored = await restoreAgentMessagesFromTranscript(projectRoot, "s1");
 
-    expect(restored).toHaveLength(3);
+    expect(restored).toHaveLength(2);
     expect(restored[0]).toMatchObject({
       role: "assistant",
       content: [
@@ -165,13 +166,10 @@ describe("session transcript restore", () => {
       ],
     });
     expect(restored[1]).toMatchObject({ role: "toolResult", toolCallId: "tool-1", toolName: "read" });
-    expect(restored[2]).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "I have processed the tool results." }],
-    });
+    expect(JSON.stringify(restored)).not.toContain(TOOL_RESULT_BRIDGE_TEXT);
   });
 
-  it("恢复中断工具轮次时在 toolResult 后补 assistant bridge", async () => {
+  it("恢复中断工具轮次时只清理空 assistant，不在 raw restore 阶段补 bridge", async () => {
     await appendTranscriptEvent(projectRoot, {
       type: "request_started",
       version: 1,
@@ -302,13 +300,9 @@ describe("session transcript restore", () => {
       "user",
       "assistant",
       "toolResult",
-      "assistant",
       "user",
     ]);
-    expect(restored[3]).toMatchObject({
-      role: "assistant",
-      content: [{ type: "text", text: "I have processed the tool results." }],
-    });
+    expect(JSON.stringify(restored)).not.toContain(TOOL_RESULT_BRIDGE_TEXT);
   });
 
   it("移除最后 assistant message 的 trailing thinking block", async () => {
@@ -443,6 +437,69 @@ describe("session transcript restore", () => {
     });
 
     expect(adapted).toEqual(messages);
+  });
+
+  it("does not add synthetic toolResult bridge when target model does not require it", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "tool-1", name: "read", arguments: {} }],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "claude",
+        usage,
+        stopReason: "toolUse",
+        timestamp: 1,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "tool-1",
+        toolName: "read",
+        content: [{ type: "text", text: "result" }],
+        isError: false,
+        timestamp: 2,
+      },
+    ] as any[];
+
+    const adapted = adaptRestoredAgentMessagesForModel(messages, {
+      api: "anthropic-messages",
+      provider: "anthropic",
+      id: "claude",
+    });
+
+    expect(JSON.stringify(adapted)).not.toContain(TOOL_RESULT_BRIDGE_TEXT);
+  });
+
+  it("adds synthetic toolResult bridge when target model compat requires it", () => {
+    const messages = [
+      {
+        role: "assistant",
+        content: [{ type: "toolCall", id: "tool-1", name: "read", arguments: {} }],
+        api: "openai-completions",
+        provider: "openai",
+        model: "deepseek-v4-pro",
+        usage,
+        stopReason: "toolUse",
+        timestamp: 1,
+      },
+      {
+        role: "toolResult",
+        toolCallId: "tool-1",
+        toolName: "read",
+        content: [{ type: "text", text: "result" }],
+        isError: false,
+        timestamp: 2,
+      },
+    ] as any[];
+
+    const adapted = adaptRestoredAgentMessagesForModel(messages, {
+      api: "openai-completions",
+      provider: "openai",
+      id: "deepseek-v4-pro",
+      compat: { requiresAssistantAfterToolResult: true },
+    });
+
+    expect(JSON.stringify(adapted)).toContain(TOOL_RESULT_BRIDGE_TEXT);
   });
 
   it("跨模型恢复时把原生工具回合降级为 user 文本", () => {

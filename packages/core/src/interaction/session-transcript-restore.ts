@@ -127,13 +127,22 @@ export function cleanRestoredAgentMessages(messages: AgentMessage[]): AgentMessa
     cleaned[cleaned.length - 1] = removeTrailingThinking(last);
   }
 
-  return addToolResultBridges(cleaned);
+  return cleaned;
 }
 
 interface TargetModelIdentity {
   readonly api?: unknown;
   readonly provider?: unknown;
   readonly id?: unknown;
+  readonly compat?: unknown;
+}
+
+function requiresAssistantAfterToolResult(target: TargetModelIdentity): boolean {
+  return !!(
+    target.compat &&
+    typeof target.compat === "object" &&
+    (target.compat as { requiresAssistantAfterToolResult?: unknown }).requiresAssistantAfterToolResult === true
+  );
 }
 
 function isSameAssistantModel(message: Record<string, unknown>, target: TargetModelIdentity): boolean {
@@ -290,10 +299,14 @@ export function adaptRestoredAgentMessagesForModel(
     adapted.push(message);
   }
 
-  return adapted.filter((message) => {
+  const filtered = adapted.filter((message) => {
     if (!isObject(message) || message.role !== "assistant") return true;
     return hasTextContent(message) || hasToolCallContent(message);
   });
+
+  return requiresAssistantAfterToolResult(target)
+    ? addToolResultBridges(filtered)
+    : filtered;
 }
 
 export function committedMessageEvents(events: TranscriptEvent[]): MessageEvent[] {
