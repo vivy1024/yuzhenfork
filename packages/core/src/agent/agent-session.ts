@@ -227,6 +227,24 @@ function extractTextFromAssistant(msg: AssistantMessage): string {
     .join("");
 }
 
+function lastAssistantMessage(messages: AgentMessage[]): AssistantMessage | undefined {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const msg = messages[i];
+    if (msg && typeof msg === "object" && "role" in msg && (msg as { role?: unknown }).role === "assistant") {
+      return msg as AssistantMessage;
+    }
+  }
+  return undefined;
+}
+
+function assistantErrorMessage(message: AssistantMessage | undefined): string | undefined {
+  return message &&
+    (message.stopReason === "error" || message.stopReason === "aborted") &&
+    message.errorMessage
+      ? message.errorMessage
+      : undefined;
+}
+
 function convertAgentMessagesForModel(messages: AgentMessage[], model: Model<Api>): Message[] {
   const llmMessages = messages.filter((message): message is Message => {
     if (!message || typeof message !== "object" || !("role" in message)) return false;
@@ -552,17 +570,36 @@ export async function runAgentSession(
   });
 
   // ----- Execute the turn -----
+  let finalAssistant: AssistantMessage | undefined;
+  let errorMessage: string | undefined;
+
   try {
     await agent.prompt(userMessage);
-    await appendTranscriptEvent(projectRoot, {
-      type: "request_committed",
-      version: 1,
-      sessionId,
-      requestId,
-      seq: seq++,
-      timestamp: Date.now(),
-    });
-    cached.lastCommittedSeq = seq - 1;
+
+    finalAssistant = lastAssistantMessage(agent.state.messages);
+    errorMessage = assistantErrorMessage(finalAssistant);
+    if (errorMessage) {
+      await appendTranscriptEvent(projectRoot, {
+        type: "request_failed",
+        version: 1,
+        sessionId,
+        requestId,
+        seq: seq++,
+        timestamp: Date.now(),
+        error: errorMessage,
+      });
+      agentCache.delete(sessionId);
+    } else {
+      await appendTranscriptEvent(projectRoot, {
+        type: "request_committed",
+        version: 1,
+        sessionId,
+        requestId,
+        seq: seq++,
+        timestamp: Date.now(),
+      });
+      cached.lastCommittedSeq = seq - 1;
+    }
   } catch (error) {
     await appendTranscriptEvent(projectRoot, {
       type: "request_failed",
@@ -580,20 +617,9 @@ export async function runAgentSession(
 
   // ----- Extract result -----
   const allMessages = agent.state.messages;
-  let finalAssistant: AssistantMessage | undefined;
-  for (let i = allMessages.length - 1; i >= 0; i--) {
-    const msg = allMessages[i];
-    if (msg && typeof msg === "object" && "role" in msg && (msg as any).role === "assistant") {
-      finalAssistant = msg as AssistantMessage;
-      break;
-    }
-  }
+  finalAssistant ??= lastAssistantMessage(allMessages);
   const responseText = finalAssistant ? extractTextFromAssistant(finalAssistant) : "";
-  const errorMessage = finalAssistant &&
-    (finalAssistant.stopReason === "error" || finalAssistant.stopReason === "aborted") &&
-    finalAssistant.errorMessage
-      ? finalAssistant.errorMessage
-      : undefined;
+  errorMessage ??= assistantErrorMessage(finalAssistant);
 
   return {
     responseText,

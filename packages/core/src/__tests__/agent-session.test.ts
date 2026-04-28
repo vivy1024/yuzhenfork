@@ -130,6 +130,7 @@ vi.mock("@mariozechner/pi-ai", async () => {
 
 import { runAgentSession, evictAgentCache } from "../agent/agent-session.js";
 import { appendTranscriptEvent, readTranscriptEvents } from "../interaction/session-transcript.js";
+import { restoreAgentMessagesFromTranscript } from "../interaction/session-transcript-restore.js";
 
 describe("runAgentSession cache — bookId switch", () => {
   let projectRoot: string;
@@ -152,6 +153,7 @@ describe("runAgentSession cache — bookId switch", () => {
 
   afterEach(async () => {
     evictAgentCache("s1");
+    evictAgentCache("s-error");
     await rm(projectRoot, { recursive: true, force: true });
   });
 
@@ -599,16 +601,31 @@ describe("runAgentSession cache — bookId switch", () => {
     expect(body).toContain("资料");
   });
 
-  it("返回 pi-agent-core final assistant error，供 API 层保留真实根因", async () => {
+  it("final assistant error writes request_failed instead of request_committed", async () => {
     const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
     const pipeline = {} as any;
 
     const result = await runAgentSession(
-      { sessionId: "s1", bookId: "book-a", language: "zh", pipeline, projectRoot, model },
+      { sessionId: "s-error", bookId: "book-a", language: "zh", pipeline, projectRoot, model },
       "model error",
     );
 
     expect(result.responseText).toBe("");
     expect(result.errorMessage).toBe("400 status code (no body)");
+
+    const events = await readTranscriptEvents(projectRoot, "s-error");
+    expect(events.map((event) => event.type)).toContain("request_failed");
+    expect(events.map((event) => event.type)).not.toContain("request_committed");
+
+    const restored = await restoreAgentMessagesFromTranscript(projectRoot, "s-error");
+    expect(restored).toEqual([]);
+
+    const instancesAfterError = agentInstances.length;
+    await runAgentSession(
+      { sessionId: "s-error", bookId: "book-a", language: "zh", pipeline, projectRoot, model },
+      "again",
+    );
+    expect(agentInstances).toHaveLength(instancesAfterError + 1);
+    expect(JSON.stringify(streamCalls.at(-1)?.context.messages)).not.toContain("model error");
   });
 });
