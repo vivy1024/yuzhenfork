@@ -72,6 +72,16 @@ vi.mock("@actalk/inkos-core", () => {
     createLLMClient: createLLMClientMock,
     createLogger: vi.fn(() => logger),
     computeAnalytics: vi.fn(() => ({})),
+    isSafeBookId: vi.fn((bookId: unknown) => (
+      typeof bookId === "string"
+      && bookId.length > 0
+      && bookId.length <= 120
+      && bookId.trim() === bookId
+      && bookId !== "."
+      && bookId !== ".."
+      && !bookId.includes("..")
+      && !/[\u0000-\u001f\u007f/\\:*?"'`{}<>|]/u.test(bookId)
+    )),
     chatCompletion: chatCompletionMock,
     loadProjectConfig: loadProjectConfigMock,
     GLOBAL_ENV_PATH: join(tmpdir(), "inkos-global.env"),
