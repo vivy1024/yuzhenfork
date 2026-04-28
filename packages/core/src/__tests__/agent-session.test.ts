@@ -129,7 +129,11 @@ vi.mock("@mariozechner/pi-ai", async () => {
 });
 
 import { runAgentSession, evictAgentCache } from "../agent/agent-session.js";
-import { appendTranscriptEvent, readTranscriptEvents } from "../interaction/session-transcript.js";
+import {
+  appendManualSessionMessages,
+  appendTranscriptEvent,
+  readTranscriptEvents,
+} from "../interaction/session-transcript.js";
 import { restoreAgentMessagesFromTranscript } from "../interaction/session-transcript-restore.js";
 
 describe("runAgentSession cache — bookId switch", () => {
@@ -153,6 +157,7 @@ describe("runAgentSession cache — bookId switch", () => {
 
   afterEach(async () => {
     evictAgentCache("s1");
+    evictAgentCache("s-cache-seq");
     evictAgentCache("s-error");
     await rm(projectRoot, { recursive: true, force: true });
   });
@@ -280,6 +285,35 @@ describe("runAgentSession cache — bookId switch", () => {
 
     expect(agentInstances).toHaveLength(2);
     expect(streamCalls.at(-1)?.model.baseUrl).toBe("https://two.example/v1");
+  });
+
+  it("rebuilds cached Agent when transcript committed seq changes outside cache", async () => {
+    const model = { provider: "anthropic", id: "fake", api: "anthropic-messages" } as any;
+    const pipeline = {} as any;
+
+    await runAgentSession(
+      { sessionId: "s-cache-seq", bookId: "book-a", language: "zh", pipeline, projectRoot, model },
+      "hello",
+    );
+
+    await appendManualSessionMessages(projectRoot, "s-cache-seq", [{
+      role: "assistant",
+      content: [{ type: "text", text: "manual fallback persisted" }],
+      api: "anthropic-messages",
+      provider: "anthropic",
+      model: "fake",
+      usage: EMPTY_USAGE,
+      stopReason: "stop",
+      timestamp: Date.now(),
+    } as any], "fallback-input");
+
+    await runAgentSession(
+      { sessionId: "s-cache-seq", bookId: "book-a", language: "zh", pipeline, projectRoot, model },
+      "again",
+    );
+
+    expect(agentInstances).toHaveLength(2);
+    expect(JSON.stringify(streamCalls.at(-1)?.context.messages)).toContain("manual fallback persisted");
   });
 
   it("enables system file read by default for the session read tool", async () => {

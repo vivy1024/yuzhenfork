@@ -444,8 +444,10 @@ export async function runAgentSession(
 
   // ----- Resolve or create Agent -----
   let cached = agentCache.get(sessionId);
+  let currentCommittedSeq: number | undefined;
 
   if (cached) {
+    currentCommittedSeq = await latestCommittedSeq(projectRoot, sessionId);
     // Evict and rebuild if model protocol identity OR bookId changed. Both are
     // captured into the Agent at construction time (model via initialState,
     // bookId via closures in systemPrompt / tools / transformContext), so a
@@ -453,8 +455,9 @@ export async function runAgentSession(
     const modelChanged = cached.modelIdentity !== requestedModelIdentity;
     const bookChanged = cached.bookId !== bookId;
     const readPermissionChanged = cached.allowSystemFileRead !== allowSystemFileRead;
+    const transcriptChanged = cached.lastCommittedSeq !== currentCommittedSeq;
 
-    if (modelChanged || bookChanged || readPermissionChanged) {
+    if (modelChanged || bookChanged || readPermissionChanged || transcriptChanged) {
       agentCache.delete(sessionId);
       cached = undefined;
     }
@@ -501,7 +504,7 @@ export async function runAgentSession(
       bookId,
       modelIdentity: requestedModelIdentity,
       allowSystemFileRead,
-      lastCommittedSeq: await latestCommittedSeq(projectRoot, sessionId),
+      lastCommittedSeq: currentCommittedSeq ?? await latestCommittedSeq(projectRoot, sessionId),
       lastActive: Date.now(),
     };
     agentCache.set(sessionId, cached);
