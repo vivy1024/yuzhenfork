@@ -19,7 +19,6 @@ import {
 import { createBookContextTransform } from "./context-transform.js";
 import {
   appendTranscriptEvents,
-  appendTranscriptEvent,
   readTranscriptEvents,
 } from "../interaction/session-transcript.js";
 import {
@@ -27,7 +26,7 @@ import {
   adaptRestoredAgentMessagesForModel,
   restoreAgentMessagesFromTranscript,
 } from "../interaction/session-transcript-restore.js";
-import type { TranscriptRole } from "../interaction/session-transcript-schema.js";
+import type { TranscriptEvent, TranscriptRole } from "../interaction/session-transcript-schema.js";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -69,6 +68,7 @@ export interface AgentSessionResult {
 
 interface CachedAgent {
   agent: Agent;
+  sessionId: string;
   projectRoot: string;
   bookId: string | null;
   language: string;
@@ -148,6 +148,10 @@ function sessionQueueKey(projectRoot: string, sessionId: string): string {
   return `${projectRoot}\0${sessionId}`;
 }
 
+function agentCacheKey(projectRoot: string, sessionId: string): string {
+  return sessionQueueKey(projectRoot, sessionId);
+}
+
 async function runInAgentSessionQueue<T>(
   projectRoot: string,
   sessionId: string,
@@ -225,9 +229,9 @@ async function ensureSessionCreatedEvent(
   projectRoot: string,
   sessionId: string,
   bookId: string | null,
-): Promise<number> {
-  const created = await appendTranscriptEvents(projectRoot, sessionId, ({ events, nextSeq }) => {
-    if (events.length > 0) return [];
+): Promise<void> {
+  await appendTranscriptEvents(projectRoot, sessionId, ({ events, nextSeq }) => {
+    if (events.some((event) => event.type === "session_created")) return [];
 
     const now = Date.now();
     return [{
@@ -242,13 +246,19 @@ async function ensureSessionCreatedEvent(
       updatedAt: now,
     }];
   });
+}
 
-  if (created.length > 0) {
-    return created.reduce((max, event) => Math.max(max, event.seq), 0) + 1;
-  }
-
-  const events = await readTranscriptEvents(projectRoot, sessionId);
-  return events.reduce((max, event) => Math.max(max, event.seq), 0) + 1;
+async function appendAgentTranscriptEvent(
+  projectRoot: string,
+  sessionId: string,
+  buildEvent: (seq: number) => TranscriptEvent,
+): Promise<TranscriptEvent> {
+  const events = await appendTranscriptEvents(projectRoot, sessionId, ({ nextSeq }) => [
+    buildEvent(nextSeq),
+  ]);
+  const event = events[0];
+  if (!event) throw new Error(`Failed to append transcript event for session "${sessionId}"`);
+  return event;
 }
 
 /**
@@ -486,9 +496,10 @@ async function runAgentSessionUnlocked(
   const model = resolveModel(config.model);
   const requestedModelIdentity = agentModelIdentity(model);
   const allowSystemFileRead = config.allowSystemFileRead ?? envFlagEnabled(process.env.INKOS_AGENT_ALLOW_SYSTEM_READ, true);
+  const cacheKey = agentCacheKey(projectRoot, sessionId);
 
   // ----- Resolve or create Agent -----
-  let cached = agentCache.get(sessionId);
+  let cached = agentCache.get(cacheKey);
   let currentCommittedSeq: number | undefined;
 
   if (cached) {
@@ -514,7 +525,7 @@ async function runAgentSessionUnlocked(
       readPermissionChanged ||
       transcriptChanged
     ) {
-      agentCache.delete(sessionId);
+      agentCache.delete(cacheKey);
       cached = undefined;
     }
   }
@@ -557,6 +568,7 @@ async function runAgentSessionUnlocked(
 
     cached = {
       agent,
+      sessionId,
       projectRoot,
       bookId,
       language,
@@ -566,7 +578,7 @@ async function runAgentSessionUnlocked(
       lastCommittedSeq: currentCommittedSeq ?? await latestCommittedSeq(projectRoot, sessionId),
       lastActive: Date.now(),
     };
-    agentCache.set(sessionId, cached);
+    agentCache.set(cacheKey, cached);
     ensureCleanupTimer();
   }
 
@@ -575,16 +587,16 @@ async function runAgentSessionUnlocked(
 
   // ----- Prepare transcript persistence -----
   const requestId = randomUUID();
-  let seq = await ensureSessionCreatedEvent(projectRoot, sessionId, bookId);
-  await appendTranscriptEvent(projectRoot, {
+  await ensureSessionCreatedEvent(projectRoot, sessionId, bookId);
+  await appendAgentTranscriptEvent(projectRoot, sessionId, (seq) => ({
     type: "request_started",
     version: 1,
     sessionId,
     requestId,
-    seq: seq++,
+    seq,
     timestamp: Date.now(),
     input: userMessage,
-  });
+  }));
 
   let parentUuid: string | null = null;
   let piTurnIndex = 0;
@@ -603,14 +615,14 @@ async function runAgentSessionUnlocked(
     const uuid = randomUUID();
     const isToolResult = role === "toolResult";
     const toolCallId = toolCallIdForMessage(event.message);
-    await appendTranscriptEvent(projectRoot, {
+    await appendAgentTranscriptEvent(projectRoot, sessionId, (seq) => ({
       type: "message",
       version: 1,
       sessionId,
       requestId,
       uuid,
       parentUuid: isToolResult && lastAssistantUuid ? lastAssistantUuid : parentUuid,
-      seq: seq++,
+      seq,
       role,
       timestamp: messageTimestamp(event.message),
       piTurnIndex,
@@ -619,7 +631,7 @@ async function runAgentSessionUnlocked(
         ? { sourceToolAssistantUuid: lastAssistantUuid }
         : {}),
       message: event.message,
-    });
+    }));
 
     if (role === "assistant") lastAssistantUuid = uuid;
     parentUuid = uuid;
@@ -641,38 +653,39 @@ async function runAgentSessionUnlocked(
     finalAssistant = lastAssistantMessage(agent.state.messages);
     errorMessage = assistantErrorMessage(finalAssistant);
     if (errorMessage) {
-      await appendTranscriptEvent(projectRoot, {
+      const failedError = errorMessage;
+      await appendAgentTranscriptEvent(projectRoot, sessionId, (seq) => ({
         type: "request_failed",
         version: 1,
         sessionId,
         requestId,
-        seq: seq++,
+        seq,
         timestamp: Date.now(),
-        error: errorMessage,
-      });
-      agentCache.delete(sessionId);
+        error: failedError,
+      }));
+      agentCache.delete(cacheKey);
     } else {
-      await appendTranscriptEvent(projectRoot, {
+      const committed = await appendAgentTranscriptEvent(projectRoot, sessionId, (seq) => ({
         type: "request_committed",
         version: 1,
         sessionId,
         requestId,
-        seq: seq++,
+        seq,
         timestamp: Date.now(),
-      });
-      cached.lastCommittedSeq = seq - 1;
+      }));
+      cached.lastCommittedSeq = committed.seq;
     }
   } catch (error) {
-    await appendTranscriptEvent(projectRoot, {
+    await appendAgentTranscriptEvent(projectRoot, sessionId, (seq) => ({
       type: "request_failed",
       version: 1,
       sessionId,
       requestId,
-      seq: seq++,
+      seq,
       timestamp: Date.now(),
       error: error instanceof Error ? error.message : String(error),
-    });
-    agentCache.delete(sessionId);
+    }));
+    agentCache.delete(cacheKey);
     throw error;
   } finally {
     unsubscribe();
@@ -697,5 +710,11 @@ async function runAgentSessionUnlocked(
 
 /** Manually evict a cached Agent session. */
 export function evictAgentCache(sessionId: string): boolean {
-  return agentCache.delete(sessionId);
+  let deleted = agentCache.delete(sessionId);
+  for (const [key, entry] of agentCache) {
+    if (entry.sessionId !== sessionId) continue;
+    agentCache.delete(key);
+    deleted = true;
+  }
+  return deleted;
 }

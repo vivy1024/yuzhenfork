@@ -437,6 +437,12 @@ function messageEventsToInteractionMessages(events: MessageEvent[]): Interaction
   const toolCalls = new Map<string, RestoredToolCall>();
   let pendingToolExecutions: ToolExecution[] = [];
   let pendingThinking: string[] = [];
+  let activeRequestId: string | null = null;
+
+  const clearPending = () => {
+    pendingToolExecutions = [];
+    pendingThinking = [];
+  };
 
   const objectArgs = (value: unknown): Record<string, unknown> | undefined => {
     if (isObject(value)) return value;
@@ -509,6 +515,10 @@ function messageEventsToInteractionMessages(events: MessageEvent[]): Interaction
 
   for (const event of events) {
     const raw = event.message as Record<string, unknown>;
+    if (activeRequestId !== event.requestId) {
+      activeRequestId = event.requestId;
+      clearPending();
+    }
 
     if (event.role === "assistant" && isObject(raw)) {
       rememberToolCalls(event, raw);
@@ -520,8 +530,7 @@ function messageEventsToInteractionMessages(events: MessageEvent[]): Interaction
       );
       if (message) {
         messages.push(message);
-        pendingToolExecutions = [];
-        pendingThinking = [];
+        clearPending();
       } else if (hasToolCallContent(raw) && currentThinking) {
         pendingThinking.push(currentThinking);
       }
@@ -534,6 +543,7 @@ function messageEventsToInteractionMessages(events: MessageEvent[]): Interaction
       continue;
     }
 
+    clearPending();
     const message = messageEventToInteractionMessage(event);
     if (message) messages.push(message);
   }

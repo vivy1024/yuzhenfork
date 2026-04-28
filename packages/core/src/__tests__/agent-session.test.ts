@@ -12,9 +12,11 @@ const EMPTY_USAGE = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-const { agentInstances, streamCalls } = vi.hoisted(() => ({
+const { agentInstances, streamCalls, heldStreamCompletions, heldStreamWaiters } = vi.hoisted(() => ({
   agentInstances: [] as any[],
   streamCalls: [] as Array<{ model: any; context: any }>,
+  heldStreamCompletions: [] as Array<() => void>,
+  heldStreamWaiters: [] as Array<() => void>,
 }));
 
 vi.mock("@mariozechner/pi-agent-core", async () => {
@@ -106,7 +108,10 @@ vi.mock("@mariozechner/pi-ai", async () => {
       reason: message.stopReason === "toolUse" ? "toolUse" : "stop",
       message,
     });
-    if (prompt.startsWith("slow ")) {
+    if (prompt === "hold for interleave") {
+      heldStreamCompletions.push(done);
+      heldStreamWaiters.splice(0).forEach((resolve) => resolve());
+    } else if (prompt.startsWith("slow ")) {
       setTimeout(done, prompt.includes("first") ? 20 : 0);
     } else {
       done();
@@ -137,15 +142,18 @@ import { runAgentSession, evictAgentCache } from "../agent/agent-session.js";
 import {
   appendManualSessionMessages,
   appendTranscriptEvent,
+  appendTranscriptEvents,
   readTranscriptEvents,
 } from "../interaction/session-transcript.js";
 import { restoreAgentMessagesFromTranscript } from "../interaction/session-transcript-restore.js";
 
 describe("runAgentSession cache — bookId switch", () => {
   let projectRoot: string;
+  let otherProjectRoot: string | null;
 
   beforeEach(async () => {
     projectRoot = await mkdtemp(join(tmpdir(), "inkos-agent-cache-"));
+    otherProjectRoot = null;
     await mkdir(join(projectRoot, "books", "book-a", "story"), { recursive: true });
     await writeFile(
       join(projectRoot, "books", "book-a", "story", "story_bible.md"),
@@ -158,13 +166,18 @@ describe("runAgentSession cache — bookId switch", () => {
     );
     agentInstances.length = 0;
     streamCalls.length = 0;
+    heldStreamCompletions.length = 0;
+    heldStreamWaiters.length = 0;
   });
 
   afterEach(async () => {
     evictAgentCache("s1");
     evictAgentCache("s-cache-seq");
     evictAgentCache("s-error");
+    evictAgentCache("s-project-root-cache");
+    evictAgentCache("s-interleave-seq");
     await rm(projectRoot, { recursive: true, force: true });
+    if (otherProjectRoot) await rm(otherProjectRoot, { recursive: true, force: true });
   });
 
   it("rebuilds Agent when bookId changes for same sessionId", async () => {
@@ -241,6 +254,42 @@ describe("runAgentSession cache — bookId switch", () => {
     );
 
     expect(agentInstances).toHaveLength(1);
+  });
+
+  it("keeps cached Agents isolated by projectRoot for the same sessionId", async () => {
+    const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
+    const pipeline = {} as any;
+    otherProjectRoot = await mkdtemp(join(tmpdir(), "inkos-agent-cache-other-"));
+    await mkdir(join(otherProjectRoot, "books", "book-a", "story"), { recursive: true });
+    await writeFile(
+      join(otherProjectRoot, "books", "book-a", "story", "story_bible.md"),
+      "另一个 projectRoot 的真相",
+    );
+
+    await runAgentSession(
+      { sessionId: "s-project-root-cache", bookId: "book-a", language: "zh", pipeline, projectRoot, model },
+      "root A",
+    );
+    await runAgentSession(
+      {
+        sessionId: "s-project-root-cache",
+        bookId: "book-a",
+        language: "zh",
+        pipeline,
+        projectRoot: otherProjectRoot,
+        model,
+      },
+      "root B",
+    );
+    await runAgentSession(
+      { sessionId: "s-project-root-cache", bookId: "book-a", language: "zh", pipeline, projectRoot, model },
+      "root A again",
+    );
+
+    expect(agentInstances).toHaveLength(2);
+    const body = JSON.stringify(streamCalls.at(-1)?.context.messages);
+    expect(body).toContain("书A 的真相");
+    expect(body).not.toContain("另一个 projectRoot 的真相");
   });
 
   it("rebuilds Agent when model id is unchanged but API protocol changes", async () => {
@@ -687,6 +736,56 @@ describe("runAgentSession cache — bookId switch", () => {
 
     expect(events.filter((event) => event.type === "session_created")).toHaveLength(1);
     expect(events.filter((event) => event.type === "request_committed")).toHaveLength(2);
+    expect(events.map((event) => event.seq)).toEqual(events.map((_, index) => index + 1));
+  });
+
+  it("assigns transcript seq after interleaved non-agent writes", async () => {
+    const model = { provider: "x", id: "y", api: "anthropic-messages" } as any;
+    const pipeline = {} as any;
+    let resolveTurnStarted!: () => void;
+    const turnStarted = new Promise<void>((resolve) => {
+      resolveTurnStarted = resolve;
+    });
+    let interleavedWrite: Promise<unknown> | null = null;
+
+    const running = runAgentSession(
+      {
+        sessionId: "s-interleave-seq",
+        bookId: "book-a",
+        language: "zh",
+        pipeline,
+        projectRoot,
+        model,
+        onEvent: (event) => {
+          if (event.type !== "turn_start" || interleavedWrite) return;
+          interleavedWrite = appendTranscriptEvents(projectRoot, "s-interleave-seq", ({ nextSeq }) => [{
+            type: "session_metadata_updated",
+            version: 1,
+            sessionId: "s-interleave-seq",
+            seq: nextSeq,
+            timestamp: Date.now(),
+            updatedAt: Date.now(),
+            title: "interleaved update",
+          }]);
+          resolveTurnStarted();
+        },
+      },
+      "hold for interleave",
+    );
+
+    await turnStarted;
+    await interleavedWrite;
+    if (heldStreamCompletions.length === 0) {
+      await new Promise<void>((resolve) => {
+        heldStreamWaiters.push(resolve);
+      });
+    }
+    const finishStream = heldStreamCompletions.shift();
+    expect(finishStream).toBeTypeOf("function");
+    finishStream?.();
+    await running;
+
+    const events = await readTranscriptEvents(projectRoot, "s-interleave-seq");
     expect(events.map((event) => event.seq)).toEqual(events.map((_, index) => index + 1));
   });
 });

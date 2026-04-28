@@ -1021,4 +1021,150 @@ describe("session transcript restore", () => {
 
     expect(session?.messages.map((message) => message.content)).toEqual(["先问", "后答"]);
   });
+
+  it("does not carry pending tool executions or thinking across request boundaries", async () => {
+    await appendTranscriptEvent(projectRoot, {
+      type: "session_created",
+      version: 1,
+      sessionId: "s1",
+      seq: 1,
+      timestamp: 1,
+      bookId: "book-a",
+      title: null,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await appendTranscriptEvent(projectRoot, {
+      type: "request_started",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r1",
+      seq: 2,
+      timestamp: 2,
+      input: "列目录",
+    });
+    await appendTranscriptEvent(projectRoot, {
+      type: "message",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r1",
+      uuid: "u1",
+      parentUuid: null,
+      seq: 3,
+      role: "user",
+      timestamp: 3,
+      message: { role: "user", content: "列目录", timestamp: 3 },
+    } as MessageEvent);
+    await appendTranscriptEvent(projectRoot, {
+      type: "message",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r1",
+      uuid: "a1",
+      parentUuid: "u1",
+      seq: 4,
+      role: "assistant",
+      timestamp: 4,
+      toolCallId: "ls-1",
+      message: {
+        role: "assistant",
+        content: [
+          { type: "thinking", thinking: "第一轮工具前思考" },
+          { type: "toolCall", id: "ls-1", name: "ls", arguments: { subdir: "story" } },
+        ],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "claude",
+        usage,
+        stopReason: "toolUse",
+        timestamp: 4,
+      },
+    } as MessageEvent);
+    await appendTranscriptEvent(projectRoot, {
+      type: "message",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r1",
+      uuid: "t1",
+      parentUuid: "a1",
+      seq: 5,
+      role: "toolResult",
+      timestamp: 5,
+      toolCallId: "ls-1",
+      sourceToolAssistantUuid: "a1",
+      message: {
+        role: "toolResult",
+        toolCallId: "ls-1",
+        toolName: "ls",
+        content: [{ type: "text", text: "roles/" }],
+        isError: false,
+        timestamp: 5,
+      },
+    } as MessageEvent);
+    await appendTranscriptEvent(projectRoot, {
+      type: "request_committed",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r1",
+      seq: 6,
+      timestamp: 6,
+    });
+    await appendTranscriptEvent(projectRoot, {
+      type: "request_started",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r2",
+      seq: 7,
+      timestamp: 7,
+      input: "继续",
+    });
+    await appendTranscriptEvent(projectRoot, {
+      type: "message",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r2",
+      uuid: "u2",
+      parentUuid: null,
+      seq: 8,
+      role: "user",
+      timestamp: 8,
+      message: { role: "user", content: "继续", timestamp: 8 },
+    } as MessageEvent);
+    await appendTranscriptEvent(projectRoot, {
+      type: "message",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r2",
+      uuid: "a2",
+      parentUuid: "u2",
+      seq: 9,
+      role: "assistant",
+      timestamp: 9,
+      message: {
+        role: "assistant",
+        content: [{ type: "text", text: "第二轮回答" }],
+        api: "anthropic-messages",
+        provider: "anthropic",
+        model: "claude",
+        usage,
+        stopReason: "stop",
+        timestamp: 9,
+      },
+    } as MessageEvent);
+    await appendTranscriptEvent(projectRoot, {
+      type: "request_committed",
+      version: 1,
+      sessionId: "s1",
+      requestId: "r2",
+      seq: 10,
+      timestamp: 10,
+    });
+
+    const session = await deriveBookSessionFromTranscript(projectRoot, "s1");
+    const secondAssistant = session?.messages.find((message) => message.content === "第二轮回答");
+
+    expect(secondAssistant).toMatchObject({ role: "assistant", content: "第二轮回答" });
+    expect(secondAssistant).not.toHaveProperty("thinking");
+    expect(secondAssistant).not.toHaveProperty("toolExecutions");
+  });
 });
