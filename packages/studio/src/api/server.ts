@@ -110,6 +110,21 @@ function filterTextChatModels<T extends { readonly id: string }>(models: Readonl
   return models.filter((model) => isTextChatModelId(model.id));
 }
 
+function normalizeApiBookId(value: unknown, fieldName: string): string | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value !== "string") {
+    throw new ApiError(400, "INVALID_BOOK_ID", `${fieldName} must be a string`);
+  }
+  const bookId = value.trim();
+  if (!bookId) {
+    throw new ApiError(400, "INVALID_BOOK_ID", `${fieldName} cannot be blank`);
+  }
+  if (!isSafeBookId(bookId)) {
+    throw new ApiError(400, "INVALID_BOOK_ID", `Invalid ${fieldName}: "${bookId}"`);
+  }
+  return bookId;
+}
+
 function nonTextModelMessage(modelId: string): string {
   return `模型 ${modelId} 不适合文本聊天/写作。请在模型选择器中改用文本模型，例如 gemini-2.5-flash、gemini-2.5-pro 或对应服务的 chat 模型。`;
 }
@@ -1609,7 +1624,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   app.post("/api/v1/sessions", async (c) => {
     const body = await c.req.json<{ bookId?: string | null; sessionId?: string }>().catch(() => ({}));
-    const bookId = (body as { bookId?: string | null }).bookId ?? null;
+    const bookId = normalizeApiBookId((body as { bookId?: unknown }).bookId, "bookId");
     const sessionId = (body as { sessionId?: string }).sessionId;
     // sessionId 只允许 timestamp-random 格式；防止注入任意文件名
     const safeSessionId = sessionId && /^[0-9]+-[a-z0-9]+$/.test(sessionId) ? sessionId : undefined;
@@ -1669,28 +1684,20 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         throw new ApiError(404, "SESSION_NOT_FOUND", `Session not found: ${sessionId}`);
       }
       let bookSession = loadedBookSession;
-      if (activeBookId !== undefined && typeof activeBookId !== "string") {
-        throw new ApiError(400, "INVALID_BOOK_ID", "activeBookId must be a string");
-      }
-      const requestedActiveBookId = activeBookId === undefined ? null : activeBookId.trim();
-      if (activeBookId !== undefined && !requestedActiveBookId) {
-        throw new ApiError(400, "INVALID_BOOK_ID", "activeBookId cannot be blank");
-      }
-      if (requestedActiveBookId && !isSafeBookId(requestedActiveBookId)) {
-        throw new ApiError(400, "INVALID_BOOK_ID", `Invalid activeBookId: "${requestedActiveBookId}"`);
-      }
+      const requestedActiveBookId = normalizeApiBookId(activeBookId, "activeBookId");
+      const persistedBookId = normalizeApiBookId(bookSession.bookId, "session.bookId");
       if (
         requestedActiveBookId
-        && bookSession.bookId
-        && bookSession.bookId !== requestedActiveBookId
+        && persistedBookId
+        && persistedBookId !== requestedActiveBookId
       ) {
         throw new ApiError(
           409,
           "SESSION_BOOK_MISMATCH",
-          `Session ${bookSession.sessionId} is bound to ${bookSession.bookId}, not ${requestedActiveBookId}`,
+          `Session ${bookSession.sessionId} is bound to ${persistedBookId}, not ${requestedActiveBookId}`,
         );
       }
-      const agentBookId = requestedActiveBookId ?? bookSession.bookId ?? null;
+      const agentBookId = requestedActiveBookId ?? persistedBookId;
       if (agentBookId) {
         try {
           await state.loadBookConfig(agentBookId);

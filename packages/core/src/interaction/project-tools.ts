@@ -16,6 +16,7 @@ import { executeEditTransaction } from "./edit-controller.js";
 import type { InteractionRuntimeTools } from "./runtime.js";
 import type { BookCreationDraft } from "./session.js";
 import { writeExportArtifact } from "./export-artifact.js";
+import { safeChildPath } from "../utils/path-safety.js";
 
 type PipelineLike = Pick<PipelineRunner, "writeNextChapter" | "reviseDraft"> & {
   readonly initBook?: (
@@ -665,7 +666,10 @@ export function createInteractionToolsFromDeps(
     },
     writeTruthFile: async (bookId, fileName, content) => {
       await state.ensureControlDocuments(bookId);
-      await writeFile(join(state.bookDir(bookId), "story", fileName), content, "utf-8");
+      const storyDir = join(state.bookDir(bookId), "story");
+      const targetPath = safeChildPath(storyDir, fileName);
+      await mkdir(dirname(targetPath), { recursive: true });
+      await writeFile(targetPath, content, "utf-8");
     },
   };
 }

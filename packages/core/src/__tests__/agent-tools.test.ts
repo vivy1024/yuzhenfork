@@ -178,6 +178,14 @@ describe("agent deterministic writing tools", () => {
     expect(pipeline.writeNextChapter).toHaveBeenCalledWith("harbor", 2600);
   });
 
+  it("documents sub_agent bookId as an optional active-book override", () => {
+    const tool = createSubAgentTool({} as never, "harbor");
+    const schemaText = JSON.stringify(tool.parameters);
+
+    expect(schemaText).toContain("current active book");
+    expect(schemaText).not.toContain("required for all agents except architect");
+  });
+
   it("blocks non-architect sub-agents when no book is active", async () => {
     const pipeline = {
       writeNextChapter: vi.fn(async () => ({
@@ -216,6 +224,27 @@ describe("agent deterministic writing tools", () => {
     expect(result.content[0]?.type).toBe("text");
     if (result.content[0]?.type === "text") {
       expect(result.content[0].text).toContain("harbor");
+    }
+  });
+
+  it("blocks architect revise mode when no book is active", async () => {
+    const pipeline = {
+      reviseFoundation: vi.fn(async () => undefined),
+    };
+    const tool = createSubAgentTool(pipeline as never, null);
+
+    const result = await tool.execute("tool-architect-revise-no-book", {
+      agent: "architect",
+      bookId: "harbor",
+      revise: true,
+      feedback: "把角色目录改成一人一卡",
+      instruction: "重写架构稿",
+    } as any);
+
+    expect(pipeline.reviseFoundation).not.toHaveBeenCalled();
+    expect(result.content[0]?.type).toBe("text");
+    if (result.content[0]?.type === "text") {
+      expect(result.content[0].text).toContain("Open the book first");
     }
   });
 
@@ -302,6 +331,32 @@ describe("agent deterministic writing tools", () => {
     expect(result.content[0]?.type).toBe("text");
     await expect(readFile(join(state.bookDir("harbor"), "story", "runtime", "notes.md"), "utf-8"))
       .resolves.toContain("Watch the harbor ledger");
+  });
+
+  it("writes Phase 5 outline truth files through write_truth_file", async () => {
+    const tool = createWriteTruthFileTool({} as never, root, "harbor");
+
+    const result = await tool.execute("tool-truth-outline", {
+      fileName: "outline/story_frame.md",
+      content: "# Story Frame\n\nThe harbor debt is the central pressure.\n",
+    });
+
+    expect(result.content[0]?.type).toBe("text");
+    await expect(readFile(join(state.bookDir("harbor"), "story", "outline", "story_frame.md"), "utf-8"))
+      .resolves.toContain("central pressure");
+  });
+
+  it("writes Phase 5 role truth files through write_truth_file", async () => {
+    const tool = createWriteTruthFileTool({} as never, root, "harbor");
+
+    const result = await tool.execute("tool-truth-role", {
+      fileName: "roles/major/Lin Yan.md",
+      content: "# Lin Yan\n\nKeeps the ledger hidden.\n",
+    });
+
+    expect(result.content[0]?.type).toBe("text");
+    await expect(readFile(join(state.bookDir("harbor"), "story", "roles", "major", "Lin Yan.md"), "utf-8"))
+      .resolves.toContain("ledger hidden");
   });
 
   it("rejects unsafe truth file names", async () => {

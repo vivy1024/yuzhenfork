@@ -62,7 +62,9 @@ const SubAgentParams = Type.Object({
     Type.Literal("exporter"),
   ]),
   instruction: Type.String({ description: "Natural language instruction for the sub-agent" }),
-  bookId: Type.Optional(Type.String({ description: "Book ID — required for all agents except architect" })),
+  bookId: Type.Optional(Type.String({
+    description: "Optional book ID. In active-book sessions, omit it to use the current active book; if provided, it must match the current active book. For architect creation, this optionally sets the new book ID.",
+  })),
   chapterNumber: Type.Optional(Type.Number({ description: "auditor/reviser: target chapter number. Omit to use the latest chapter." })),
   // -- architect params --
   title: Type.Optional(Type.String({ description: "architect only: explicit book title. Required when creating a book." })),
@@ -80,7 +82,7 @@ const SubAgentParams = Type.Object({
   targetChapters: Type.Optional(Type.Number({ description: "architect only: total chapter count. Default: 200" })),
   chapterWordCount: Type.Optional(Type.Number({ description: "architect/writer: words per chapter. Default: 3000" })),
   revise: Type.Optional(Type.Boolean({
-    description: "architect only: true 表示在已有书上重新生成架构稿（比如把旧的条目式格式升级成段落式架构稿 + 一人一卡的角色目录、或者按 feedback 调整某些细节），而不是新建书籍。需要同时提供 bookId",
+    description: "architect only: true 表示在当前 active book 上重新生成架构稿，而不是新建书籍。no-book creation sessions cannot revise an existing book.",
   })),
   feedback: Type.Optional(Type.String({
     description: "architect only: revise 模式下的调整要求。举例：把架构稿从条目式升级成段落式架构稿、某个角色设定需要重新设计、主线冲突表达太弱需要加强等。如果是架构稿评审未通过要求重写的场景，把评审意见的 overallFeedback 原样传入即可",
@@ -138,6 +140,9 @@ export function createSubAgentTool(
         switch (agent) {
           case "architect": {
             if (revise) {
+              if (!activeBookId) {
+                return textResult("Open the book first before revising its foundation.");
+              }
               const targetBookId = resolveToolBookId("architect", bookId, activeBookId);
               progress(`Revising foundation for "${targetBookId}"...`);
               await pipeline.reviseFoundation(targetBookId, feedback ?? instruction);
@@ -251,31 +256,50 @@ const WriteTruthFileParams = Type.Object({
   content: Type.String({ description: "Full replacement content for the truth file." }),
 });
 
-const SAFE_TRUTH_FILE_NAMES = new Set([
+const SAFE_TRUTH_FLAT_FILE_NAMES = new Set([
   "author_intent.md",
   "current_focus.md",
   "story_bible.md",
   "volume_outline.md",
   "book_rules.md",
+  "particle_ledger.md",
+  "subplot_board.md",
+  "emotional_arcs.md",
+  "style_guide.md",
+  "parent_canon.md",
+  "fanfic_canon.md",
   "character_matrix.md",
   "current_state.md",
   "pending_hooks.md",
   "chapter_summaries.md",
 ]);
 
+const SAFE_TRUTH_OUTLINE_FILE_NAMES = new Set([
+  "outline/story_frame.md",
+  "outline/volume_map.md",
+  "outline/节奏原则.md",
+  "outline/rhythm_principles.md",
+]);
+
+const SAFE_ROLE_TRUTH_FILE_RE = /^roles\/(主要角色|次要角色|major|minor)\/[^/\\]+\.md$/u;
+
 function assertSafeTruthFileName(fileName: string): string {
-  const trimmed = fileName.trim().toLowerCase();
-  const normalized = trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
+  const trimmed = fileName.trim();
+  const withExtension = trimmed.endsWith(".md") ? trimmed : `${trimmed}.md`;
+  const lower = withExtension.toLowerCase();
   if (
     !trimmed ||
-    trimmed.includes("/") ||
-    trimmed.includes("\\") ||
-    trimmed.includes("..") ||
-    !SAFE_TRUTH_FILE_NAMES.has(normalized)
+    withExtension.startsWith("/") ||
+    withExtension.includes("\\") ||
+    withExtension.includes("\0") ||
+    withExtension.includes("..")
   ) {
     throw new Error(`Invalid truth file name: ${JSON.stringify(fileName)}`);
   }
-  return normalized;
+  if (SAFE_TRUTH_FLAT_FILE_NAMES.has(lower)) return lower;
+  if (SAFE_TRUTH_OUTLINE_FILE_NAMES.has(lower)) return lower;
+  if (SAFE_ROLE_TRUTH_FILE_RE.test(withExtension)) return withExtension;
+  throw new Error(`Invalid truth file name: ${JSON.stringify(fileName)}`);
 }
 
 export function createWriteTruthFileTool(
