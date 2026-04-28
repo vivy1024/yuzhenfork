@@ -9,7 +9,8 @@
 export type ApiProtocol =
   | "openai-completions"
   | "openai-responses"
-  | "anthropic-messages";
+  | "anthropic-messages"
+  | "google-generative-ai";
 
 export type EndpointGroup =
   | "overseas"
@@ -54,6 +55,8 @@ export interface ProviderCompat {
   readonly supportsStore?: boolean;
   readonly supportsSystemRole?: boolean;
   readonly supportsDeveloperRole?: boolean;
+  /** Some OpenAI-compatible providers reject restored histories ending in toolResult; only those providers get a synthetic assistant bridge during context projection. */
+  readonly requiresAssistantAfterToolResult?: boolean;
 }
 
 export interface ProviderTransportDefaults {

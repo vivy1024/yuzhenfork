@@ -1,17 +1,18 @@
-import { readFile, writeFile, readdir, mkdir, unlink } from "node:fs/promises";
-import { join } from "node:path";
-import { BookSessionSchema, createBookSession } from "./session.js";
+import { readdir, unlink } from "node:fs/promises";
+import { createBookSession } from "./session.js";
 import type { BookSession } from "./session.js";
-
-const SESSIONS_DIR = ".inkos/sessions";
-
-function sessionsDir(projectRoot: string): string {
-  return join(projectRoot, SESSIONS_DIR);
-}
-
-function sessionPath(projectRoot: string, sessionId: string): string {
-  return join(sessionsDir(projectRoot), `${sessionId}.json`);
-}
+import {
+  appendTranscriptEvents,
+  legacyBookSessionPath,
+  readTranscriptEvents,
+  sessionsDir,
+  transcriptPath,
+} from "./session-transcript.js";
+import {
+  migrateLegacyBookSessionToTranscript,
+  readLegacyBookSession,
+} from "./session-transcript-legacy.js";
+import { deriveBookSessionFromTranscript } from "./session-transcript-restore.js";
 
 /**
  * 从 messages 数组里取第一条 user 消息，裁剪成 ≤20 字的单行字符串。
@@ -42,24 +43,76 @@ export async function loadBookSession(
   projectRoot: string,
   sessionId: string,
 ): Promise<BookSession | null> {
-  try {
-    const raw = await readFile(sessionPath(projectRoot, sessionId), "utf-8");
-    return BookSessionSchema.parse(JSON.parse(raw));
-  } catch {
-    return null;
-  }
+  const transcriptSession = await deriveBookSessionFromTranscript(projectRoot, sessionId);
+  if (transcriptSession) return transcriptSession;
+
+  const legacySession = await readLegacyBookSession(projectRoot, sessionId);
+  if (!legacySession) return null;
+
+  await migrateLegacyBookSessionToTranscript(projectRoot, legacySession);
+  return await deriveBookSessionFromTranscript(projectRoot, sessionId) ?? legacySession;
+}
+
+async function appendSessionCreatedEvent(
+  projectRoot: string,
+  session: BookSession,
+): Promise<void> {
+  await appendTranscriptEvents(projectRoot, session.sessionId, ({ events, nextSeq }) => {
+    if (events.some((event) => event.type === "session_created")) return [];
+    return [{
+      type: "session_created",
+      version: 1,
+      sessionId: session.sessionId,
+      seq: nextSeq,
+      timestamp: session.createdAt,
+      bookId: session.bookId,
+      title: session.title,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+    }];
+  });
+}
+
+async function appendSessionMetadataUpdatedEvent(
+  projectRoot: string,
+  sessionId: string,
+  metadata: {
+    readonly bookId?: string | null;
+    readonly title?: string | null;
+    readonly updatedAt: number;
+  },
+): Promise<void> {
+  await appendTranscriptEvents(projectRoot, sessionId, ({ nextSeq }) => [{
+    type: "session_metadata_updated",
+    version: 1,
+    sessionId,
+    seq: nextSeq,
+    timestamp: metadata.updatedAt,
+    updatedAt: metadata.updatedAt,
+    ...("bookId" in metadata ? { bookId: metadata.bookId } : {}),
+    ...("title" in metadata ? { title: metadata.title } : {}),
+  }]);
 }
 
 export async function persistBookSession(
   projectRoot: string,
   session: BookSession,
 ): Promise<void> {
-  const dir = sessionsDir(projectRoot);
-  await mkdir(dir, { recursive: true });
-  await writeFile(
-    sessionPath(projectRoot, session.sessionId),
-    JSON.stringify(session, null, 2),
-  );
+  const events = await readTranscriptEvents(projectRoot, session.sessionId);
+  if (events.length === 0) {
+    if (session.messages.length === 0) {
+      await appendSessionCreatedEvent(projectRoot, session);
+      return;
+    }
+    await migrateLegacyBookSessionToTranscript(projectRoot, session);
+    return;
+  }
+
+  await appendSessionMetadataUpdatedEvent(projectRoot, session.sessionId, {
+    bookId: session.bookId,
+    title: session.title,
+    updatedAt: session.updatedAt,
+  });
 }
 
 export interface BookSessionSummary {
@@ -83,52 +136,28 @@ export async function listBookSessions(
     return [];
   }
 
-  const jsonFiles = files.filter((file) => file.endsWith(".json"));
+  const sessionIds = new Set<string>();
+  for (const file of files) {
+    if (file.endsWith(".jsonl")) {
+      sessionIds.add(file.slice(0, -".jsonl".length));
+    } else if (file.endsWith(".json")) {
+      sessionIds.add(file.slice(0, -".json".length));
+    }
+  }
+
   const summaries = await Promise.all(
-    jsonFiles.map(async (file): Promise<BookSessionSummary | null> => {
+    [...sessionIds].map(async (sessionId): Promise<BookSessionSummary | null> => {
       try {
-        const raw = await readFile(join(dir, file), "utf-8");
-        const data = JSON.parse(raw) as {
-          sessionId?: unknown;
-          bookId?: unknown;
-          title?: unknown;
-          messages?: unknown;
-          createdAt?: unknown;
-          updatedAt?: unknown;
-        };
-        if (typeof data.sessionId !== "string") return null;
-        const parsedBookId = data.bookId === null || typeof data.bookId === "string"
-          ? (data.bookId as string | null)
-          : null;
-        if (parsedBookId !== bookId) return null;
-
-        let persistedTitle = typeof data.title === "string" ? data.title : null;
-
-        // Lazy migration：老 session 的 title 字段是 null 但已经有用户消息的，
-        // 一次性把第一条用户消息补写成 title 并 persist 回磁盘。用户在新流程中
-        // 发消息时会立即写 title，此 migration 只对历史数据生效一次。
-        if (persistedTitle === null) {
-          const recoveredTitle = extractFirstUserMessageTitle(data.messages);
-          if (recoveredTitle) {
-            try {
-              const fullSession = await loadBookSession(projectRoot, data.sessionId);
-              if (fullSession && fullSession.title === null) {
-                await persistBookSession(projectRoot, { ...fullSession, title: recoveredTitle });
-                persistedTitle = recoveredTitle;
-              }
-            } catch {
-              // 读不出完整 session 就忽略；下次再试
-            }
-          }
-        }
+        const session = await loadBookSession(projectRoot, sessionId);
+        if (!session || session.bookId !== bookId) return null;
 
         return {
-          sessionId: data.sessionId,
-          bookId: parsedBookId,
-          title: persistedTitle,
-          messageCount: Array.isArray(data.messages) ? data.messages.length : 0,
-          createdAt: typeof data.createdAt === "number" ? data.createdAt : 0,
-          updatedAt: typeof data.updatedAt === "number" ? data.updatedAt : 0,
+          sessionId: session.sessionId,
+          bookId: session.bookId,
+          title: session.title,
+          messageCount: session.messages.length,
+          createdAt: session.createdAt,
+          updatedAt: session.updatedAt,
         };
       } catch {
         return null;
@@ -148,20 +177,19 @@ export async function renameBookSession(
 ): Promise<BookSession | null> {
   const session = await loadBookSession(projectRoot, sessionId);
   if (!session) return null;
-  const updated = { ...session, title, updatedAt: Date.now() };
-  await persistBookSession(projectRoot, updated);
-  return updated;
+  const updatedAt = Date.now();
+  await appendSessionMetadataUpdatedEvent(projectRoot, sessionId, { title, updatedAt });
+  return loadBookSession(projectRoot, sessionId);
 }
 
 export async function deleteBookSession(
   projectRoot: string,
   sessionId: string,
 ): Promise<void> {
-  try {
-    await unlink(sessionPath(projectRoot, sessionId));
-  } catch {
-    // Session file is already absent; treat delete as idempotent.
-  }
+  await Promise.all([
+    unlink(transcriptPath(projectRoot, sessionId)).catch(() => undefined),
+    unlink(legacyBookSessionPath(projectRoot, sessionId)).catch(() => undefined),
+  ]);
 }
 
 export async function migrateBookSession(
@@ -175,13 +203,11 @@ export async function migrateBookSession(
     throw new SessionAlreadyMigratedError(sessionId, session.bookId);
   }
 
-  const updated = {
-    ...session,
+  await appendSessionMetadataUpdatedEvent(projectRoot, sessionId, {
     bookId: newBookId,
     updatedAt: Date.now(),
-  };
-  await persistBookSession(projectRoot, updated);
-  return updated;
+  });
+  return loadBookSession(projectRoot, sessionId);
 }
 
 export async function createAndPersistBookSession(
@@ -195,6 +221,6 @@ export async function createAndPersistBookSession(
     if (existing) return existing;
   }
   const session = createBookSession(bookId, sessionId);
-  await persistBookSession(projectRoot, session);
+  await appendSessionCreatedEvent(projectRoot, session);
   return session;
 }

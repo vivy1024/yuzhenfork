@@ -31,6 +31,7 @@ export interface StreamProgress {
 export type OnStreamProgress = (progress: StreamProgress) => void;
 
 const INKOS_USER_AGENT = "InkOS/1.3.5";
+const UNKNOWN_MODEL_FALLBACK_MAX_TOKENS = 8192 * 3;
 
 function mergeUserAgent(headers?: Record<string, string>): Record<string, string> {
   return { "User-Agent": INKOS_USER_AGENT, ...(headers ?? {}) };
@@ -104,7 +105,7 @@ export interface LLMClient {
     readonly temperature: number;
     /**
      * Per-call fallback: 当 agent 调 chat() 不传 options.maxTokens 时用这个值。
-     * 来自 providers bank 的 modelCard.maxOutput（v2.0.0 起）。
+     * 命中模型卡时来自 providers bank 的 modelCard.maxOutput；未知模型走写作兜底预算。
      */
     readonly maxTokens: number;
     /**
@@ -150,7 +151,7 @@ export function createLLMClient(config: LLMConfig): LLMClient {
   const _earlyCard = lookupModel(config.service ?? "custom", config.model);
   const defaults = {
     temperature: config.temperature ?? 0.7,
-    maxTokens: _earlyCard?.maxOutput ?? 8192,
+    maxTokens: _earlyCard?.maxOutput ?? UNKNOWN_MODEL_FALLBACK_MAX_TOKENS,
     thinkingBudget: config.thinkingBudget ?? 0,
     extra: config.extra ?? {},
   };
@@ -167,13 +168,16 @@ export function createLLMClient(config: LLMConfig): LLMClient {
   const piApi = resolvePiApi(serviceName, config.apiFormat, (inkosProvider?.api ?? preset?.api) as PiApi) as PiApi;
   const baseUrl = config.baseUrl || inkosProvider?.baseUrl || preset?.baseUrl || "";
   const extraHeaders = config.headers ?? parseEnvHeaders();
-  const compat = resolveProviderCompat(inkosProvider, baseUrl);
+  const compat = piApi === "openai-completions"
+    ? resolveProviderCompat(inkosProvider, baseUrl)
+    : undefined;
 
   const provider = config.provider === "anthropic" ? "anthropic" : "openai";
   // pi-ai provider 字段：大多数情况 pi-ai 会按 baseUrl 自动嗅探（openrouter.ai / api.z.ai /
   // api.x.ai / deepseek.com / anthropic.com 等）。这里只列 pi-ai 嗅探不到、需要显式指定的少数情况。
   let piProvider: string;
-  if (inkosProvider?.id === "zhipu") piProvider = "zai";
+  if (inkosProvider?.id === "google") piProvider = "google";
+  else if (inkosProvider?.id === "zhipu") piProvider = "zai";
   else if (inkosProvider?.id === "openrouter") piProvider = "openrouter";
   else if (inkosProvider?.id === "githubCopilot") piProvider = "githubCopilot";
   else if (inkosProvider?.api === "anthropic-messages") piProvider = "anthropic";
@@ -193,7 +197,7 @@ export function createLLMClient(config: LLMConfig): LLMClient {
     input: ["text"] as ("text" | "image")[],
     cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
     contextWindow: modelCard?.contextWindowTokens ?? 128_000,
-    maxTokens: modelCard?.maxOutput ?? 8192,
+    maxTokens: modelCard?.maxOutput ?? UNKNOWN_MODEL_FALLBACK_MAX_TOKENS,
     ...(extraHeaders ? { headers: extraHeaders } : {}),
     ...(compat ? { compat } : {}),
   };

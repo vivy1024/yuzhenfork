@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -9,11 +9,18 @@ import {
   renameBookSession,
   deleteBookSession,
   migrateBookSession,
+  createAndPersistBookSession,
   extractFirstUserMessageTitle,
   SessionAlreadyMigratedError,
 } from "../interaction/book-session-store.js";
 import { createBookSession, appendBookSessionMessage } from "../interaction/session.js";
-import { mkdir, writeFile } from "node:fs/promises";
+import {
+  appendManualSessionMessages,
+  legacyBookSessionPath,
+  readTranscriptEvents,
+  sessionsDir,
+} from "../interaction/session-transcript.js";
+import { restoreAgentMessagesFromTranscript } from "../interaction/session-transcript-restore.js";
 
 describe("book-session-store", () => {
   let tempDir: string;
@@ -82,6 +89,104 @@ describe("book-session-store", () => {
       const loaded = await loadBookSession(tempDir, session.sessionId);
       expect(loaded!.title).toBe("测试标题");
     });
+
+    it("读取 legacy JSON 时迁移为 JSONL 并保留 UI thinking", async () => {
+      const session = {
+        ...createBookSession("book-a", "legacy-1"),
+        messages: [
+          { role: "user" as const, content: "继续", timestamp: 10 },
+          { role: "assistant" as const, content: "好的", thinking: "旧思考", timestamp: 11 },
+        ],
+      };
+      await persistBookSession(tempDir, session);
+
+      const loaded = await loadBookSession(tempDir, "legacy-1");
+
+      expect(loaded).toMatchObject({
+        sessionId: "legacy-1",
+        bookId: "book-a",
+        messages: [
+          { role: "user", content: "继续" },
+          { role: "assistant", content: "好的", thinking: "旧思考" },
+        ],
+      });
+      await expect(readFile(join(tempDir, ".inkos", "sessions", "legacy-1.jsonl"), "utf-8"))
+        .resolves
+        .toContain("request_committed");
+    });
+
+    it("does not duplicate legacy messages when migration runs concurrently", async () => {
+      const legacy = createBookSession("book-a", "legacy-race");
+      const withMessages = {
+        ...legacy,
+        messages: [
+          { role: "user" as const, content: "old user", timestamp: legacy.createdAt },
+          { role: "assistant" as const, content: "old assistant", timestamp: legacy.createdAt + 1 },
+        ],
+      };
+      await mkdir(sessionsDir(tempDir), { recursive: true });
+      await writeFile(
+        legacyBookSessionPath(tempDir, "legacy-race"),
+        JSON.stringify(withMessages, null, 2),
+        "utf-8",
+      );
+
+      const [first, second] = await Promise.all([
+        loadBookSession(tempDir, "legacy-race"),
+        loadBookSession(tempDir, "legacy-race"),
+      ]);
+
+      expect(first?.messages).toHaveLength(2);
+      expect(second?.messages).toHaveLength(2);
+
+      const restored = await restoreAgentMessagesFromTranscript(tempDir, "legacy-race");
+      expect(restored.map((message) => message.role)).toEqual(["user", "assistant"]);
+    });
+
+    it("createAndPersistBookSession 为新 session 写 JSONL 而不是 legacy JSON", async () => {
+      const session = await createAndPersistBookSession(tempDir, "book-a", "123456-abcdef");
+
+      expect(session.sessionId).toBe("123456-abcdef");
+      await expect(readFile(join(tempDir, ".inkos", "sessions", "123456-abcdef.jsonl"), "utf-8"))
+        .resolves
+        .toContain("session_created");
+      await expect(readFile(join(tempDir, ".inkos", "sessions", "123456-abcdef.json"), "utf-8"))
+        .rejects
+        .toThrow();
+    });
+
+    it("does not duplicate session_created when explicit session creation races", async () => {
+      await Promise.all([
+        createAndPersistBookSession(tempDir, "book-a", "create-race"),
+        createAndPersistBookSession(tempDir, "book-a", "create-race"),
+      ]);
+
+      const events = await readTranscriptEvents(tempDir, "create-race");
+      expect(events.filter((event) => event.type === "session_created")).toHaveLength(1);
+      expect(events.map((event) => event.seq)).toEqual([1]);
+    });
+
+    it("renameBookSession 追加 metadata event 并从 JSONL 派生新标题", async () => {
+      await createAndPersistBookSession(tempDir, "book-a", "123456-abcdef");
+
+      const renamed = await renameBookSession(tempDir, "123456-abcdef", "新标题");
+
+      expect(renamed!.title).toBe("新标题");
+      const loaded = await loadBookSession(tempDir, "123456-abcdef");
+      expect(loaded!.title).toBe("新标题");
+    });
+
+    it("listBookSessions 同时列出 JSONL session 和未迁移 legacy JSON session", async () => {
+      await createAndPersistBookSession(tempDir, "book-a", "123456-abcdef");
+      const dir = join(tempDir, ".inkos", "sessions");
+      await mkdir(dir, { recursive: true });
+      const legacy = { ...createBookSession("book-a", "legacy-1"), updatedAt: 999 };
+      await writeFile(join(dir, "legacy-1.json"), JSON.stringify(legacy));
+
+      const list = await listBookSessions(tempDir, "book-a");
+
+      expect(list.map((entry) => entry.sessionId).sort()).toEqual(["123456-abcdef", "legacy-1"]);
+    });
   });
 
   describe("listBookSessions", () => {
@@ -120,6 +225,20 @@ describe("book-session-store", () => {
       expect(list[2].updatedAt).toBe(100);
     });
 
+    it("updates session activity time from committed chat messages", async () => {
+      const session = await createAndPersistBookSession(tempDir, "book", "chat-activity");
+      await new Promise((resolve) => setTimeout(resolve, 5));
+
+      await appendManualSessionMessages(tempDir, session.sessionId, [{
+        role: "user",
+        content: "继续",
+        timestamp: Date.now(),
+      } as any]);
+
+      const loaded = await loadBookSession(tempDir, session.sessionId);
+      expect(loaded?.updatedAt).toBeGreaterThan(session.updatedAt);
+    });
+
     it("lists null bookId sessions", async () => {
       const s = createBookSession(null);
       await persistBookSession(tempDir, s);
@@ -145,6 +264,19 @@ describe("book-session-store", () => {
     it("returns null for non-existent session", async () => {
       const result = await renameBookSession(tempDir, "nonexistent", "title");
       expect(result).toBeNull();
+    });
+
+    it("assigns unique seq for concurrent metadata updates", async () => {
+      await createAndPersistBookSession(tempDir, "book-a", "metadata-race");
+
+      await Promise.all([
+        renameBookSession(tempDir, "metadata-race", "标题 A"),
+        renameBookSession(tempDir, "metadata-race", "标题 B"),
+      ]);
+
+      const events = await readTranscriptEvents(tempDir, "metadata-race");
+      expect(events.map((event) => event.seq)).toEqual([1, 2, 3]);
+      expect(new Set(events.map((event) => event.seq)).size).toBe(events.length);
     });
   });
 

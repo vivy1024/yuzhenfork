@@ -15,8 +15,7 @@ import {
   resolveSessionActiveBook,
   listBookSessions,
   loadBookSession,
-  persistBookSession,
-  appendBookSessionMessage,
+  appendManualSessionMessages,
   createAndPersistBookSession,
   renameBookSession,
   deleteBookSession,
@@ -43,7 +42,7 @@ import {
   type LogEntry,
 } from "@actalk/inkos-core";
 import { access, readFile, readdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import { isSafeBookId } from "./safety.js";
 import { ApiError } from "./errors.js";
 import { buildStudioBookConfig } from "./book-create.js";
@@ -136,10 +135,20 @@ interface CollectedToolExec {
   status: "running" | "completed" | "error";
   args?: Record<string, unknown>;
   result?: string;
+  details?: unknown;
   error?: string;
   stages?: Array<{ label: string; status: "pending" | "completed" }>;
   startedAt: number;
   completedAt?: number;
+}
+
+interface StudioBookListSummary {
+  readonly id: string;
+  readonly title: string;
+  readonly genre: string;
+  readonly status: string;
+  readonly chaptersWritten: number;
+  readonly [key: string]: unknown;
 }
 
 // --- Event bus for SSE ---
@@ -192,6 +201,50 @@ function broadcast(event: string, data: unknown): void {
   for (const handler of subscribers) {
     handler(event, data);
   }
+}
+
+function deriveBookIdFromTitle(title: string): string {
+  return title
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9\u4e00-\u9fff]/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 30);
+}
+
+function resolveArchitectBookIdFromArgs(args?: Record<string, unknown>): string | null {
+  if (!args || args.agent !== "architect" || args.revise === true) return null;
+  if (typeof args.bookId === "string" && args.bookId.trim()) return args.bookId.trim();
+  if (typeof args.title === "string" && args.title.trim()) {
+    return deriveBookIdFromTitle(args.title) || null;
+  }
+  return null;
+}
+
+function resolveCreatedBookIdFromToolExecs(execs: ReadonlyArray<CollectedToolExec>): string | null {
+  for (let i = execs.length - 1; i >= 0; i -= 1) {
+    const exec = execs[i];
+    if (exec.tool !== "sub_agent" || exec.agent !== "architect" || exec.status !== "completed") continue;
+
+    const details = exec.details as { kind?: unknown; bookId?: unknown } | undefined;
+    if (details?.kind === "book_created" && typeof details.bookId === "string" && details.bookId.trim()) {
+      return details.bookId.trim();
+    }
+
+    const fromArgs = resolveArchitectBookIdFromArgs(exec.args);
+    if (fromArgs) return fromArgs;
+  }
+  return null;
+}
+
+async function loadStudioBookListSummary(
+  state: StateManager,
+  bookId: string,
+): Promise<StudioBookListSummary> {
+  const book = await state.loadBookConfig(bookId);
+  const nextChapter = await state.getNextChapterNumber(bookId);
+  return { ...book, chaptersWritten: nextChapter - 1 };
 }
 
 function isCustomServiceId(serviceId: string): boolean {
@@ -728,13 +781,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   app.get("/api/v1/books", async (c) => {
     const bookIds = await state.listBooks();
-    const books = await Promise.all(
-      bookIds.map(async (id) => {
-        const book = await state.loadBookConfig(id);
-        const nextChapter = await state.getNextChapterNumber(id);
-        return { ...book, chaptersWritten: nextChapter - 1 };
-      }),
-    );
+    const books = await Promise.all(bookIds.map((id) => loadStudioBookListSummary(state, id)));
     return c.json({ books });
   });
 
@@ -811,13 +858,14 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       },
       tools,
     }).then(
-      (result: {
+      async (result: {
         readonly session: { readonly activeBookId?: string };
         readonly details?: Readonly<Record<string, unknown>>;
       }) => {
         const createdBookId = (result.details?.bookId as string | undefined) ?? result.session.activeBookId ?? bookId;
+        const book = await loadStudioBookListSummary(state, createdBookId).catch(() => undefined);
         bookCreateStatus.delete(createdBookId);
-        broadcast("book:created", { bookId: createdBookId });
+        broadcast("book:created", { bookId: createdBookId, ...(book ? { book } : {}) });
       },
       (e: unknown) => {
         const error = e instanceof Error ? e.message : String(e);
@@ -925,7 +973,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
    */
   function resolveTruthFilePath(bookDir: string, file: string): string | null {
     // Reject absolute paths, traversal, null bytes outright.
-    if (!file || file.includes("\0") || file.startsWith("/") || file.includes("..")) {
+    if (!file || file.includes("\0") || isAbsolute(file) || file.includes("..")) {
       return null;
     }
 
@@ -940,12 +988,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
     if (!allowed) return null;
 
-    const storyDir = join(bookDir, "story");
-    const resolved = join(storyDir, file);
-    // Path safety: resolved absolute path must sit inside storyDir. `join`
-    // collapses any `..` segments, so compare against the storyDir prefix.
-    const storyPrefix = storyDir.endsWith("/") ? storyDir : storyDir + "/";
-    if (!resolved.startsWith(storyPrefix) && resolved !== storyDir) {
+    const storyDir = resolve(bookDir, "story");
+    const resolved = resolve(storyDir, file);
+    const relativePath = relative(storyDir, resolved);
+    if (relativePath === "" || relativePath.startsWith("..") || isAbsolute(relativePath)) {
       return null;
     }
     return resolved;
@@ -1090,6 +1136,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         stream.writeSSE({ event, data: JSON.stringify(data) });
       };
       subscribers.add(handler);
+      await stream.writeSSE({ event: "ping", data: "" });
 
       // Keep alive
       const keepAlive = setInterval(() => {
@@ -1623,11 +1670,18 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       }
       let bookSession = loadedBookSession;
       const streamSessionId = loadedBookSession.sessionId;
-
-      // Build initial message context from persisted session
-      const initialMessages = bookSession.messages
-        .filter((m) => m.role === "user" || m.role === "assistant")
-        .map((m) => ({ role: m.role as "user" | "assistant", content: m.content }));
+      const titleBeforeRun = bookSession.title;
+      let sessionTitleBroadcasted = false;
+      const refreshBookSessionFromTranscript = async (): Promise<void> => {
+        const refreshed = await loadBookSession(root, bookSession.sessionId);
+        if (refreshed) {
+          bookSession = refreshed;
+        }
+        if (!sessionTitleBroadcasted && titleBeforeRun === null && bookSession.title) {
+          broadcast("session:title", { sessionId: bookSession.sessionId, title: bookSession.title });
+          sessionTitleBroadcasted = true;
+        }
+      };
 
       // Resolve model — multi-service resolution
       let resolvedModel: ResolvedModel["model"] | undefined;
@@ -1780,6 +1834,17 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
                 startedAt: Date.now(),
               });
 
+              if (!activeBookId && event.toolName === "sub_agent" && agent === "architect") {
+                const bookId = resolveArchitectBookIdFromArgs(args);
+                if (bookId) {
+                  const title = typeof args?.title === "string" && args.title.trim()
+                    ? args.title.trim()
+                    : bookId;
+                  bookCreateStatus.set(bookId, { status: "creating" });
+                  broadcast("book:creating", { bookId, title, sessionId: streamSessionId });
+                }
+              }
+
               broadcast("tool:start", {
                 sessionId: streamSessionId,
                 id: event.toolCallId,
@@ -1803,6 +1868,20 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
                 exec.stages = exec.stages?.map(s => ({ ...s, status: "completed" as const }));
                 if (event.isError) exec.error = extractToolError(event.result);
                 else exec.result = summarizeResult(event.result);
+                exec.details = (event.result as { details?: unknown } | undefined)?.details;
+                if (
+                  event.isError &&
+                  !activeBookId &&
+                  exec.tool === "sub_agent" &&
+                  exec.agent === "architect"
+                ) {
+                  const bookId = resolveArchitectBookIdFromArgs(exec.args);
+                  if (bookId) {
+                    const error = exec.error ?? "Book creation failed";
+                    bookCreateStatus.set(bookId, { status: "error", error });
+                    broadcast("book:error", { bookId, sessionId: streamSessionId, error });
+                  }
+                }
               }
               broadcast("tool:end", {
                 sessionId: streamSessionId,
@@ -1815,37 +1894,48 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           },
         },
         instruction,
-        initialMessages,
       );
 
-      // Persist user + assistant messages to BookSession
-      bookSession = appendBookSessionMessage(bookSession, {
-        role: "user",
-        content: instruction,
-        timestamp: Date.now(),
-      });
-      // 第一条用户消息就是 session 的标题：如果 title 还是 null，用消息内容（单行、≤20字）写入。
-      // 后续消息不覆盖；用户手动改名通过 renameBookSession 覆盖。
-      if (bookSession.title === null) {
-        const oneLine = instruction.trim().replace(/\s+/g, " ");
-        const title = oneLine.length > 20 ? `${oneLine.slice(0, 20)}…` : oneLine;
-        if (title) {
-          bookSession = { ...bookSession, title };
-          broadcast("session:title", { sessionId: bookSession.sessionId, title });
+      let broadcastedCreatedBookId: string | null = null;
+      const finalizeCreatedBook = async (): Promise<string | null> => {
+        if (activeBookId) return null;
+        const createdBookId = resolveCreatedBookIdFromToolExecs(collectedToolExecs);
+        if (!createdBookId) return null;
+        if (broadcastedCreatedBookId === createdBookId) return createdBookId;
+
+        try {
+          const migratedSession = await migrateBookSession(root, bookSession.sessionId, createdBookId);
+          if (migratedSession) {
+            bookSession = migratedSession;
+          }
+        } catch (e) {
+          if (!(e instanceof SessionAlreadyMigratedError)) {
+            throw e;
+          }
         }
-      }
-      if (result.responseText) {
-        const lastAssistant = result.messages?.filter((m: any) => m.role === "assistant").pop();
-        const thinking = lastAssistant?.thinking;
-        bookSession = appendBookSessionMessage(bookSession, {
-          role: "assistant",
-          content: result.responseText,
-          ...(thinking ? { thinking } : {}),
-          ...(collectedToolExecs.length > 0 ? { toolExecutions: collectedToolExecs } : {}),
-          timestamp: Date.now() + 1,
+
+        const book = await loadStudioBookListSummary(state, createdBookId).catch(() => undefined);
+        bookCreateStatus.delete(createdBookId);
+        broadcast("book:created", {
+          bookId: createdBookId,
+          sessionId: bookSession.sessionId,
+          ...(book ? { book } : {}),
         });
-      }
+        broadcastedCreatedBookId = createdBookId;
+        return createdBookId;
+      };
+
       if (!result.responseText) {
+        if (result.errorMessage) {
+          if (resolveCreatedBookIdFromToolExecs(collectedToolExecs)) {
+            await finalizeCreatedBook();
+          }
+          return c.json({
+            error: { code: "AGENT_LLM_ERROR", message: result.errorMessage },
+            response: result.errorMessage,
+          }, 502);
+        }
+
         try {
           const fallbackClient = createLLMClient({
             ...config.llm,
@@ -1866,15 +1956,31 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
             { maxTokens: 256 },
           );
           if (fallback.content?.trim()) {
-            bookSession = appendBookSessionMessage(bookSession, {
+            await appendManualSessionMessages(root, bookSession.sessionId, [{
               role: "assistant",
-              content: fallback.content,
-              timestamp: Date.now() + 1,
-            });
-            await persistBookSession(root, bookSession);
+              content: [{ type: "text", text: fallback.content }],
+              api: "anthropic-messages",
+              provider: configuredEntry?.service ?? reqService ?? config.llm.provider,
+              model: reqModel ?? config.llm.model,
+              usage: {
+                input: 0,
+                output: 0,
+                cacheRead: 0,
+                cacheWrite: 0,
+                totalTokens: 0,
+                cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+              },
+              stopReason: "stop",
+              timestamp: Date.now(),
+            }], instruction);
+            await refreshBookSessionFromTranscript();
+            const createdBookId = await finalizeCreatedBook();
             return c.json({
               response: fallback.content,
-              session: { sessionId: bookSession.sessionId },
+              session: {
+                sessionId: bookSession.sessionId,
+                ...(createdBookId ? { activeBookId: createdBookId } : {}),
+              },
             });
           }
         } catch {
@@ -1899,6 +2005,9 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
           );
         } catch (probeError) {
           const probeMessage = probeError instanceof Error ? probeError.message : String(probeError);
+          if (resolveCreatedBookIdFromToolExecs(collectedToolExecs)) {
+            await finalizeCreatedBook();
+          }
           return c.json({
             error: { code: "AGENT_EMPTY_RESPONSE", message: probeMessage },
             response: probeMessage,
@@ -1906,34 +2015,18 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
         }
 
         const emptyMessage = "模型未返回文本内容。请检查协议类型（chat/responses）、流式开关或上游服务兼容性。";
+        if (resolveCreatedBookIdFromToolExecs(collectedToolExecs)) {
+          await finalizeCreatedBook();
+        }
         return c.json({
           error: { code: "AGENT_EMPTY_RESPONSE", message: emptyMessage },
           response: emptyMessage,
         }, 502);
       }
-      await persistBookSession(root, bookSession);
+      await refreshBookSessionFromTranscript();
+      await finalizeCreatedBook();
 
       broadcast("agent:complete", { instruction, activeBookId, sessionId: bookSession.sessionId });
-
-      // If a sub_agent created a new book during this session, broadcast book:created
-      // so the sidebar refreshes.
-      if (!activeBookId && collectedToolExecs.some((t) => t.agent === "architect" && t.status === "completed")) {
-        const books = await state.listBooks();
-        const latestBook = books.at(-1);
-        if (latestBook) {
-          try {
-            const migratedSession = await migrateBookSession(root, bookSession.sessionId, latestBook);
-            if (migratedSession) {
-              bookSession = migratedSession;
-            }
-          } catch (e) {
-            if (!(e instanceof SessionAlreadyMigratedError)) {
-              throw e;
-            }
-          }
-          broadcast("book:created", { bookId: latestBook, sessionId: bookSession.sessionId });
-        }
-      }
 
       return c.json({
         response: result.responseText,

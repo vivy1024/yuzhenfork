@@ -27,6 +27,7 @@ const createAndPersistBookSessionMock = vi.fn();
 const loadBookSessionMock = vi.fn();
 const persistBookSessionMock = vi.fn();
 const appendBookSessionMessageMock = vi.fn();
+const appendManualSessionMessagesMock = vi.fn();
 const renameBookSessionMock = vi.fn();
 const deleteBookSessionMock = vi.fn();
 const migrateBookSessionMock = vi.fn();
@@ -130,8 +131,8 @@ vi.mock("@actalk/inkos-core", () => {
       return [];
     }
 
-    async loadBookConfig(): Promise<never> {
-      return await loadBookConfigMock() as never;
+    async loadBookConfig(bookId?: string): Promise<never> {
+      return await loadBookConfigMock(bookId) as never;
     }
 
     async loadChapterIndex(bookId: string): Promise<[]> {
@@ -146,7 +147,7 @@ vi.mock("@actalk/inkos-core", () => {
       return (await rollbackToChapterMock(bookId, chapterNumber)) as number[];
     }
 
-    async getNextChapterNumber(): Promise<number> {
+    async getNextChapterNumber(_bookId?: string): Promise<number> {
       return 1;
     }
 
@@ -210,6 +211,7 @@ vi.mock("@actalk/inkos-core", () => {
     loadBookSession: loadBookSessionMock,
     persistBookSession: persistBookSessionMock,
     appendBookSessionMessage: appendBookSessionMessageMock,
+    appendManualSessionMessages: appendManualSessionMessagesMock,
     isNewLayoutBook: vi.fn(async () => false),
     renameBookSession: renameBookSessionMock,
     deleteBookSession: deleteBookSessionMock,
@@ -380,6 +382,7 @@ describe("createStudioServer daemon lifecycle", () => {
     loadBookSessionMock.mockReset();
     persistBookSessionMock.mockReset();
     appendBookSessionMessageMock.mockReset();
+    appendManualSessionMessagesMock.mockReset();
     renameBookSessionMock.mockReset();
     deleteBookSessionMock.mockReset();
     migrateBookSessionMock.mockReset();
@@ -410,6 +413,7 @@ describe("createStudioServer daemon lifecycle", () => {
     appendBookSessionMessageMock.mockImplementation(
       (session: unknown, _msg: unknown) => session,
     );
+    appendManualSessionMessagesMock.mockResolvedValue(undefined);
     renameBookSessionMock.mockResolvedValue(null);
     deleteBookSessionMock.mockResolvedValue(undefined);
     migrateBookSessionMock.mockImplementation(async (_root: string, _sessionId: string, bookId: string) => ({
@@ -1759,8 +1763,74 @@ describe("createStudioServer daemon lifecycle", () => {
         projectRoot: root,
       }),
       "continue",
-      expect.any(Array),
     );
+  });
+
+  it("does not override system file read policy from Studio agent API by default", async () => {
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "continue", activeBookId: "demo-book", sessionId: "agent-session-1" }),
+    });
+
+    expect(response.status).toBe(200);
+    const agentConfig = runAgentSessionMock.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+    expect("allowSystemFileRead" in agentConfig).toBe(false);
+  });
+
+  it("does not append or persist legacy BookSession messages after agent success", async () => {
+    runAgentSessionMock.mockResolvedValueOnce({
+      responseText: "Agent response.",
+      messages: [
+        { role: "user", content: "continue", timestamp: 1 },
+        { role: "assistant", content: [{ type: "text", text: "Agent response." }], timestamp: 2 },
+      ],
+    });
+    loadBookSessionMock
+      .mockResolvedValueOnce({
+        sessionId: "agent-session-1",
+        bookId: "demo-book",
+        title: null,
+        messages: [],
+        events: [],
+        draftRounds: [],
+        createdAt: 1,
+        updatedAt: 1,
+      })
+      .mockResolvedValueOnce({
+        sessionId: "agent-session-1",
+        bookId: "demo-book",
+        title: "continue",
+        messages: [
+          { role: "user", content: "continue", timestamp: 1 },
+          { role: "assistant", content: "Agent response.", timestamp: 2 },
+        ],
+        events: [],
+        draftRounds: [],
+        createdAt: 1,
+        updatedAt: 2,
+      });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "continue", activeBookId: "demo-book", sessionId: "agent-session-1" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(appendBookSessionMessageMock).not.toHaveBeenCalled();
+    expect(persistBookSessionMock).not.toHaveBeenCalled();
+    expect(runAgentSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: "agent-session-1" }),
+      "continue",
+    );
+    expect(loadBookSessionMock).toHaveBeenCalledTimes(2);
   });
 
   it("allows /api/agent to use explicit service+model when Studio config has no defaultModel", async () => {
@@ -1898,6 +1968,62 @@ describe("createStudioServer daemon lifecycle", () => {
     });
   });
 
+  it("returns the agent final assistant error without replacing it with an empty-response probe", async () => {
+    const upstreamError = "400 The `reasoning_content` in the thinking mode must be passed back to the API.";
+    runAgentSessionMock.mockResolvedValueOnce({
+      responseText: "",
+      errorMessage: upstreamError,
+      messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: upstreamError }],
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "nihao", activeBookId: "demo-book", sessionId: "agent-session-1" }),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "AGENT_LLM_ERROR",
+        message: upstreamError,
+      },
+      response: upstreamError,
+    });
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+  });
+
+  it("returns malformed Gemini function-call errors without replacing them with an empty-response probe", async () => {
+    const upstreamError = "Provider finish_reason: function_call_filter: MALFORMED_FUNCTION_CALL";
+    runAgentSessionMock.mockResolvedValueOnce({
+      responseText: "",
+      errorMessage: upstreamError,
+      messages: [{ role: "assistant", content: [], stopReason: "error", errorMessage: upstreamError }],
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "nihao", activeBookId: "demo-book", sessionId: "agent-session-1" }),
+    });
+
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "AGENT_LLM_ERROR",
+        message: upstreamError,
+      },
+      response: upstreamError,
+    });
+    expect(chatCompletionMock).not.toHaveBeenCalled();
+  });
+
   it("falls back to plain chat when the tool-agent returns empty text", async () => {
     runAgentSessionMock.mockResolvedValueOnce({
       responseText: "",
@@ -1921,6 +2047,81 @@ describe("createStudioServer daemon lifecycle", () => {
     await expect(response.json()).resolves.toEqual({
       response: "你好！",
       session: { sessionId: "agent-session-1" },
+    });
+  });
+
+  it("migrates and exposes a book created by architect even when the final agent text is empty", async () => {
+    const orphanSession = {
+      sessionId: "agent-session-1",
+      bookId: null,
+      title: null,
+      messages: [],
+      events: [],
+      draftRounds: [],
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    loadBookSessionMock.mockResolvedValue(orphanSession);
+    appendBookSessionMessageMock.mockImplementation((session: unknown) => session);
+    migrateBookSessionMock.mockResolvedValue({
+      ...orphanSession,
+      bookId: "new-book",
+    });
+    loadBookConfigMock.mockImplementation(async (bookId?: string) => ({
+      id: bookId ?? "new-book",
+      title: "New Book",
+      platform: "qidian",
+      genre: "urban",
+      status: "outlining",
+      targetChapters: 100,
+      chapterWordCount: 3000,
+      createdAt: "2026-04-12T00:00:00.000Z",
+      updatedAt: "2026-04-12T00:00:00.000Z",
+    }));
+    runAgentSessionMock.mockImplementationOnce(async (config: { onEvent?: (event: unknown) => void }) => {
+      config.onEvent?.({
+        type: "tool_execution_start",
+        toolCallId: "tool-1",
+        toolName: "sub_agent",
+        args: { agent: "architect", title: "New Book" },
+      });
+      config.onEvent?.({
+        type: "tool_execution_end",
+        toolCallId: "tool-1",
+        toolName: "sub_agent",
+        isError: false,
+        result: {
+          content: [{ type: "text", text: "Book created." }],
+          details: { kind: "book_created", bookId: "new-book", title: "New Book" },
+        },
+      });
+      return {
+        responseText: "",
+        messages: [{ role: "user", content: "/new New Book" }],
+      };
+    });
+    chatCompletionMock.mockResolvedValueOnce({
+      content: "建书完成。",
+      usage: { promptTokens: 1, completionTokens: 1, totalTokens: 2 },
+    });
+
+    const { createStudioServer } = await import("./server.js");
+    const app = createStudioServer(cloneProjectConfig() as never, root);
+
+    const response = await app.request("http://localhost/api/v1/agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ instruction: "写一本都市商战", sessionId: "agent-session-1" }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(migrateBookSessionMock).toHaveBeenCalledWith(root, "agent-session-1", "new-book");
+    await expect(response.json()).resolves.toMatchObject({
+      response: "建书完成。",
+      session: {
+        sessionId: "agent-session-1",
+        activeBookId: "new-book",
+      },
     });
   });
 

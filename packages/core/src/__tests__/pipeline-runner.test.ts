@@ -33,6 +33,7 @@ const hasNodeSqlite = (() => {
 })();
 
 const sqliteIt = hasNodeSqlite ? it : it.skip;
+const SLOW_PIPELINE_TEST_TIMEOUT_MS = 15_000;
 
 const ZERO_USAGE = {
   promptTokens: 0,
@@ -575,7 +576,7 @@ describe("PipelineRunner", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  }, 15_000);
+  }, SLOW_PIPELINE_TEST_TIMEOUT_MS);
 
   it("cleans staged files when initBook fails before foundation is complete", async () => {
     const root = await mkdtemp(join(tmpdir(), "inkos-init-rollback-"));
@@ -4508,7 +4509,7 @@ describe("PipelineRunner", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, SLOW_PIPELINE_TEST_TIMEOUT_MS);
 
   it("persists manual revisions only when merged audit improves", async () => {
     const { root, runner, state, bookId } = await createRunnerFixture();
@@ -4589,7 +4590,7 @@ describe("PipelineRunner", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, SLOW_PIPELINE_TEST_TIMEOUT_MS);
 
   it("re-audits revisions against updated state overrides instead of stale on-disk truth files", async () => {
     const { root, runner, state, bookId } = await createRunnerFixture();
@@ -4705,7 +4706,7 @@ describe("PipelineRunner", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, SLOW_PIPELINE_TEST_TIMEOUT_MS);
 
   it("excludes pure sequence-level fatigue from revision blocker counts", async () => {
     const { root, runner, state, bookId } = await createRunnerFixture();

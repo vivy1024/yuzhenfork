@@ -3,7 +3,7 @@ import type { AgentTool, AgentToolResult, AgentToolUpdateCallback } from "@mario
 import type { PipelineRunner } from "../pipeline/runner.js";
 import { type ReviseMode } from "../agents/reviser.js";
 import { readFile, writeFile, readdir, stat } from "node:fs/promises";
-import { join, normalize, resolve } from "node:path";
+import { isAbsolute, join, normalize, resolve } from "node:path";
 import { StateManager } from "../state/manager.js";
 import { createInteractionToolsFromDeps } from "../interaction/project-tools.js";
 import { writeExportArtifact } from "../interaction/export-artifact.js";
@@ -12,8 +12,10 @@ import { writeExportArtifact } from "../interaction/export-artifact.js";
 // Helpers
 // ---------------------------------------------------------------------------
 
-function textResult(text: string): AgentToolResult<undefined> {
-  return { content: [{ type: "text", text }], details: undefined };
+function textResult(text: string): AgentToolResult<undefined>;
+function textResult<T>(text: string, details: T): AgentToolResult<T>;
+function textResult<T = undefined>(text: string, details?: T): AgentToolResult<T> {
+  return { content: [{ type: "text", text }], details: details as T };
 }
 
 /**
@@ -125,7 +127,7 @@ export function createSubAgentTool(
       params: Static<typeof SubAgentParams>,
       _signal?: AbortSignal,
       onUpdate?: AgentToolUpdateCallback,
-    ): Promise<AgentToolResult<undefined>> {
+    ): Promise<AgentToolResult<unknown>> {
       const { agent, instruction, bookId, title, chapterNumber, genre, platform, language, targetChapters, chapterWordCount, revise, feedback, mode, format, approvedOnly } = params;
 
       const progress = (msg: string) => {
@@ -172,7 +174,10 @@ export function createSubAgentTool(
               { externalContext: instruction },
             );
             progress(`Architect finished — book "${id}" foundation created.`);
-            return textResult(`Book "${resolvedTitle}" (${id}) initialised successfully. Foundation files are ready.`);
+            return textResult(
+              `Book "${resolvedTitle}" (${id}) initialised successfully. Foundation files are ready.`,
+              { kind: "book_created", bookId: id, title: resolvedTitle },
+            );
           }
 
           case "writer": {
@@ -335,15 +340,32 @@ export function createPatchChapterTextTool(
 // ---------------------------------------------------------------------------
 
 const ReadParams = Type.Object({
-  path: Type.String({ description: "File path relative to books/, e.g. {bookId}/story/story_bible.md" }),
+  path: Type.String({ description: "File path relative to books/, or an absolute path when system path reading is enabled." }),
 });
 
-export function createReadTool(projectRoot: string): AgentTool<typeof ReadParams> {
+export interface ReadToolOptions {
+  readonly allowSystemPaths?: boolean;
+}
+
+function resolveReadPath(booksRoot: string, requestedPath: string, options: ReadToolOptions): string {
+  if (options.allowSystemPaths && isAbsolute(requestedPath)) {
+    return resolve(requestedPath);
+  }
+  return safeBooksPath(booksRoot, requestedPath);
+}
+
+export function createReadTool(
+  projectRoot: string,
+  options: ReadToolOptions = {},
+): AgentTool<typeof ReadParams> {
   const booksRoot = join(projectRoot, "books");
+  const description = options.allowSystemPaths
+    ? "Read a file. Relative paths resolve under books/; absolute paths read from the system filesystem."
+    : "Read a file from the book directory. Path is relative to books/.";
 
   return {
     name: "read",
-    description: "Read a file from the book directory. Path is relative to books/.",
+    description,
     label: "Read File",
     parameters: ReadParams,
     async execute(
@@ -351,7 +373,7 @@ export function createReadTool(projectRoot: string): AgentTool<typeof ReadParams
       params: Static<typeof ReadParams>,
     ): Promise<AgentToolResult<undefined>> {
       try {
-        const filePath = safeBooksPath(booksRoot, params.path);
+        const filePath = resolveReadPath(booksRoot, params.path, options);
         let content = await readFile(filePath, "utf-8");
         if (content.length > 10_000) {
           content = content.slice(0, 10_000) + "\n\n... [truncated at 10 000 chars]";
