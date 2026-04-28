@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
   appendManualSessionMessages,
+  appendTranscriptEvents,
   appendTranscriptEvent,
   nextTranscriptSeq,
   readTranscriptEvents,
@@ -130,6 +131,26 @@ describe("session transcript codec", () => {
     await appendTranscriptEvent(projectRoot, committed);
 
     await expect(nextTranscriptSeq(projectRoot, "s1")).resolves.toBe(8);
+  });
+
+  it("atomically assigns unique seq for concurrent generated events", async () => {
+    await Promise.all(
+      Array.from({ length: 10 }, (_, index) =>
+        appendTranscriptEvents(projectRoot, "s-concurrent", ({ nextSeq }) => [{
+          type: "request_started",
+          version: 1,
+          sessionId: "s-concurrent",
+          requestId: `r-${index}`,
+          seq: nextSeq,
+          timestamp: 100 + index,
+          input: `input-${index}`,
+        }]),
+      ),
+    );
+
+    const events = await readTranscriptEvents(projectRoot, "s-concurrent");
+    expect(events).toHaveLength(10);
+    expect(events.map((event) => event.seq)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10]);
   });
 
   it("appendManualSessionMessages 写入 committed request 并保留 raw assistant message", async () => {

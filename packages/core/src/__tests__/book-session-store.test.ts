@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -14,7 +14,8 @@ import {
   SessionAlreadyMigratedError,
 } from "../interaction/book-session-store.js";
 import { createBookSession, appendBookSessionMessage } from "../interaction/session.js";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { legacyBookSessionPath, readTranscriptEvents, sessionsDir } from "../interaction/session-transcript.js";
+import { restoreAgentMessagesFromTranscript } from "../interaction/session-transcript-restore.js";
 
 describe("book-session-store", () => {
   let tempDir: string;
@@ -107,6 +108,34 @@ describe("book-session-store", () => {
       await expect(readFile(join(tempDir, ".inkos", "sessions", "legacy-1.jsonl"), "utf-8"))
         .resolves
         .toContain("request_committed");
+    });
+
+    it("does not duplicate legacy messages when migration runs concurrently", async () => {
+      const legacy = createBookSession("book-a", "legacy-race");
+      const withMessages = {
+        ...legacy,
+        messages: [
+          { role: "user" as const, content: "old user", timestamp: legacy.createdAt },
+          { role: "assistant" as const, content: "old assistant", timestamp: legacy.createdAt + 1 },
+        ],
+      };
+      await mkdir(sessionsDir(tempDir), { recursive: true });
+      await writeFile(
+        legacyBookSessionPath(tempDir, "legacy-race"),
+        JSON.stringify(withMessages, null, 2),
+        "utf-8",
+      );
+
+      const [first, second] = await Promise.all([
+        loadBookSession(tempDir, "legacy-race"),
+        loadBookSession(tempDir, "legacy-race"),
+      ]);
+
+      expect(first?.messages).toHaveLength(2);
+      expect(second?.messages).toHaveLength(2);
+
+      const restored = await restoreAgentMessagesFromTranscript(tempDir, "legacy-race");
+      expect(restored.map((message) => message.role)).toEqual(["user", "assistant"]);
     });
 
     it("createAndPersistBookSession 为新 session 写 JSONL 而不是 legacy JSON", async () => {
@@ -205,6 +234,19 @@ describe("book-session-store", () => {
     it("returns null for non-existent session", async () => {
       const result = await renameBookSession(tempDir, "nonexistent", "title");
       expect(result).toBeNull();
+    });
+
+    it("assigns unique seq for concurrent metadata updates", async () => {
+      await createAndPersistBookSession(tempDir, "book-a", "metadata-race");
+
+      await Promise.all([
+        renameBookSession(tempDir, "metadata-race", "标题 A"),
+        renameBookSession(tempDir, "metadata-race", "标题 B"),
+      ]);
+
+      const events = await readTranscriptEvents(tempDir, "metadata-race");
+      expect(events.map((event) => event.seq)).toEqual([1, 2, 3]);
+      expect(new Set(events.map((event) => event.seq)).size).toBe(events.length);
     });
   });
 

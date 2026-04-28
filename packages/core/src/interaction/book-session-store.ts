@@ -2,9 +2,8 @@ import { readdir, unlink } from "node:fs/promises";
 import { createBookSession } from "./session.js";
 import type { BookSession } from "./session.js";
 import {
-  appendTranscriptEvent,
+  appendTranscriptEvents,
   legacyBookSessionPath,
-  nextTranscriptSeq,
   readTranscriptEvents,
   sessionsDir,
   transcriptPath,
@@ -58,17 +57,17 @@ async function appendSessionCreatedEvent(
   projectRoot: string,
   session: BookSession,
 ): Promise<void> {
-  await appendTranscriptEvent(projectRoot, {
+  await appendTranscriptEvents(projectRoot, session.sessionId, ({ nextSeq }) => [{
     type: "session_created",
     version: 1,
     sessionId: session.sessionId,
-    seq: await nextTranscriptSeq(projectRoot, session.sessionId),
+    seq: nextSeq,
     timestamp: session.createdAt,
     bookId: session.bookId,
     title: session.title,
     createdAt: session.createdAt,
     updatedAt: session.updatedAt,
-  });
+  }]);
 }
 
 async function appendSessionMetadataUpdatedEvent(
@@ -80,16 +79,16 @@ async function appendSessionMetadataUpdatedEvent(
     readonly updatedAt: number;
   },
 ): Promise<void> {
-  await appendTranscriptEvent(projectRoot, {
+  await appendTranscriptEvents(projectRoot, sessionId, ({ nextSeq }) => [{
     type: "session_metadata_updated",
     version: 1,
     sessionId,
-    seq: await nextTranscriptSeq(projectRoot, sessionId),
+    seq: nextSeq,
     timestamp: metadata.updatedAt,
     updatedAt: metadata.updatedAt,
     ...("bookId" in metadata ? { bookId: metadata.bookId } : {}),
     ...("title" in metadata ? { title: metadata.title } : {}),
-  });
+  }]);
 }
 
 export async function persistBookSession(

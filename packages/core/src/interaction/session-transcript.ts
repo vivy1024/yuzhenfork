@@ -54,18 +54,39 @@ export async function appendTranscriptEvent(
   projectRoot: string,
   event: TranscriptEvent,
 ): Promise<void> {
-  const key = `${projectRoot}:${event.sessionId}`;
+  await appendTranscriptEvents(projectRoot, event.sessionId, () => [event]);
+}
+
+export async function appendTranscriptEvents(
+  projectRoot: string,
+  sessionId: string,
+  buildEvents: (context: {
+    readonly events: ReadonlyArray<TranscriptEvent>;
+    readonly nextSeq: number;
+  }) => ReadonlyArray<TranscriptEvent> | Promise<ReadonlyArray<TranscriptEvent>>,
+): Promise<TranscriptEvent[]> {
+  const key = `${projectRoot}:${sessionId}`;
   const previous = appendQueues.get(key) ?? Promise.resolve();
+  let result: TranscriptEvent[] = [];
+
   const next = previous.then(async () => {
+    const events = await readTranscriptEvents(projectRoot, sessionId);
+    const nextSeq = events.reduce((max, event) => Math.max(max, event.seq), 0) + 1;
+    const built = await buildEvents({ events, nextSeq });
+    result = built.map((event) => TranscriptEventSchema.parse(event));
+    if (result.length === 0) return;
+
     await mkdir(sessionsDir(projectRoot), { recursive: true });
     await appendFile(
-      transcriptPath(projectRoot, event.sessionId),
-      `${JSON.stringify(event)}\n`,
+      transcriptPath(projectRoot, sessionId),
+      `${result.map((event) => JSON.stringify(event)).join("\n")}\n`,
       "utf-8",
     );
   });
+
   appendQueues.set(key, next.catch(() => undefined));
   await next;
+  return result;
 }
 
 function transcriptRoleForMessage(message: AgentMessage): TranscriptRole | null {
@@ -117,49 +138,52 @@ export async function appendManualSessionMessages(
   if (persistedMessages.length === 0) return;
 
   const requestId = randomUUID();
-  let seq = await nextTranscriptSeq(projectRoot, sessionId);
-  await appendTranscriptEvent(projectRoot, {
-    type: "request_started",
-    version: 1,
-    sessionId,
-    requestId,
-    seq: seq++,
-    timestamp: Date.now(),
-    input,
-  });
-
-  let parentUuid: string | null = null;
-  let lastAssistantUuid: string | null = null;
-  for (const { message, role } of persistedMessages) {
-    const uuid = randomUUID();
-    const isToolResult = role === "toolResult";
-    const toolCallId = toolCallIdForMessage(message);
-    await appendTranscriptEvent(projectRoot, {
-      type: "message",
+  await appendTranscriptEvents(projectRoot, sessionId, ({ nextSeq }) => {
+    let seq = nextSeq;
+    const events: TranscriptEvent[] = [{
+      type: "request_started",
       version: 1,
       sessionId,
       requestId,
-      uuid,
-      parentUuid: isToolResult && lastAssistantUuid ? lastAssistantUuid : parentUuid,
       seq: seq++,
-      role,
-      timestamp: messageTimestamp(message),
-      ...(toolCallId ? { toolCallId } : {}),
-      ...(isToolResult && lastAssistantUuid
-        ? { sourceToolAssistantUuid: lastAssistantUuid }
-        : {}),
-      message,
-    });
-    if (role === "assistant") lastAssistantUuid = uuid;
-    parentUuid = uuid;
-  }
+      timestamp: Date.now(),
+      input,
+    }];
 
-  await appendTranscriptEvent(projectRoot, {
-    type: "request_committed",
-    version: 1,
-    sessionId,
-    requestId,
-    seq,
-    timestamp: Date.now(),
+    let parentUuid: string | null = null;
+    let lastAssistantUuid: string | null = null;
+    for (const { message, role } of persistedMessages) {
+      const uuid = randomUUID();
+      const isToolResult = role === "toolResult";
+      const toolCallId = toolCallIdForMessage(message);
+      events.push({
+        type: "message",
+        version: 1,
+        sessionId,
+        requestId,
+        uuid,
+        parentUuid: isToolResult && lastAssistantUuid ? lastAssistantUuid : parentUuid,
+        seq: seq++,
+        role,
+        timestamp: messageTimestamp(message),
+        ...(toolCallId ? { toolCallId } : {}),
+        ...(isToolResult && lastAssistantUuid
+          ? { sourceToolAssistantUuid: lastAssistantUuid }
+          : {}),
+        message,
+      });
+      if (role === "assistant") lastAssistantUuid = uuid;
+      parentUuid = uuid;
+    }
+
+    events.push({
+      type: "request_committed",
+      version: 1,
+      sessionId,
+      requestId,
+      seq,
+      timestamp: Date.now(),
+    });
+    return events;
   });
 }

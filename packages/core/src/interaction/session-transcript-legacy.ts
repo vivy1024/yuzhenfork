@@ -2,10 +2,8 @@ import { randomUUID } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { BookSessionSchema, type BookSession } from "./session.js";
 import {
-  appendTranscriptEvent,
+  appendTranscriptEvents,
   legacyBookSessionPath,
-  nextTranscriptSeq,
-  readTranscriptEvents,
 } from "./session-transcript.js";
 import type { MessageEvent } from "./session-transcript-schema.js";
 
@@ -34,77 +32,82 @@ export async function migrateLegacyBookSessionToTranscript(
   projectRoot: string,
   session: BookSession,
 ): Promise<void> {
-  const existing = await readTranscriptEvents(projectRoot, session.sessionId);
-  if (existing.length > 0) return;
+  await appendTranscriptEvents(projectRoot, session.sessionId, ({ events, nextSeq }) => {
+    if (events.length > 0) return [];
 
-  let seq = await nextTranscriptSeq(projectRoot, session.sessionId);
-  await appendTranscriptEvent(projectRoot, {
-    type: "session_created",
-    version: 1,
-    sessionId: session.sessionId,
-    seq: seq++,
-    timestamp: session.createdAt,
-    bookId: session.bookId,
-    title: session.title,
-    createdAt: session.createdAt,
-    updatedAt: session.updatedAt,
-  });
+    const sessionCreatedSeq = nextSeq;
+    const requestStartedSeq = nextSeq + 1;
+    let messageSeq = nextSeq + 2;
+    const requestId = `legacy-${randomUUID()}`;
+    const transcriptEvents: MessageEvent[] = [];
+    let parentUuid: string | null = null;
 
-  const requestId = `legacy-${session.sessionId}`;
-  await appendTranscriptEvent(projectRoot, {
-    type: "request_started",
-    version: 1,
-    sessionId: session.sessionId,
-    requestId,
-    seq: seq++,
-    timestamp: session.createdAt,
-    input: "",
-  });
+    for (const legacyMessage of session.messages) {
+      const uuid = randomUUID();
+      const message = legacyMessage.role === "assistant"
+        ? {
+            role: "assistant",
+            content: [{ type: "text", text: legacyMessage.content }],
+            api: "anthropic-messages",
+            provider: "legacy",
+            model: "unknown",
+            usage: EMPTY_USAGE,
+            stopReason: "stop",
+            timestamp: legacyMessage.timestamp,
+          }
+        : {
+            role: legacyMessage.role,
+            content: legacyMessage.content,
+            timestamp: legacyMessage.timestamp,
+          };
+      transcriptEvents.push({
+        type: "message",
+        version: 1,
+        sessionId: session.sessionId,
+        requestId,
+        uuid,
+        parentUuid,
+        seq: messageSeq++,
+        role: legacyMessage.role === "assistant" ? "assistant" : legacyMessage.role,
+        timestamp: legacyMessage.timestamp,
+        ...(legacyMessage.role === "assistant" && legacyMessage.thinking
+          ? { legacyDisplay: { thinking: legacyMessage.thinking } }
+          : {}),
+        message,
+      });
+      parentUuid = uuid;
+    }
 
-  let parentUuid: string | null = null;
-  for (const legacyMessage of session.messages) {
-    const uuid = randomUUID();
-    const message = legacyMessage.role === "assistant"
-      ? {
-          role: "assistant",
-          content: [{ type: "text", text: legacyMessage.content }],
-          api: "anthropic-messages",
-          provider: "legacy",
-          model: "unknown",
-          usage: EMPTY_USAGE,
-          stopReason: "stop",
-          timestamp: legacyMessage.timestamp,
-        }
-      : {
-          role: legacyMessage.role,
-          content: legacyMessage.content,
-          timestamp: legacyMessage.timestamp,
-        };
-    const event: MessageEvent = {
-      type: "message",
-      version: 1,
-      sessionId: session.sessionId,
-      requestId,
-      uuid,
-      parentUuid,
-      seq: seq++,
-      role: legacyMessage.role === "assistant" ? "assistant" : legacyMessage.role,
-      timestamp: legacyMessage.timestamp,
-      ...(legacyMessage.role === "assistant" && legacyMessage.thinking
-        ? { legacyDisplay: { thinking: legacyMessage.thinking } }
-        : {}),
-      message,
-    };
-    await appendTranscriptEvent(projectRoot, event);
-    parentUuid = uuid;
-  }
-
-  await appendTranscriptEvent(projectRoot, {
-    type: "request_committed",
-    version: 1,
-    sessionId: session.sessionId,
-    requestId,
-    seq: seq++,
-    timestamp: session.updatedAt,
+    return [
+      {
+        type: "session_created",
+        version: 1,
+        sessionId: session.sessionId,
+        seq: sessionCreatedSeq,
+        timestamp: session.createdAt,
+        bookId: session.bookId,
+        title: session.title,
+        createdAt: session.createdAt,
+        updatedAt: session.updatedAt,
+      },
+      {
+        type: "request_started",
+        version: 1,
+        sessionId: session.sessionId,
+        requestId,
+        seq: requestStartedSeq,
+        timestamp: session.createdAt,
+        input: "",
+      },
+      ...transcriptEvents,
+      {
+        type: "request_committed",
+        version: 1,
+        sessionId: session.sessionId,
+        requestId,
+        seq: messageSeq,
+        timestamp: session.updatedAt,
+      },
+    ];
   });
 }
