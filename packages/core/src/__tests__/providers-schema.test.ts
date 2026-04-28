@@ -7,7 +7,7 @@ describe("providers structural integrity", () => {
     for (const p of getAllEndpoints()) {
       expect(p.id).toBeTruthy();
       expect(p.label).toBeTruthy();
-      expect(p.api).toMatch(/^(openai-completions|openai-responses|anthropic-messages)$/);
+      expect(p.api).toMatch(/^(openai-completions|openai-responses|anthropic-messages|google-generative-ai)$/);
       // gateway/anchor provider 允许 baseUrl 为空（由用户填）
       if (gatewayProviders.has(p.id)) {
         expect(typeof p.baseUrl).toBe("string");
