@@ -1,0 +1,192 @@
+import { useState, useEffect, useRef } from "react";
+import { fetchJson, putApi } from "../../../hooks/use-api";
+import type { UserProfile } from "../../../types/settings";
+import { User, Mail, GitBranch, Upload } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+
+export function ProfilePanel() {
+  const [profile, setProfile] = useState<UserProfile>({
+    name: "",
+    email: "",
+    gitName: "",
+    gitEmail: "",
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetchJson<{ profile: UserProfile }>("/settings/user")
+      .then((data) => {
+        setProfile(data.profile);
+        if (data.profile.avatar) setAvatarPreview(data.profile.avatar);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+  }, []);
+
+  async function handleSave() {
+    setSaving(true);
+    try {
+      await putApi("/settings/user", { profile });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function handleAvatarChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      alert("头像文件不能超过 2MB");
+      return;
+    }
+    // 压缩为 128x128 JPEG 以避免 config JSON 膨胀
+    const img = new Image();
+    const objectUrl = URL.createObjectURL(file);
+    img.onload = () => {
+      URL.revokeObjectURL(objectUrl);
+      const canvas = document.createElement("canvas");
+      const size = 128;
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      // 居中裁剪
+      const minDim = Math.min(img.width, img.height);
+      const sx = (img.width - minDim) / 2;
+      const sy = (img.height - minDim) / 2;
+      ctx.drawImage(img, sx, sy, minDim, minDim, 0, 0, size, size);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.8);
+      setAvatarPreview(dataUrl);
+      setProfile((p) => ({ ...p, avatar: dataUrl }));
+    };
+    img.src = objectUrl;
+  }
+
+  if (loading) {
+    return <div className="text-muted-foreground">加载中...</div>;
+  }
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h2 className="text-lg font-semibold mb-1 text-foreground">个人资料</h2>
+        <p className="text-sm text-muted-foreground">
+          配置您的个人信息和 Git 提交信息
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-border p-4 space-y-4">
+        {/* 头像 */}
+        <div className="flex items-center gap-4 pb-4 border-b border-border">
+          <div className="relative">
+            {avatarPreview ? (
+              <img
+                src={avatarPreview}
+                alt="头像"
+                className="h-16 w-16 rounded-full object-cover border border-border"
+              />
+            ) : (
+              <div className="flex h-16 w-16 items-center justify-center rounded-full bg-muted text-xl font-semibold text-muted-foreground">
+                {profile.name ? profile.name.charAt(0).toUpperCase() : "U"}
+              </div>
+            )}
+          </div>
+          <div>
+            <p className="text-sm font-medium">{profile.name || "未设置姓名"}</p>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleAvatarChange}
+            />
+            <Button
+              variant="outline"
+              size="xs"
+              className="mt-1 gap-1"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className="size-3" />
+              上传头像
+            </Button>
+          </div>
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium mb-2 text-foreground">
+            <User className="w-4 h-4" />
+            姓名
+          </label>
+          <Input
+            type="text"
+            value={profile.name}
+            onChange={(e) => setProfile({ ...profile, name: e.target.value })}
+            className="w-full"
+            placeholder="您的姓名"
+          />
+        </div>
+
+        <div>
+          <label className="flex items-center gap-2 text-sm font-medium mb-2 text-foreground">
+            <Mail className="w-4 h-4" />
+            邮箱
+          </label>
+          <Input
+            type="email"
+            value={profile.email}
+            onChange={(e) => setProfile({ ...profile, email: e.target.value })}
+            className="w-full"
+            placeholder="your@email.com"
+          />
+        </div>
+
+        <div className="pt-4 border-t border-border">
+          <h3 className="flex items-center gap-2 text-sm font-semibold mb-3 text-foreground">
+            <GitBranch className="w-4 h-4" />
+            Git 配置
+          </h3>
+          <div className="space-y-4">
+            <div>
+              <label className="text-sm font-medium mb-2 block text-foreground">
+                Git 用户名
+              </label>
+              <Input
+                type="text"
+                value={profile.gitName || ""}
+                onChange={(e) => setProfile({ ...profile, gitName: e.target.value })}
+                className="w-full"
+                placeholder="用于 Git 提交的用户名"
+              />
+            </div>
+            <div>
+              <label className="text-sm font-medium mb-2 block text-foreground">
+                Git 邮箱
+              </label>
+              <Input
+                type="email"
+                value={profile.gitEmail || ""}
+                onChange={(e) => setProfile({ ...profile, gitEmail: e.target.value })}
+                className="w-full"
+                placeholder="用于 Git 提交的邮箱"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-4">
+          <Button
+            variant="default"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? "保存中..." : "保存"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,582 @@
+import type {
+  CanvasContext,
+  SessionToolDefinition,
+  SessionToolExecutionInput,
+  SessionToolExecutionResult,
+} from "../../shared/agent-native-workspace.js";
+import type {
+  NarratorSessionRuntimeMetadata,
+  SessionConfig,
+  SessionPermissionMode,
+} from "../../shared/session-types.js";
+import type { ProviderReasoningPolicy } from "../../shared/provider-catalog.js";
+import type { LlmRuntimeFailureCode } from "./llm-runtime-service.js";
+import type { RuntimeToolUse } from "./provider-adapters/index.js";
+import { filterSessionToolsForProvider } from "./session-tool-policy.js";
+
+export type AgentTurnItem =
+  | { readonly type: "message"; readonly role: "system" | "user" | "assistant"; readonly content: string; readonly reasoning_content?: string; readonly id?: string; readonly metadata?: Record<string, unknown> }
+  | { readonly type: "tool_call"; readonly id: string; readonly name: string; readonly input: Record<string, unknown> }
+  | { readonly type: "tool_result"; readonly toolCallId: string; readonly name: string; readonly content: string; readonly data?: unknown; readonly metadata?: Record<string, unknown> };
+
+export interface AgentGenerateInput {
+  readonly sessionConfig: SessionConfig;
+  readonly messages: readonly AgentTurnItem[];
+  readonly tools: readonly SessionToolDefinition[];
+  readonly permissionMode: SessionPermissionMode;
+  readonly canvasContext?: CanvasContext;
+  readonly onStreamChunk?: (chunk: string) => void;
+  readonly signal?: AbortSignal;
+}
+
+export type AgentGenerateResult =
+  | { readonly success: true; readonly type?: "message"; readonly content: string; readonly reasoningContent?: string; readonly metadata: NarratorSessionRuntimeMetadata }
+  | { readonly success: true; readonly type: "tool_use"; readonly toolUses: readonly RuntimeToolUse[]; readonly reasoningContent?: string; readonly metadata: NarratorSessionRuntimeMetadata }
+  | { readonly success: false; readonly code: LlmRuntimeFailureCode | string; readonly error: string; readonly metadata?: Partial<NarratorSessionRuntimeMetadata> };
+
+export type AgentToolExecutionInput = Omit<SessionToolExecutionInput, "sessionConfig"> & {
+  readonly sessionConfig: SessionConfig;
+};
+
+export type AgentTurnEvent =
+  | { readonly type: "assistant_message"; readonly content: string; readonly reasoningContent?: string; readonly runtime: NarratorSessionRuntimeMetadata }
+  | { readonly type: "streaming_chunk"; readonly content: string }
+  | { readonly type: "reasoning_chunk"; readonly content: string }
+  | { readonly type: "tool_call"; readonly id: string; readonly toolName: string; readonly input: Record<string, unknown>; readonly runtime: NarratorSessionRuntimeMetadata }
+  | { readonly type: "tool_result"; readonly id: string; readonly toolName: string; readonly result: SessionToolExecutionResult; readonly runtime?: NarratorSessionRuntimeMetadata }
+  | { readonly type: "confirmation_required"; readonly id: string; readonly toolName: string; readonly result: SessionToolExecutionResult; readonly sourceToolUseId?: string }
+  | { readonly type: "turn_completed" }
+  | { readonly type: "turn_failed"; readonly reason: string; readonly message: string; readonly data?: Record<string, unknown> };
+
+export interface AgentTurnRuntimeInput {
+  readonly sessionId: string;
+  readonly sessionConfig: SessionConfig;
+  readonly messages: readonly AgentTurnItem[];
+  readonly systemPrompt: string;
+  readonly context?: string;
+  readonly tools: readonly SessionToolDefinition[];
+  readonly permissionMode: SessionPermissionMode;
+  readonly canvasContext?: CanvasContext;
+  readonly generate: (input: AgentGenerateInput) => Promise<AgentGenerateResult>;
+  readonly executeTool: (input: AgentToolExecutionInput) => Promise<SessionToolExecutionResult>;
+  readonly shouldContinueAfterToolResult?: (input: { readonly toolName: string; readonly result: SessionToolExecutionResult }) => boolean;
+  readonly maxSteps?: number;
+  readonly onStreamChunk?: (chunk: string) => void;
+  readonly onEvent?: (event: AgentTurnEvent) => void;
+  readonly reasoningPolicy?: ProviderReasoningPolicy;
+  readonly signal?: AbortSignal;
+  /** Fix: silentToolCallThreshold — 连续无文本输出的工具调用次数阈值，超过后注入提示 */
+  readonly silentToolCallThreshold?: number;
+}
+
+function buildSystemContent(systemPrompt: string, context?: string): string {
+  const trimmedPrompt = systemPrompt.trim();
+  const trimmedContext = context?.trim();
+  if (!trimmedContext) return trimmedPrompt;
+  if (!trimmedPrompt) return trimmedContext;
+  return `${trimmedPrompt}\n\n${trimmedContext}`;
+}
+
+function buildInitialMessages(input: AgentTurnRuntimeInput): AgentTurnItem[] {
+  const systemContent = buildSystemContent(input.systemPrompt, input.context);
+  if (!systemContent) {
+    return [...input.messages];
+  }
+
+  const [firstMessage, ...restMessages] = input.messages;
+  if (firstMessage?.type === "message" && firstMessage.role === "system") {
+    return [{ ...firstMessage, content: systemContent }, ...restMessages];
+  }
+
+  return [{ type: "message", role: "system", content: systemContent }, ...input.messages];
+}
+
+function buildFailureEvent(reply: Extract<AgentGenerateResult, { success: false }>): AgentTurnEvent {
+  return {
+    type: "turn_failed",
+    reason: reply.code,
+    message: reply.error,
+    ...(reply.metadata ? { data: { metadata: reply.metadata } } : {}),
+  };
+}
+
+function isContextOverflowError(code: string, errorMessage: string): boolean {
+  const overflowIndicators = ["context_length_exceeded", "maximum context length", "token limit", "context window"];
+  const combined = `${code} ${errorMessage}`.toLowerCase();
+  return overflowIndicators.some(indicator => combined.includes(indicator));
+}
+
+function emergencyTruncateMessages(messages: AgentTurnItem[], keepRecent: number = 10): AgentTurnItem[] {
+  if (messages.length <= keepRecent + 2) return messages;
+
+  const firstSystem = messages.find(m => m.type === "message" && m.role === "system");
+  // Keep at most 1/3 of messages — aggressive truncation to ensure the retry
+  // fits within context limits even if individual messages are large.
+  // The 1/3 ratio is a heuristic: system prompt ≈ 1/3, recent context ≈ 1/3,
+  // leaving 1/3 headroom for the model's response.
+  const actualKeep = Math.min(keepRecent, Math.floor(messages.length / 3));
+  let recentMessages = messages.slice(-actualKeep);
+
+  // Ensure we don't start with an orphaned tool_result (models reject this)
+  while (recentMessages.length > 0 && recentMessages[0]!.type === "tool_result") {
+    recentMessages = recentMessages.slice(1);
+  }
+
+  const truncationNotice: AgentTurnItem = {
+    type: "message",
+    role: "system",
+    content: "[对话历史已因上下文溢出被紧急压缩。以下是最近的对话内容。]",
+  };
+
+  return firstSystem
+    ? [firstSystem, truncationNotice, ...recentMessages]
+    : [truncationNotice, ...recentMessages];
+}
+
+function stableJson(value: unknown): string {
+  if (value === null || typeof value !== "object") {
+    return JSON.stringify(value);
+  }
+  if (Array.isArray(value)) {
+    return `[${value.map((item) => stableJson(item)).join(",")}]`;
+  }
+  const record = value as Record<string, unknown>;
+  return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
+}
+
+function toolSignature(toolName: string, input: Record<string, unknown>): string {
+  return `${toolName}:${stableJson(input)}`;
+}
+
+const TOOL_RESULT_CONTINUATION_INSTRUCTION = "工具已完成。请先总结已经获得的信息，判断是否足够进入下一步。如果信息足够，请继续执行下一步；不要重复读取同一资源。";
+
+function toolResultContent(result: SessionToolExecutionResult): string {
+  return result.summary ? `${result.summary}\n\n${TOOL_RESULT_CONTINUATION_INSTRUCTION}` : TOOL_RESULT_CONTINUATION_INSTRUCTION;
+}
+
+function createDuplicateToolResult(firstResult: SessionToolExecutionResult): SessionToolExecutionResult {
+  return {
+    ok: true,
+    summary: "已拦截重复工具调用：该工具与参数在本轮中已经执行过，请基于已有结果继续下一步。",
+    data: {
+      status: "duplicate-tool-call",
+      firstSummary: firstResult.summary,
+    },
+  };
+}
+
+function isPendingConfirmationResult(result: SessionToolExecutionResult): boolean {
+  return result.ok && (
+    Boolean(result.confirmation)
+    || (
+      result.data !== null
+      && typeof result.data === "object"
+      && (result.data as { status?: unknown }).status === "pending-confirmation"
+    )
+  );
+}
+
+export async function runAgentTurn(input: AgentTurnRuntimeInput): Promise<AgentTurnEvent[]> {
+  const events: AgentTurnEvent[] = [];
+  const emit = (event: AgentTurnEvent) => { events.push(event); input.onEvent?.(event); };
+  const messages = buildInitialMessages(input);
+  const filteredTools = filterSessionToolsForProvider(input.tools, input.sessionConfig.toolPolicy, {
+    permissionMode: input.permissionMode,
+    ...(input.canvasContext ? { canvasContext: input.canvasContext } : {}),
+  });
+  if (input.tools.length > 0 && filteredTools.tools.length === 0) {
+    emit({
+      type: "turn_failed",
+      reason: "policy-disabled",
+      message: "当前 session 工具策略禁用了所有可发送给模型的工具。",
+      data: { deniedTools: filteredTools.deniedTools },
+    });
+    return events;
+  }
+  const maxSteps = Math.max(0, input.maxSteps ?? 6);
+  let executedToolSteps = 0;
+  let hasAttemptedOverflowRecovery = false;
+  const recentToolCalls: string[] = [];
+  const toolResultsBySignature = new Map<string, SessionToolExecutionResult>();
+  // Fix: silentToolCallThreshold — 跟踪连续无文本输出的工具调用次数
+  let consecutiveSilentToolCalls = 0;
+  const silentThreshold = input.silentToolCallThreshold ?? -1; // -1 = disabled
+
+  const emitStreamChunk = input.onStreamChunk
+    ? (chunk: string) => {
+        events.push({ type: "streaming_chunk", content: chunk });
+        input.onStreamChunk!(chunk);
+      }
+    : undefined;
+
+  for (;;) {
+    if (input.signal?.aborted) {
+      console.log(JSON.stringify({ component: "agent-turn-runtime", event: "aborted", sessionId: input.sessionId, executedToolSteps }));
+      emit({ type: "turn_completed" });
+      return events;
+    }
+
+    const generateStartedAt = Date.now();
+    const reply = await input.generate({
+      sessionConfig: input.sessionConfig,
+      messages,
+      tools: filteredTools.tools,
+      permissionMode: input.permissionMode,
+      ...(input.canvasContext ? { canvasContext: input.canvasContext } : {}),
+      ...(emitStreamChunk ? { onStreamChunk: emitStreamChunk } : {}),
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    const generateDurationMs = Date.now() - generateStartedAt;
+
+    if (!reply.success) {
+      console.log(JSON.stringify({ component: "agent-turn-runtime", event: "generate-failed", sessionId: input.sessionId, code: reply.code, durationMs: generateDurationMs }));
+
+      // Attempt context overflow recovery (max 1 retry)
+      if (!hasAttemptedOverflowRecovery && isContextOverflowError(reply.code, reply.error)) {
+        hasAttemptedOverflowRecovery = true;
+        const originalCount = messages.length;
+        const truncated = emergencyTruncateMessages(messages);
+
+        if (truncated.length < originalCount) {
+          console.log(JSON.stringify({ component: "agent-turn-runtime", event: "context-overflow-detected", sessionId: input.sessionId, originalCount, truncatedCount: truncated.length }));
+
+          // Replace messages with truncated version
+          messages.length = 0;
+          messages.push(...truncated);
+
+          console.log(JSON.stringify({ component: "agent-turn-runtime", event: "context-overflow-retry", sessionId: input.sessionId, messageCount: messages.length }));
+
+          // Retry generate with truncated messages
+          const retryReply = await input.generate({
+            sessionConfig: input.sessionConfig,
+            messages,
+            tools: filteredTools.tools,
+            permissionMode: input.permissionMode,
+            ...(input.canvasContext ? { canvasContext: input.canvasContext } : {}),
+            ...(emitStreamChunk ? { onStreamChunk: emitStreamChunk } : {}),
+            ...(input.signal ? { signal: input.signal } : {}),
+          });
+
+          if (retryReply.success) {
+            console.log(JSON.stringify({ component: "agent-turn-runtime", event: "context-overflow-recovery-success", sessionId: input.sessionId }));
+            // Re-assign and continue the loop by processing retryReply below
+            // We need to handle the retryReply the same way as a normal reply
+            if (retryReply.type !== "tool_use") {
+              const content = retryReply.content.trim();
+              if (!content) {
+                emit({ type: "turn_failed", reason: "empty-response", message: "Agent runtime returned an empty response after overflow recovery" });
+                return events;
+              }
+              consecutiveSilentToolCalls = 0;
+              emit({ type: "assistant_message", content, reasoningContent: retryReply.reasoningContent, runtime: retryReply.metadata });
+              emit({ type: "turn_completed" });
+              return events;
+            }
+            // For tool_use after recovery, push tool calls into messages and continue the loop
+            // We'll let the next iteration handle it by injecting an assistant placeholder
+            // Actually, we need to process tool_use inline here — fall through won't work cleanly.
+            // Simplest: re-enter the loop by using `continue` after setting up state.
+            // But we can't reassign `reply` (const). Instead, just continue — next iteration will re-generate.
+            // The truncated messages are already set, so next loop iteration will call generate() again.
+            // But wait — we already got a successful retryReply with tool_use. We should not re-generate.
+            // Best approach: push the tool uses as messages and continue the loop to execute them.
+            if (retryReply.reasoningContent) {
+              const retryPolicy = input.reasoningPolicy ?? "passback-on-tool-loop";
+              if (retryPolicy !== "strip") {
+                messages.push({ type: "message", role: "assistant", content: "", reasoning_content: retryReply.reasoningContent });
+              }
+            }
+            for (const toolUse of retryReply.toolUses) {
+              if (executedToolSteps >= maxSteps) {
+                emit({ type: "turn_failed", reason: "tool-loop-limit", message: `工具循环超过 ${maxSteps} 步，已停止本轮调用。`, data: { maxSteps, recentToolCalls } });
+                return events;
+              }
+              emit({ type: "tool_call", id: toolUse.id, toolName: toolUse.name, input: toolUse.input, runtime: retryReply.metadata });
+              messages.push({ type: "tool_call", id: toolUse.id, name: toolUse.name, input: toolUse.input });
+              recentToolCalls.push(toolUse.name);
+
+              const toolStartedAt = Date.now();
+              const signature = toolSignature(toolUse.name, toolUse.input);
+              const duplicateResult = toolResultsBySignature.get(signature);
+              const toolResult = duplicateResult
+                ? createDuplicateToolResult(duplicateResult)
+                : await input.executeTool({
+                  sessionId: input.sessionId,
+                  toolName: toolUse.name,
+                  input: toolUse.input,
+                  permissionMode: input.permissionMode,
+                  sessionConfig: input.sessionConfig,
+                  ...(input.canvasContext ? { canvasContext: input.canvasContext } : {}),
+                });
+              const toolDurationMs = Date.now() - toolStartedAt;
+              executedToolSteps += 1;
+              console.log(JSON.stringify({ component: "agent-turn-runtime", event: "tool-executed", sessionId: input.sessionId, toolName: toolUse.name, ok: toolResult.ok, durationMs: toolDurationMs, duplicate: Boolean(duplicateResult), step: executedToolSteps }));
+              if (!duplicateResult) {
+                toolResultsBySignature.set(signature, toolResult);
+              }
+              emit({ type: "tool_result", id: toolUse.id, toolName: toolUse.name, result: toolResult, runtime: retryReply.metadata });
+              messages.push({
+                type: "tool_result",
+                toolCallId: toolUse.id,
+                name: toolUse.name,
+                content: toolResultContent(toolResult),
+                ...(toolResult.data !== undefined ? { data: toolResult.data } : {}),
+                metadata: { toolResult },
+              });
+
+              if (isPendingConfirmationResult(toolResult)) {
+                emit({ type: "confirmation_required", id: toolResult.confirmation?.id ?? toolUse.id, toolName: toolUse.name, result: toolResult, sourceToolUseId: toolUse.id });
+                return events;
+              }
+              if (input.shouldContinueAfterToolResult && !input.shouldContinueAfterToolResult({ toolName: toolUse.name, result: toolResult })) {
+                emit({ type: "turn_failed", reason: toolResult.error ?? "tool-execution-failed", message: toolResult.summary });
+                return events;
+              }
+              consecutiveSilentToolCalls += 1;
+            }
+            // After processing retry tool uses, continue the main loop for next generate
+            continue;
+          } else {
+            console.log(JSON.stringify({ component: "agent-turn-runtime", event: "context-overflow-recovery-failed", sessionId: input.sessionId, code: retryReply.code }));
+            // Fall through to emit failure with the retry's error
+            emit(buildFailureEvent(retryReply));
+            return events;
+          }
+        }
+      }
+
+      emit(buildFailureEvent(reply));
+      return events;
+    }
+
+    const usage = reply.metadata?.usage;
+    console.log(JSON.stringify({ component: "agent-turn-runtime", event: "generate-ok", sessionId: input.sessionId, type: reply.type ?? "message", durationMs: generateDurationMs, ...(usage ? { inputTokens: usage.input_tokens, outputTokens: usage.output_tokens } : {}) }));
+
+    if (reply.type !== "tool_use") {
+      const content = reply.content.trim();
+      if (!content) {
+        emit({ type: "turn_failed", reason: "empty-response", message: "Agent runtime returned an empty response" });
+        return events;
+      }
+      consecutiveSilentToolCalls = 0; // Fix: reset on assistant message
+      emit(
+        { type: "assistant_message", content, reasoningContent: reply.reasoningContent, runtime: reply.metadata },
+      );
+      emit(
+        { type: "turn_completed" },
+      );
+      return events;
+    }
+
+    if (reply.toolUses.length === 0) {
+      emit({ type: "turn_failed", reason: "empty-tool-use", message: "Agent runtime received a tool_use reply without executable tools" });
+      return events;
+    }
+
+    // Insert assistant message with reasoning_content before tool calls
+    // Controlled by reasoningPolicy: strip (never), passback-on-tool-loop (default, tool loops only), always-passback (always)
+    const policy = input.reasoningPolicy ?? "passback-on-tool-loop";
+    if (reply.reasoningContent && policy !== "strip") {
+      messages.push({ type: "message", role: "assistant", content: "", reasoning_content: reply.reasoningContent });
+    }
+
+    // Determine if all tools in this batch are read-only (parallelizable)
+    const PARALLEL_SAFE_TOOLS = new Set([
+      "Read", "Glob", "Grep", "WebSearch", "WebFetch",
+      "GetGoals", "LearningGuide", "Recall",
+    ]);
+
+    const allParallelSafe = reply.toolUses.length > 1 && reply.toolUses.every(tu => PARALLEL_SAFE_TOOLS.has(tu.name));
+
+    if (allParallelSafe) {
+      // --- Parallel execution path ---
+      // Pre-check: enough steps remaining?
+      if (executedToolSteps + reply.toolUses.length > maxSteps) {
+        emit({
+          type: "turn_failed",
+          reason: "tool-loop-limit",
+          message: `工具循环超过 ${maxSteps} 步，已停止本轮调用。`,
+          data: { maxSteps, recentToolCalls },
+        });
+        return events;
+      }
+
+      console.log(JSON.stringify({ component: "agent-turn-runtime", event: "parallel-tool-execution", count: reply.toolUses.length, sessionId: input.sessionId }));
+
+      // Emit all tool_call events first
+      for (const toolUse of reply.toolUses) {
+        emit({
+          type: "tool_call",
+          id: toolUse.id,
+          toolName: toolUse.name,
+          input: toolUse.input,
+          runtime: reply.metadata,
+        });
+        messages.push({ type: "tool_call", id: toolUse.id, name: toolUse.name, input: toolUse.input });
+        recentToolCalls.push(toolUse.name);
+      }
+
+      // Execute all tools in parallel
+      const parallelResults = await Promise.all(
+        reply.toolUses.map(async (toolUse) => {
+          const toolStartedAt = Date.now();
+          const signature = toolSignature(toolUse.name, toolUse.input);
+          const duplicateResult = toolResultsBySignature.get(signature);
+          const toolResult = duplicateResult
+            ? createDuplicateToolResult(duplicateResult)
+            : await input.executeTool({
+              sessionId: input.sessionId,
+              toolName: toolUse.name,
+              input: toolUse.input,
+              permissionMode: input.permissionMode,
+              sessionConfig: input.sessionConfig,
+              ...(input.canvasContext ? { canvasContext: input.canvasContext } : {}),
+            });
+          const toolDurationMs = Date.now() - toolStartedAt;
+          return { toolUse, toolResult, toolDurationMs, signature, isDuplicate: Boolean(duplicateResult) };
+        }),
+      );
+
+      // Process results sequentially to maintain event order
+      for (const { toolUse, toolResult, toolDurationMs, signature, isDuplicate } of parallelResults) {
+        if (input.signal?.aborted) {
+          emit({ type: "turn_completed" });
+          return events;
+        }
+
+        executedToolSteps += 1;
+        console.log(JSON.stringify({ component: "agent-turn-runtime", event: "tool-executed", sessionId: input.sessionId, toolName: toolUse.name, ok: toolResult.ok, durationMs: toolDurationMs, duplicate: isDuplicate, step: executedToolSteps }));
+        if (!isDuplicate) {
+          toolResultsBySignature.set(signature, toolResult);
+        }
+        emit({
+          type: "tool_result",
+          id: toolUse.id,
+          toolName: toolUse.name,
+          result: toolResult,
+          runtime: reply.metadata,
+        });
+        messages.push({
+          type: "tool_result",
+          toolCallId: toolUse.id,
+          name: toolUse.name,
+          content: toolResultContent(toolResult),
+          ...(toolResult.data !== undefined ? { data: toolResult.data } : {}),
+          metadata: { toolResult },
+        });
+
+        if (isPendingConfirmationResult(toolResult)) {
+          emit({
+            type: "confirmation_required",
+            id: toolResult.confirmation?.id ?? toolUse.id,
+            toolName: toolUse.name,
+            result: toolResult,
+            sourceToolUseId: toolUse.id,
+          });
+          return events;
+        }
+
+        if (input.shouldContinueAfterToolResult && !input.shouldContinueAfterToolResult({ toolName: toolUse.name, result: toolResult })) {
+          emit({
+            type: "turn_failed",
+            reason: toolResult.error ?? "tool-execution-failed",
+            message: toolResult.summary,
+          });
+          return events;
+        }
+
+        consecutiveSilentToolCalls += 1;
+      }
+    } else {
+      // --- Sequential execution path (existing behavior) ---
+      for (const toolUse of reply.toolUses) {
+        if (executedToolSteps >= maxSteps) {
+          emit({
+            type: "turn_failed",
+            reason: "tool-loop-limit",
+            message: `工具循环超过 ${maxSteps} 步，已停止本轮调用。`,
+            data: { maxSteps, recentToolCalls },
+          });
+          return events;
+        }
+
+        emit({
+          type: "tool_call",
+          id: toolUse.id,
+          toolName: toolUse.name,
+          input: toolUse.input,
+          runtime: reply.metadata,
+        });
+        messages.push({ type: "tool_call", id: toolUse.id, name: toolUse.name, input: toolUse.input });
+        recentToolCalls.push(toolUse.name);
+
+        const toolStartedAt = Date.now();
+        const signature = toolSignature(toolUse.name, toolUse.input);
+        const duplicateResult = toolResultsBySignature.get(signature);
+        const toolResult = duplicateResult
+          ? createDuplicateToolResult(duplicateResult)
+          : await input.executeTool({
+            sessionId: input.sessionId,
+            toolName: toolUse.name,
+            input: toolUse.input,
+            permissionMode: input.permissionMode,
+            sessionConfig: input.sessionConfig,
+            ...(input.canvasContext ? { canvasContext: input.canvasContext } : {}),
+          });
+        const toolDurationMs = Date.now() - toolStartedAt;
+        executedToolSteps += 1;
+        console.log(JSON.stringify({ component: "agent-turn-runtime", event: "tool-executed", sessionId: input.sessionId, toolName: toolUse.name, ok: toolResult.ok, durationMs: toolDurationMs, duplicate: Boolean(duplicateResult), step: executedToolSteps }));
+        if (!duplicateResult) {
+          toolResultsBySignature.set(signature, toolResult);
+        }
+        emit({
+          type: "tool_result",
+          id: toolUse.id,
+          toolName: toolUse.name,
+          result: toolResult,
+          runtime: reply.metadata,
+        });
+        messages.push({
+          type: "tool_result",
+          toolCallId: toolUse.id,
+          name: toolUse.name,
+          content: toolResultContent(toolResult),
+          ...(toolResult.data !== undefined ? { data: toolResult.data } : {}),
+          metadata: { toolResult },
+        });
+
+        if (isPendingConfirmationResult(toolResult)) {
+          emit({
+            type: "confirmation_required",
+            id: toolResult.confirmation?.id ?? toolUse.id,
+            toolName: toolUse.name,
+            result: toolResult,
+            sourceToolUseId: toolUse.id,
+          });
+          return events;
+        }
+
+        if (input.shouldContinueAfterToolResult && !input.shouldContinueAfterToolResult({ toolName: toolUse.name, result: toolResult })) {
+          emit({
+            type: "turn_failed",
+            reason: toolResult.error ?? "tool-execution-failed",
+            message: toolResult.summary,
+          });
+          return events;
+        }
+
+        // Fix: silentToolCallThreshold — 递增连续无文本输出计数
+        consecutiveSilentToolCalls += 1;
+      }
+    }
+
+    // Fix: silentToolCallThreshold — 超过阈值时注入提示
+    if (silentThreshold > 0 && consecutiveSilentToolCalls >= silentThreshold) {
+      messages.push({
+        type: "message",
+        role: "system",
+        content: `注意：你已经连续执行了 ${consecutiveSilentToolCalls} 次工具调用而没有向用户输出任何文字。请在下一步中向用户汇报当前进展或结果。`,
+      });
+    }
+  }
+}

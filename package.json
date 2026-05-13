@@ -1,0 +1,63 @@
+{
+  "name": "novelfork",
+  "version": "0.4.0",
+  "private": true,
+  "description": "NovelFork — Forked from InkOS, specialized AI-assisted workbench for Chinese web novel creation",
+  "keywords": [
+    "ai-novel-writing",
+    "web-novel",
+    "chinese-novel",
+    "novel-generator",
+    "autonomous-writing",
+    "xuanhuan",
+    "xianxia",
+    "multi-agent",
+    "creative-writing-ai",
+    "cli"
+  ],
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/vivy1024/novelfork"
+  },
+  "scripts": {
+    "build": "pnpm -r build",
+    "dev": "pnpm -r dev",
+    "test": "pnpm -r test",
+    "lint": "pnpm -r lint",
+    "typecheck": "pnpm -r typecheck",
+    "bun:main": "bun run main.ts",
+    "bun:studio": "bun run main.ts",
+    "bun:build-client": "pnpm --dir packages/studio build:client",
+    "bun:compile": "pnpm --dir packages/studio compile",
+    "docs:verify": "bun run scripts/verify-docs.ts",
+    "verify:publish-manifests": "node scripts/verify-no-workspace-protocol.mjs packages/core packages/cli packages/studio",
+    "release": "pnpm build && pnpm test",
+    "version": "pnpm -r exec npm version"
+  },
+  "engines": {
+    "node": ">=22.5.0",
+    "pnpm": ">=9.0.0"
+  },
+  "dependencies": {
+    "glob": "13.0.6",
+    "idb": "8.0.3",
+    "tiktoken": "1.0.22"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.59.1",
+    "esbuild": "0.28.0"
+  },
+  "overrides": {
+    "@tiptap/core": "2.27.2",
+    "@tiptap/pm": "2.27.2",
+    "@tiptap/extension-code-block": "2.27.2",
+    "@tiptap/extension-text-style": "2.27.2",
+    "@tiptap/react": "2.27.2",
+    "@tiptap/starter-kit": "2.27.2"
+  },
+  "workspaces": [
+    "packages/*",
+    "!packages/desktop"
+  ]
+}

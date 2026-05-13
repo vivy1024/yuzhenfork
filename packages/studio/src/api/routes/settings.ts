@@ -1,0 +1,211 @@
+import { Hono } from "hono";
+import { loadUserConfig, updateUserConfig, getUserConfigPath } from "../lib/user-config-service.js";
+import { collectMetrics } from "../lib/metrics-service.js";
+import { buildStudioReleaseSnapshot } from "../lib/release-metadata.js";
+import { resolveRuntimeStoragePath } from "../lib/runtime-storage-paths.js";
+import { getCodexRuntimeCapabilityStatuses } from "../../shared/codex-runtime-status.js";
+import { setGlobalProxyUrl, setPerProviderProxy } from "../lib/provider-adapters/index.js";
+import type { UserConfigPatch } from "../../types/settings.js";
+import type { StudioReleaseSnapshot } from "../../shared/release-manifest.js";
+
+interface SettingsRouterOptions {
+  readonly root?: string;
+  readonly buildReleaseSnapshot?: (root: string) => Promise<StudioReleaseSnapshot>;
+}
+
+export function createSettingsRouter(options: SettingsRouterOptions = {}) {
+  const app = new Hono();
+
+  // 获取完整用户配置
+  app.get("/user", async (c) => {
+    try {
+      const config = await loadUserConfig();
+      return c.json(config);
+    } catch (error) {
+      console.error("Failed to load user config:", error);
+      return c.json({ error: "Failed to load user config" }, 500);
+    }
+  });
+
+  // 更新用户配置（部分更新）
+  app.put("/user", async (c) => {
+    try {
+      const partial = await c.req.json<UserConfigPatch>();
+      const updated = await updateUserConfig(partial);
+
+      // 如果 proxy 配置变更，同步更新 provider adapter 层的代理设置
+      if (partial.proxy) {
+        setGlobalProxyUrl(updated.proxy?.platforms?.ai || undefined);
+        setPerProviderProxy(updated.proxy?.providers ?? {});
+      }
+
+      return c.json(updated);
+    } catch (error) {
+      console.error("Failed to update user config:", error);
+      return c.json({ error: "Failed to update user config" }, 500);
+    }
+  });
+
+  // 获取主题配置
+  app.get("/theme", async (c) => {
+    try {
+      const config = await loadUserConfig();
+      return c.json({ theme: config.preferences.theme });
+    } catch (error) {
+      console.error("Failed to load theme:", error);
+      return c.json({ error: "Failed to load theme" }, 500);
+    }
+  });
+
+  // 更新主题配置
+  app.put("/theme", async (c) => {
+    try {
+      const { theme } = await c.req.json<{ theme: "light" | "dark" | "auto" }>();
+      const updated = await updateUserConfig({
+        preferences: { theme },
+      });
+      return c.json({ theme: updated.preferences.theme });
+    } catch (error) {
+      console.error("Failed to update theme:", error);
+      return c.json({ error: "Failed to update theme" }, 500);
+    }
+  });
+
+  // 获取编辑器配置
+  app.get("/editor", async (c) => {
+    try {
+      const config = await loadUserConfig();
+      return c.json({
+        fontSize: config.preferences.fontSize,
+        fontFamily: config.preferences.fontFamily,
+        lineHeight: config.preferences.editorLineHeight,
+        tabSize: config.preferences.editorTabSize,
+        autoSave: config.preferences.autoSave,
+        autoSaveDelay: config.preferences.autoSaveDelay,
+      });
+    } catch (error) {
+      console.error("Failed to load editor config:", error);
+      return c.json({ error: "Failed to load editor config" }, 500);
+    }
+  });
+
+  // 更新编辑器配置
+  app.put("/editor", async (c) => {
+    try {
+      const editorPrefs = await c.req.json<Partial<{
+        fontSize: number;
+        fontFamily: string;
+        lineHeight: number;
+        tabSize: number;
+        autoSave: boolean;
+        autoSaveDelay: number;
+      }>>();
+
+      const updated = await updateUserConfig({
+        preferences: {
+          fontSize: editorPrefs.fontSize,
+          fontFamily: editorPrefs.fontFamily,
+          editorLineHeight: editorPrefs.lineHeight,
+          editorTabSize: editorPrefs.tabSize,
+          autoSave: editorPrefs.autoSave,
+          autoSaveDelay: editorPrefs.autoSaveDelay,
+        },
+      });
+
+      return c.json({
+        fontSize: updated.preferences.fontSize,
+        fontFamily: updated.preferences.fontFamily,
+        lineHeight: updated.preferences.editorLineHeight,
+        tabSize: updated.preferences.editorTabSize,
+        autoSave: updated.preferences.autoSave,
+        autoSaveDelay: updated.preferences.autoSaveDelay,
+      });
+    } catch (error) {
+      console.error("Failed to update editor config:", error);
+      return c.json({ error: "Failed to update editor config" }, 500);
+    }
+  });
+
+  // 获取快捷键配置
+  app.get("/shortcuts", async (c) => {
+    try {
+      const config = await loadUserConfig();
+      return c.json({ shortcuts: config.shortcuts });
+    } catch (error) {
+      console.error("Failed to load shortcuts:", error);
+      return c.json({ error: "Failed to load shortcuts" }, 500);
+    }
+  });
+
+  // 更新快捷键配置
+  app.put("/shortcuts", async (c) => {
+    try {
+      const { shortcuts } = await c.req.json<{ shortcuts: Record<string, string> }>();
+      const updated = await updateUserConfig({ shortcuts });
+      return c.json({ shortcuts: updated.shortcuts });
+    } catch (error) {
+      console.error("Failed to update shortcuts:", error);
+      return c.json({ error: "Failed to update shortcuts" }, 500);
+    }
+  });
+
+  // 获取系统指标
+  app.get("/metrics", async (c) => {
+    try {
+      // 从环境变量或默认路径获取项目根目录
+      const projectRoot = process.env.NOVELFORK_PROJECT_ROOT || process.cwd();
+      const metrics = await collectMetrics(projectRoot);
+      return c.json(metrics);
+    } catch (error) {
+      console.error("Failed to collect metrics:", error);
+      return c.json({ error: "Failed to collect metrics" }, 500);
+    }
+  });
+
+  // 获取版本 / 更新 / changelog 信息
+  app.get("/release", async (c) => {
+    try {
+      const projectRoot = options.root ?? process.env.NOVELFORK_PROJECT_ROOT ?? process.cwd();
+      const snapshotBuilder = options.buildReleaseSnapshot ?? buildStudioReleaseSnapshot;
+      const release = await snapshotBuilder(projectRoot);
+      return c.json(release);
+    } catch (error) {
+      console.error("Failed to load release metadata:", error);
+      return c.json({ error: "Failed to load release metadata" }, 500);
+    }
+  });
+
+  // 获取 runtime 状态：MCP、sandbox、storage 路径
+  app.get("/runtime-status", async (c) => {
+    try {
+      const config = await loadUserConfig();
+      const capabilities = getCodexRuntimeCapabilityStatuses();
+      return c.json({
+        storage: {
+          runtimeDir: resolveRuntimeStoragePath(),
+          userConfigPath: getUserConfigPath(),
+          providerStorePath: resolveRuntimeStoragePath("provider-runtime.json"),
+          sessionStorePath: resolveRuntimeStoragePath("sessions"),
+          transcriptStorePath: resolveRuntimeStoragePath("transcripts"),
+          checkpointStorePath: resolveRuntimeStoragePath("checkpoints"),
+        },
+        mcp: {
+          strategy: config.runtimeControls?.toolAccess?.mcpStrategy ?? "disabled",
+          servers: [], // MCP server registry 尚未实现真实连接管理
+          status: "planned" as const,
+        },
+        sandbox: {
+          mode: config.runtimeControls?.codexSandboxMode ?? undefined,
+          status: capabilities.find((cap) => cap.id === "codex.sandboxMode")?.status ?? "planned",
+          note: "Codex OS sandbox 尚未接入真实隔离环境",
+        },
+        capabilities,
+      });
+    } catch (error) {
+      console.error("Failed to load runtime status:", error);
+      return c.json({ error: "Failed to load runtime status" }, 500);
+    }
+  });
+
+  return app;
+}

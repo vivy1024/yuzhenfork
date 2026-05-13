@@ -1,0 +1,185 @@
+import type { ReactNode } from "react";
+
+import type { CanvasContext } from "../../shared/agent-native-workspace";
+import type { ToolResultArtifact } from "../tool-results";
+import type { NarratorSessionMode } from "../../shared/session-types";
+import type { SlashCommandCompactResult } from "./slash-command-registry";
+import { buildAbortEnvelope, buildMessageEnvelope } from "./runtime";
+import {
+  ConversationSurface,
+  type ConversationConfirmation,
+  type ConversationRecoveryNotice,
+  type ConversationSessionConfigPatch,
+  type ConversationStatus,
+  type ConversationSurfaceMessage,
+  type SessionDetailData,
+} from "./surface";
+
+export type ConversationRouteMessage = ConversationSurfaceMessage;
+export type ConversationRouteStatus = ConversationStatus;
+export type ConversationRouteConfirmation = ConversationConfirmation;
+
+export type ConversationRouteClientEnvelope = ReturnType<typeof buildMessageEnvelope> | ReturnType<typeof buildAbortEnvelope>;
+
+export interface ConversationRouteProps {
+  sessionId?: string;
+  title?: string;
+  sessionMode?: NarratorSessionMode;
+  initialAck?: number;
+  canvasContext?: CanvasContext;
+  initialMessages?: readonly ConversationRouteMessage[];
+  initialStatus?: ConversationRouteStatus;
+  initialConfirmation?: ConversationRouteConfirmation | null;
+  initialRecoveryNotice?: ConversationRecoveryNotice | null;
+  sendDisabledReason?: string;
+  settingsHref?: string;
+  footerActions?: ReactNode;
+  createMessageId?: () => string;
+  onClientEnvelope?: (envelope: ConversationRouteClientEnvelope) => void;
+  onSendMessage?: (content: string) => void;
+  onAbortSession?: () => void;
+  onUpdateSessionConfig?: (patch: ConversationSessionConfigPatch) => Promise<void> | void;
+  onCompactSession?: (instructions?: string) => Promise<SlashCommandCompactResult>;
+  onTruncateToMessage?: (messageId: string) => Promise<void> | void;
+  onDeleteMessage?: (messageId: string) => Promise<void> | void;
+  onApproveConfirmation?: (id: string, answers?: Record<string, unknown>) => void;
+  onRejectConfirmation?: (id: string) => void;
+  onOpenArtifact?: (artifact: ToolResultArtifact) => void;
+  /** 历史消息分页 */
+  hasPreviousMessages?: boolean;
+  onLoadPreviousMessages?: () => Promise<ConversationSurfaceMessage[]>;
+  /** 工具栏回调 */
+  onEditTitle?: (newTitle: string) => void;
+  onGenerateTitle?: () => void;
+  onArchive?: () => void;
+  onForkSession?: (title?: string) => void;
+  /** 更新工作目录 */
+  onUpdateWorkDir?: (path: string) => Promise<void> | void;
+  /** 固定会话 */
+  onPin?: () => void;
+  isPinned?: boolean;
+  /** 附件上传回调 */
+  onAttach?: (files: FileList) => void;
+  /** 会话详情数据 */
+  sessionDetail?: SessionDetailData;
+}
+
+const defaultStatus: ConversationRouteStatus = { state: "idle", label: "未连接" };
+
+function createDefaultMessageId() {
+  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
+    return crypto.randomUUID();
+  }
+
+  return `client-${Date.now()}`;
+}
+
+export function ConversationRoute({
+  sessionId,
+  title = "叙述者",
+  sessionMode,
+  initialAck,
+  canvasContext,
+  initialMessages = [],
+  initialStatus = defaultStatus,
+  initialConfirmation = null,
+  initialRecoveryNotice = null,
+  sendDisabledReason,
+  settingsHref,
+  footerActions = null,
+  createMessageId = createDefaultMessageId,
+  onClientEnvelope = () => undefined,
+  onSendMessage,
+  onAbortSession,
+  onUpdateSessionConfig = () => undefined,
+  onCompactSession,
+  onTruncateToMessage,
+  onDeleteMessage,
+  onApproveConfirmation = () => undefined,
+  onRejectConfirmation = () => undefined,
+  onOpenArtifact,
+  hasPreviousMessages,
+  onLoadPreviousMessages,
+  onEditTitle,
+  onGenerateTitle,
+  onArchive,
+  onForkSession,
+  onUpdateWorkDir,
+  onPin,
+  isPinned,
+  onAttach,
+  sessionDetail,
+}: ConversationRouteProps) {
+  if (!sessionId) {
+    return (
+      <section data-testid="conversation-route-empty" className="flex h-full w-full flex-1 flex-col items-center justify-center p-6">
+        <h2>选择或新建叙述者会话</h2>
+        <p>请从 shell 会话列表选择一个会话，或创建新会话后开始对话。</p>
+      </section>
+    );
+  }
+
+  const handleSend = (content: string) => {
+    if (onSendMessage) {
+      onSendMessage(content);
+      return;
+    }
+
+    onClientEnvelope(
+      buildMessageEnvelope({
+        sessionId,
+        messageId: createMessageId(),
+        content,
+        sessionMode,
+        ack: initialAck,
+        canvasContext,
+      }),
+    );
+  };
+
+  const handleAbort = () => {
+    if (onAbortSession) {
+      onAbortSession();
+      return;
+    }
+
+    onClientEnvelope(buildAbortEnvelope({ sessionId }));
+  };
+
+  return (
+    <section data-testid="conversation-route" className="flex h-full w-full min-h-0 min-w-0 flex-1" data-session-id={sessionId}>
+      <ConversationSurface
+        title={title}
+        sessionId={sessionId}
+        status={initialStatus}
+        messages={initialMessages}
+        pendingConfirmation={initialConfirmation}
+        recoveryNotice={initialRecoveryNotice}
+        isRunning={initialStatus.state === "running" || initialStatus.narratorState === "working"}
+        streamingStartedAt={initialStatus.streamingStartedAt}
+        sendDisabledReason={sendDisabledReason}
+        settingsHref={settingsHref}
+        footerActions={footerActions}
+        onApproveConfirmation={onApproveConfirmation}
+        onRejectConfirmation={onRejectConfirmation}
+        onSend={handleSend}
+        onAbort={handleAbort}
+        onUpdateSessionConfig={onUpdateSessionConfig}
+        onCompactSession={onCompactSession}
+        onTruncateToMessage={onTruncateToMessage}
+        onDeleteMessage={onDeleteMessage}
+        onOpenArtifact={onOpenArtifact}
+        hasPreviousMessages={hasPreviousMessages}
+        onLoadPreviousMessages={onLoadPreviousMessages}
+        onEditTitle={onEditTitle}
+        onGenerateTitle={onGenerateTitle}
+        onArchive={onArchive}
+        onForkSession={onForkSession}
+        onUpdateWorkDir={onUpdateWorkDir}
+        onPin={onPin}
+        isPinned={isPinned}
+        sessionDetail={sessionDetail}
+      />
+    </section>
+  );
+}
