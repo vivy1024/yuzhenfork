@@ -2,9 +2,9 @@ node_modules/
 dist/
 target/
 /books/
-plugins/
 skills/
-novelfork.json
+# novelfork.json — 健身项目需要跟踪此配置
+# plugins/ — 健身插件需要跟踪
 *.log
 package-lock.json
 .env
@@ -19,7 +19,7 @@ _tmp_*
 test-project/
 packages/studio/.test-workspace/
 packages/studio/books/
-packages/studio/novelfork.json
+# packages/studio/novelfork.json — 不再忽略
 *.db
 *.sqlite
 *.sqlite3
@@ -55,3 +55,6 @@ packages/studio/src/api/embedded-assets.generated.ts
 cockpit-tools/
 .narrafork-reference/
 .novelfork-worktrees/
+
+# 健身 Agent 运行时数据
+.runtime-fitness/

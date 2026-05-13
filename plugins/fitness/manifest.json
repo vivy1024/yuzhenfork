@@ -1,0 +1,36 @@
+{
+  "name": "yuzhen-fitness-plugin",
+  "version": "0.1.0",
+  "description": "玉珍健身 Agent 插件 — 提供健身教练、安全评估、营养规划能力",
+  "projectType": "fitness",
+  "scope": "fitness",
+  "entry": "./index.ts",
+  "agents": [
+    {
+      "id": "fitness-coach",
+      "name": "健身教练",
+      "description": "根据用户身体数据和目标，制定个性化训练计划",
+      "systemPromptFile": "./prompts/coach.md"
+    },
+    {
+      "id": "safety-assessor",
+      "name": "安全评估员",
+      "description": "评估训练动作对用户的安全性，识别禁忌症",
+      "systemPromptFile": "./prompts/safety-assessor.md"
+    },
+    {
+      "id": "nutrition-planner",
+      "name": "营养规划师",
+      "description": "根据 TDEE 和目标制定饮食方案",
+      "systemPromptFile": "./prompts/nutrition-planner.md"
+    }
+  ],
+  "tools": [
+    "tdee.calculate",
+    "volume.calculate",
+    "safety.check_contraindications"
+  ],
+  "mcpDependencies": [
+    "daml-rag"
+  ]
+}
