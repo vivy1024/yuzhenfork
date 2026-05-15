@@ -394,7 +394,10 @@ export async function callMcpToolViaManaged(
     const hasTool = [...managed.client.tools].some((t) => t.name === toolName);
     if (hasTool) {
       try {
-        const result = await managed.client.callTool(toolName, input);
+        const result = await managed.client.callTool({ name: toolName, arguments: input });
+        if (typeof result === "object" && "success" in result && !(result as any).success) {
+          return { content: JSON.stringify(result), isError: true };
+        }
         const content = typeof result === "string" ? result : JSON.stringify(result);
         return { content, isError: false };
       } catch (error) {
