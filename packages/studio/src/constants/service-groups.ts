@@ -11,7 +11,7 @@ export const GROUP_ORDER: ReadonlyArray<EndpointGroup> = [
 export const GROUP_LABELS: Record<EndpointGroup, string> = {
   overseas: "海外原厂",
   china: "国产原厂",
-  aggregator: "聚合 / 二手 API",
+  aggregator: "聚合 API",
   local: "本地 / 订阅",
   codingPlan: "CodingPlan",
 };
