@@ -25,7 +25,7 @@ Open-source AI Agent that autonomously writes, audits, and revises novels — wi
 
 **InkOS TUI is here!** — run `inkos tui` to launch a full-screen interactive dashboard. Conversational creation, natural-language book operations, slash command autocomplete, themed animations — TUI, Studio, and OpenClaw share the same interaction kernel.
 
-**v1.3.11 Studio service and model configuration update** — hardens custom/local model connection tests, prevents non-ASCII API key crashes, restores service deletion, persists radar history, refreshes genre management, and carries requested long-form line ratios into planning.
+**v1.3.11 Studio service and aggregator update** — adds [kkaiapi](https://en.kkaiapi.com) as a model service option, hardens custom/local model connection tests, prevents non-ASCII API key crashes, restores service deletion, persists radar history, refreshes genre management, and carries requested long-form line ratios into planning.
 
 **Native English novel writing now supported！** — 10 built-in English genre profiles with dedicated pacing rules, fatigue word lists, and audit dimensions. Set `--lang en` and go.
 
