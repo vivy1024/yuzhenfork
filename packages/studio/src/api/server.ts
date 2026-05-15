@@ -1035,14 +1035,22 @@ export async function startStudioServer(
     // setupMonitorWebSocket(startedServer, ctx);
   }
 
-  // 自动连接 MCP servers（autoConnect=true 的）
-  try {
-    const { initializeMcpTools } = await import("./lib/session-tool-registry.js");
-    const mcpResult = await initializeMcpTools();
-    if (mcpResult.connected > 0) {
-      console.log(`[startup] MCP auto-connected: ${mcpResult.connected} server(s), ${mcpResult.tools} tool(s)`);
+  // 自动连接 MCP servers — 通过内部 HTTP 调用（使用 core MCPClientImpl，已验证兼容 Bun）
+  setTimeout(async () => {
+    try {
+      const res = await fetch(`http://localhost:${port}/api/mcp/servers`);
+      const { servers } = await res.json() as { servers: Array<{ id: string; status: string }> };
+      for (const server of servers) {
+        if (server.status !== "connected") {
+          const startRes = await fetch(`http://localhost:${port}/api/mcp/servers/${server.id}/start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+          const result = await startRes.json() as { ok?: boolean; tools?: Array<{ name: string }> };
+          if (result.ok) {
+            console.log(`[startup] MCP auto-connected: ${server.id} (${result.tools?.length ?? 0} tools)`);
+          }
+        }
+      }
+    } catch (mcpError) {
+      console.warn(`[startup] MCP auto-connect failed:`, mcpError instanceof Error ? mcpError.message : mcpError);
     }
-  } catch (mcpError) {
-    console.warn(`[startup] MCP auto-connect failed:`, mcpError instanceof Error ? mcpError.message : mcpError);
-  }
+  }, 1000); // 延迟 1 秒等 HTTP server 就绪
 }

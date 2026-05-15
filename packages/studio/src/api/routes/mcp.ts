@@ -234,6 +234,26 @@ export function createMCPRouter(projectRoot: string, options: MCPRouterOptions =
     try {
       await client.connect();
       const tools = [...client.tools].map((tool) => ({ name: tool.name, description: tool.description }));
+
+      // 注册 MCP 工具到 session tool registry（让对话时能调用）
+      try {
+        const { registerPluginTools } = await import("../lib/session-tool-registry.js");
+        const MCP_TOOL_PREFIX = "mcp__";
+        const serverSlug = (entry.name ?? entry.id).replace(/[^a-zA-Z0-9]/g, "_");
+        const sessionTools = [...client.tools].map((tool) => ({
+          name: `${MCP_TOOL_PREFIX}${serverSlug}__${tool.name}`,
+          description: `[MCP: ${entry.name}] ${tool.description ?? tool.name}`,
+          inputSchema: tool.inputSchema ?? { type: "object" as const, properties: {}, required: [] as string[], additionalProperties: false },
+          risk: "read" as const,
+          renderer: "tool.mcp" as const,
+          enabledForModes: ["ask", "edit", "allow", "read", "plan"] as string[],
+          visibility: "author" as const,
+        }));
+        registerPluginTools(sessionTools);
+      } catch (regError) {
+        console.warn(`[mcp/start] Failed to register tools to session registry:`, regError);
+      }
+
       return c.json({ ok: true, status: client.state, tools });
     } catch (error) {
       managedServers.delete(id);
@@ -344,4 +364,44 @@ export function createMCPRouter(projectRoot: string, options: MCPRouterOptions =
   });
 
   return app;
+}
+
+/**
+ * 全局 MCP 工具调用函数 — 供 session-tool-executor 使用
+ * 解析 mcp__<serverSlug>__<toolName> 格式，找到对应的 MCPClientImpl 执行
+ */
+export async function callMcpToolViaManaged(
+  fullToolName: string,
+  input: Record<string, unknown>,
+): Promise<{ content: string; isError: boolean }> {
+  // 解析工具名：mcp__DAML_RAG_________search_exercises → server slug + tool name
+  const prefix = "mcp__";
+  if (!fullToolName.startsWith(prefix)) {
+    return { content: `Not an MCP tool: ${fullToolName}`, isError: true };
+  }
+
+  const withoutPrefix = fullToolName.slice(prefix.length);
+  // 找到最后一个 __ 分隔符（tool name 中不含 __）
+  const lastSep = withoutPrefix.lastIndexOf("__");
+  if (lastSep === -1) {
+    return { content: `Invalid MCP tool name format: ${fullToolName}`, isError: true };
+  }
+
+  const toolName = withoutPrefix.slice(lastSep + 2);
+
+  // 在所有 managed servers 中查找能处理这个工具的
+  for (const [, managed] of managedServers) {
+    const hasTool = [...managed.client.tools].some((t) => t.name === toolName);
+    if (hasTool) {
+      try {
+        const result = await managed.client.callTool(toolName, input);
+        const content = typeof result === "string" ? result : JSON.stringify(result);
+        return { content, isError: false };
+      } catch (error) {
+        return { content: `MCP tool error: ${error instanceof Error ? error.message : String(error)}`, isError: true };
+      }
+    }
+  }
+
+  return { content: `No MCP server has tool: ${toolName}`, isError: true };
 }

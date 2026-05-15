@@ -570,6 +570,7 @@ export async function initializeMcpTools(): Promise<{ connected: number; tools: 
 
     const registry = getMcpRegistry({
       mcpStrategy: config.runtimeControls.toolAccess.mcpStrategy,
+      defaultRisk: "read", // 健身工具默认为只读（不需要确认）
     });
 
     // Convert McpServerEntry to McpServerConfig format
