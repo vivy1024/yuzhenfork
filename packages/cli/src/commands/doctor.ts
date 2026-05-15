@@ -268,6 +268,11 @@ export const doctorCommand = new Command("doctor")
           ok: false,
           detail: "No LLM config available (no project config or global .env)",
         });
+        checks.push({
+          name: "  Hint",
+          ok: false,
+          detail: "Run `inkos setup`, `inkos config set-global`, or add LLM settings to the project .env file.",
+        });
       } else {
         checks.push({
           name: "LLM Config",
@@ -325,6 +330,14 @@ export const doctorCommand = new Command("doctor")
           ok: connected,
           detail: connected ? detectedDetail : lastError.split("\n")[0]!,
         });
+
+        if (!connected && /\b(?:401|403|429)\b|unauthorized|forbidden|quota|额度|余额|配额/i.test(lastError)) {
+          checks.push({
+            name: "  Hint",
+            ok: false,
+            detail: "检查 API Key 是否正确、模型是否可用，以及账号余额或配额是否足够。",
+          });
+        }
 
         if (!connected && llmConfig.provider === "openai") {
           checks.push({

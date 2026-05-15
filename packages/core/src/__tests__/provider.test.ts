@@ -181,6 +181,7 @@ describe("chatCompletion via pi-ai", () => {
 
     expect(error.message).toContain("API 返回 400");
     expect(error.message).toContain("temperature");
+    expect(error.message).not.toMatch(/kkaiapi/i);
   });
 
   it("wraps 401 errors with an unauthorized message", async () => {
@@ -203,6 +204,7 @@ describe("chatCompletion via pi-ai", () => {
     );
 
     expect(error.message).toContain("无法连接到 API 服务");
+    expect(error.message).not.toMatch(/kkaiapi/i);
   });
 
   it("retries transient socket termination errors before failing the chapter pipeline", async () => {
@@ -229,6 +231,25 @@ describe("chatCompletion via pi-ai", () => {
     const opts = mockStreamSimple.mock.calls[0]?.[2] as Record<string, unknown>;
     expect(opts.temperature).toBe(0.3);
     expect(opts.maxTokens).toBe(256);
+  });
+
+  it("drops non-ByteString headers before calling pi-ai", async () => {
+    mockStreamSimple.mockReturnValue(makeTextStream("ok"));
+
+    const client = makeClient(0.7, {
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        headers: {
+          "X-Valid": "ok",
+          "X-Bad": "服务测试",
+        },
+      },
+    });
+    await chatCompletion(client, "test-model", [{ role: "user", content: "hi" }]);
+
+    const opts = mockStreamSimple.mock.calls[0]?.[2] as { headers?: Record<string, string> };
+    expect(opts.headers).toMatchObject({ "User-Agent": "InkOS/1.3.5", "X-Valid": "ok" });
+    expect(opts.headers).not.toHaveProperty("X-Bad");
   });
 
   it("uses client defaults when no per-call overrides are provided", async () => {
@@ -296,6 +317,71 @@ describe("chatCompletion via pi-ai", () => {
     expect(fetchMock).toHaveBeenCalledOnce();
     expect(mockCompleteSimple).not.toHaveBeenCalled();
     expect(mockStreamSimple).not.toHaveBeenCalled();
+
+    vi.unstubAllGlobals();
+  });
+
+  it("rejects non-ASCII API keys before native custom fetch builds headers", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeClient(0.7, {
+      service: "custom",
+      stream: false,
+      _apiKey: "sk-test测试",
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        provider: "openai",
+        baseUrl: "https://gateway.example/v1",
+      },
+    });
+
+    const error = await captureError(
+      chatCompletion(client, "gpt-5.4", [{ role: "user", content: "ping" }]),
+    );
+
+    expect(error.message).toContain("non-ASCII");
+    expect(fetchMock).not.toHaveBeenCalled();
+    vi.unstubAllGlobals();
+  });
+
+  it("uses native fetch transport for kkaiapi chat and sanitizes headers", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        choices: [{ message: { content: "kkai ok" } }],
+        usage: { prompt_tokens: 3, completion_tokens: 2, total_tokens: 5 },
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const client = makeClient(0.7, {
+      service: "kkaiapi",
+      stream: false,
+      _piModel: {
+        ...MOCK_PI_MODEL,
+        provider: "openai",
+        baseUrl: "https://api.kkaiapi.com/v1",
+        headers: {
+          "X-Valid": "ok",
+          "X-Bad": "服务测试",
+        },
+      },
+    });
+    const result = await chatCompletion(client, "deepseek-v4-flash", [{ role: "user", content: "nihao" }]);
+
+    expect(result.content).toBe("kkai ok");
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(mockCompleteSimple).not.toHaveBeenCalled();
+    expect(mockStreamSimple).not.toHaveBeenCalled();
+
+    const init = fetchMock.mock.calls[0]?.[1] as { headers?: Record<string, string> };
+    expect(init.headers).toMatchObject({
+      Authorization: "Bearer test-key",
+      "Content-Type": "application/json",
+      "X-Valid": "ok",
+    });
+    expect(init.headers).not.toHaveProperty("X-Bad");
 
     vi.unstubAllGlobals();
   });
@@ -556,6 +642,7 @@ describe("chatCompletion via pi-ai", () => {
 
     expect(result.content).toBe("本地自定义端点可用");
     expect(fetchMock).toHaveBeenCalledOnce();
+    expect(fetchMock.mock.calls[0]?.[1]?.headers).not.toHaveProperty("Authorization");
     expect(mockCompleteSimple).not.toHaveBeenCalled();
 
     vi.unstubAllGlobals();

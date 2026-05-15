@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import { fetchJson } from "../hooks/use-api";
 import { useServiceStore } from "../store/service";
-import { Eye, EyeOff, Loader2, ArrowLeft } from "lucide-react";
+import { Eye, EyeOff, Loader2, ArrowLeft, Trash2 } from "lucide-react";
 import {
+  deleteServiceConfig,
   matchServiceConfigEntryForDetail,
   probeServiceForDetail,
   rehydrateServiceConnectionStatus,
@@ -10,6 +11,7 @@ import {
   type ServiceDetailConnectionStatus as ConnectionStatus,
   type ServiceDetailDetectedConfig as DetectedConfig,
   type ServiceDetailModelInfo as ModelInfo,
+  type ServiceDetailVerifiedProbe as VerifiedProbe,
 } from "./service-detail-state";
 
 interface Nav {
@@ -52,6 +54,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   const [stream, setStream] = useState(true);
   const [detectedModel, setDetectedModel] = useState<string>("");
   const [detectedConfig, setDetectedConfig] = useState<DetectedConfig | null>(null);
+  const [verifiedProbe, setVerifiedProbe] = useState<VerifiedProbe | null>(null);
 
   // -- Unified connection status --
   const [status, setStatus] = useState<ConnectionStatus>({ state: "idle" });
@@ -125,7 +128,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
   // -- Handlers --
   const handleTest = async () => {
     const trimmedKey = apiKey.trim();
-    if (!trimmedKey) {
+    if (!trimmedKey && !isCustom) {
       setStatus({ state: "error", message: "请先输入 API Key" });
       return;
     }
@@ -144,19 +147,46 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
       });
       if (result.ok) {
         const models = result.models ?? [];
+        const verifiedApiFormat = result.detected?.apiFormat ?? apiFormat;
+        const verifiedStream = typeof result.detected?.stream === "boolean" ? result.detected.stream : stream;
+        const verifiedBaseUrl = isCustom ? (result.detected?.baseUrl ?? baseUrl.trim()) : "";
         if (result.detected?.apiFormat) setApiFormat(result.detected.apiFormat);
         if (typeof result.detected?.stream === "boolean") setStream(result.detected.stream);
         if (isCustom && result.detected?.baseUrl) setBaseUrl(result.detected.baseUrl);
         setDetectedModel(result.selectedModel ?? "");
         setDetectedConfig(result.detected ?? null);
+        setVerifiedProbe({
+          apiKey: trimmedKey,
+          baseUrl: verifiedBaseUrl,
+          apiFormat: verifiedApiFormat,
+          stream: verifiedStream,
+          models,
+          selectedModel: result.selectedModel,
+          detected: result.detected,
+        });
         setStatus({ state: "connected", models });
         setStoreModels(effectiveServiceId, models); // Write to global store
       } else {
+        setVerifiedProbe(null);
         setStatus({ state: "error", message: result.error ?? "连接失败" });
         clearStoreModels(effectiveServiceId);
       }
     } catch (e) {
+      setVerifiedProbe(null);
       setStatus({ state: "error", message: e instanceof Error ? e.message : "连接失败" });
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!window.confirm(`删除“${label}”的配置和密钥？`)) return;
+    setStatus({ state: "saving" });
+    try {
+      await deleteServiceConfig(effectiveServiceId);
+      clearStoreModels(effectiveServiceId);
+      await refreshServices();
+      nav.toServices();
+    } catch (e) {
+      setStatus({ state: "error", message: e instanceof Error ? e.message : "删除失败" });
     }
   };
 
@@ -180,6 +210,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
         stream,
         temperature,
         detectedModel,
+        verifiedProbe,
       });
       if (result.status.state === "connected") {
         if (result.detectedConfig?.apiFormat) setApiFormat(result.detectedConfig.apiFormat);
@@ -263,6 +294,13 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
             {status.state === "saving" && <Loader2 size={12} className="animate-spin" />}
             保存
           </button>
+          {(isConnected || isCustom) && (
+            <button onClick={handleDelete} disabled={isBusy}
+              className="flex items-center gap-1.5 px-3.5 py-2 text-xs rounded-lg border border-destructive/30 text-destructive hover:bg-destructive/10 transition-colors disabled:opacity-50">
+              <Trash2 size={12} />
+              删除配置
+            </button>
+          )}
           {/* Status feedback */}
           {status.state === "connected" && (
             <span className="text-xs text-emerald-500">

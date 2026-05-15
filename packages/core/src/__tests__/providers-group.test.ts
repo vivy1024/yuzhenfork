@@ -18,7 +18,7 @@ describe("InkosEndpoint.group", () => {
       "volcengine", "wenxin", "xiaomimimo", "zeroone", "zhipu",
     ].sort());
     expect(byGroup("aggregator")).toEqual([
-      "giteeai", "infiniai", "modelscope", "newapi", "openrouter", "ppio", "qiniu", "siliconcloud",
+      "giteeai", "infiniai", "kkaiapi", "modelscope", "newapi", "openrouter", "ppio", "qiniu", "siliconcloud",
     ].sort());
     expect(byGroup("local")).toEqual(["githubCopilot", "ollama"].sort());
     expect(byGroup("codingPlan")).toEqual([

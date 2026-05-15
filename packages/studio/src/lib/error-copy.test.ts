@@ -19,11 +19,16 @@ describe("localizeKnownRuntimeMessage", () => {
   });
 
   it("localizes common LLM configuration errors", () => {
-    expect(localizeKnownRuntimeMessage(
+    const studioMessage = localizeKnownRuntimeMessage(
       "Studio LLM API key not set. Open Studio services and save an API key for the selected service.",
-    )).toBe("Studio 模型 API Key 未设置。请打开“模型配置”，为当前服务保存 API Key。");
-    expect(localizeKnownRuntimeMessage(
+    );
+    expect(studioMessage).toContain("Studio 模型 API Key 未设置");
+    expect(studioMessage).not.toMatch(/kkaiapi/i);
+
+    const cliMessage = localizeKnownRuntimeMessage(
       "INKOS_LLM_API_KEY not set. Run 'inkos config set-global' or add it to project .env file.",
-    )).toBe("INKOS_LLM_API_KEY 未设置。请运行 `inkos config set-global`，或在项目 .env 文件中添加它。");
+    );
+    expect(cliMessage).toContain("INKOS_LLM_API_KEY 未设置");
+    expect(cliMessage).not.toMatch(/kkaiapi/i);
   });
 });

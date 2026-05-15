@@ -36,8 +36,30 @@ const INKOS_USER_AGENT = "InkOS/1.3.5";
 const UNKNOWN_MODEL_FALLBACK_MAX_TOKENS = 8192 * 3;
 const TRANSIENT_LLM_RETRIES = 2;
 
+function isByteString(value: string): boolean {
+  for (let i = 0; i < value.length; i++) {
+    if (value.charCodeAt(i) > 255) return false;
+  }
+  return true;
+}
+
+function isValidHeaderName(value: string): boolean {
+  return /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/.test(value);
+}
+
+function sanitizeHttpHeaders(headers?: Record<string, string>): Record<string, string> | undefined {
+  if (!headers) return undefined;
+  const sanitized: Record<string, string> = {};
+  for (const [key, value] of Object.entries(headers)) {
+    if (!isValidHeaderName(key)) continue;
+    if (!isByteString(value)) continue;
+    sanitized[key] = value;
+  }
+  return Object.keys(sanitized).length > 0 ? sanitized : undefined;
+}
+
 function mergeUserAgent(headers?: Record<string, string>): Record<string, string> {
-  return { "User-Agent": INKOS_USER_AGENT, ...(headers ?? {}) };
+  return { "User-Agent": INKOS_USER_AGENT, ...(sanitizeHttpHeaders(headers) ?? {}) };
 }
 
 export function createStreamMonitor(
@@ -171,7 +193,7 @@ export function createLLMClient(config: LLMConfig): LLMClient {
 
   const piApi = resolvePiApi(serviceName, config.apiFormat, (inkosProvider?.api ?? preset?.api) as PiApi) as PiApi;
   const baseUrl = config.baseUrl || inkosProvider?.baseUrl || preset?.baseUrl || "";
-  const extraHeaders = config.headers ?? parseEnvHeaders();
+  const extraHeaders = sanitizeHttpHeaders(config.headers ?? parseEnvHeaders());
   const compat = piApi === "openai-completions"
     ? resolveProviderCompat(inkosProvider, baseUrl)
     : undefined;
@@ -324,7 +346,7 @@ export function __resetFixedTemperatureWarnings(): void {
 
 // === Error Wrapping ===
 
-function wrapLLMError(error: unknown, context?: { readonly baseUrl?: string; readonly model?: string }): Error {
+function wrapLLMError(error: unknown, context?: { readonly baseUrl?: string; readonly model?: string; readonly service?: string }): Error {
   const msg = String(error);
   const ctxLine = context
     ? `\n  (baseUrl: ${context.baseUrl}, model: ${context.model})`
@@ -468,6 +490,9 @@ async function withTransientLLMRetry<T>(
 }
 
 function shouldUseNativeCustomTransport(client: LLMClient): boolean {
+  if (client.service === "kkaiapi" && client.provider === "openai") {
+    return true;
+  }
   if (client.service === "custom") {
     if (
       client.configSource === "studio"
@@ -491,11 +516,21 @@ function shouldUseNativeLocalOpenAICompatibleTransport(client: LLMClient): boole
 }
 
 function buildCustomHeaders(client: LLMClient): Record<string, string> {
-  return {
-    Authorization: `Bearer ${client._apiKey ?? ""}`,
+  const apiKey = sanitizeHeaderApiKey(client._apiKey);
+  return sanitizeHttpHeaders({
     "Content-Type": "application/json",
+    ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
     ...(client._piModel?.headers ?? {}),
-  };
+  }) ?? { "Content-Type": "application/json" };
+}
+
+function sanitizeHeaderApiKey(apiKey: string | undefined): string {
+  const trimmed = apiKey?.trim() ?? "";
+  if (!trimmed) return "";
+  if (!/^[\x20-\x7e]+$/.test(trimmed)) {
+    throw new Error("API Key contains non-ASCII characters; please remove any pasted Chinese notes or whitespace.");
+  }
+  return trimmed;
 }
 
 function joinSystemPrompt(messages: ReadonlyArray<LLMMessage>): string | undefined {
@@ -663,7 +698,7 @@ async function chatCompletionViaCustomAnthropicCompatible(
   onTextDelta?: (text: string) => void,
 ): Promise<LLMResponse> {
   const baseUrl = client._piModel?.baseUrl ?? "";
-  const errorCtx = { baseUrl, model };
+  const errorCtx = { baseUrl, model, service: client.service };
   const extra = stripReservedKeys(resolved.extra);
   const payload: Record<string, unknown> = {
     model,
@@ -676,16 +711,17 @@ async function chatCompletionViaCustomAnthropicCompatible(
   const system = joinSystemPrompt(messages);
   if (system) payload.system = system;
 
+  const apiKey = sanitizeHeaderApiKey(client._apiKey);
   const response = await fetchWithProxy(`${baseUrl.replace(/\/$/, "")}/messages`, {
     method: "POST",
-    headers: {
+    headers: sanitizeHttpHeaders({
       "User-Agent": INKOS_USER_AGENT,
-      "x-api-key": client._apiKey ?? "",
+      "x-api-key": apiKey,
       "anthropic-version": "2023-06-01",
       "Content-Type": "application/json",
-      Authorization: `Bearer ${client._apiKey ?? ""}`,
+      ...(apiKey ? { Authorization: `Bearer ${apiKey}` } : {}),
       ...(client._piModel?.headers ?? {}),
-    },
+    }) ?? { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
   }, client.proxyUrl);
 
@@ -770,7 +806,7 @@ async function chatCompletionViaCustomOpenAICompatible(
   }
   const baseUrl = client._piModel?.baseUrl ?? "";
   const headers = buildCustomHeaders(client);
-  const errorCtx = { baseUrl, model };
+  const errorCtx = { baseUrl, model, service: client.service };
   const extra = stripReservedKeys(resolved.extra);
 
   if (client.apiFormat === "responses") {
@@ -987,7 +1023,7 @@ export async function chatCompletion(
   };
   const onStreamProgress = options?.onStreamProgress;
   const onTextDelta = options?.onTextDelta;
-  const errorCtx = { baseUrl: client._piModel?.baseUrl ?? "(unknown)", model };
+  const errorCtx = { baseUrl: client._piModel?.baseUrl ?? "(unknown)", model, service: client.service };
 
   try {
     return await withTransientLLMRetry(
@@ -1024,6 +1060,7 @@ export async function chatWithTools(
     readonly maxTokens?: number;
   },
 ): Promise<ChatWithToolsResult> {
+  const errorCtx = { baseUrl: client._piModel?.baseUrl ?? "(unknown)", model, service: client.service };
   try {
     const resolved = {
       temperature: clampTemperatureForModel(
@@ -1035,7 +1072,7 @@ export async function chatWithTools(
     };
     return await chatWithToolsViaPiAi(client, model, messages, tools, resolved);
   } catch (error) {
-    throw wrapLLMError(error);
+    throw wrapLLMError(error, errorCtx);
   }
 }
 

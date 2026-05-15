@@ -157,6 +157,7 @@ const strings = {
   "radar.scanning": { zh: "扫描中...", en: "Scanning..." },
   "radar.summary": { zh: "市场概要", en: "Market Summary" },
   "radar.emptyHint": { zh: "点击「扫描市场」分析当前趋势和机会", en: "Click \"Scan Market\" to analyze trends and opportunities" },
+  "radar.history": { zh: "扫描历史", en: "Scan History" },
 
   // Doctor
   "doctor.title": { zh: "环境诊断", en: "Environment Check" },
@@ -173,6 +174,7 @@ const strings = {
 
   // Genre extras
   "genre.createNew": { zh: "创建新题材", en: "Create New Genre" },
+  "genre.name": { zh: "名称", en: "Name" },
   "genre.editGenre": { zh: "编辑", en: "Edit" },
   "genre.deleteGenre": { zh: "删除", en: "Delete" },
   "genre.confirmDelete": { zh: "确认删除此题材？", en: "Delete this genre?" },

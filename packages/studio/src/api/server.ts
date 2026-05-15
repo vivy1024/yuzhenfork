@@ -37,13 +37,14 @@ import {
   chatCompletion,
   buildExportArtifact,
   GLOBAL_ENV_PATH,
+  Scheduler,
   type ResolvedModel,
   type PipelineConfig,
   type ProjectConfig,
   type LogSink,
   type LogEntry,
 } from "@actalk/inkos-core";
-import { access, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { isSafeBookId } from "./safety.js";
 import { ApiError } from "./errors.js";
@@ -91,6 +92,20 @@ function summarizeResult(result: unknown): string {
   return String(result).slice(0, 200);
 }
 
+function compareServiceListItems(
+  left: { readonly service: string },
+  right: { readonly service: string },
+): number {
+  if (left.service === "kkaiapi" && right.service !== "kkaiapi") return -1;
+  if (right.service === "kkaiapi" && left.service !== "kkaiapi") return 1;
+  return 0;
+}
+
+function isHeaderSafeApiKey(value: string): boolean {
+  if (!value) return true;
+  return /^[\x21-\x7E]+$/.test(value);
+}
+
 const NON_TEXT_MODEL_ID_PARTS = [
   "image",
   "embedding",
@@ -101,6 +116,11 @@ const NON_TEXT_MODEL_ID_PARTS = [
   "audio",
   "moderation",
 ] as const;
+
+const SERVICE_MODELS_PROBE_TIMEOUT_MS = 4_000;
+const SERVICE_CHAT_PROBE_TIMEOUT_MS = 8_000;
+const MAX_DISCOVERED_MODELS_TO_PING = 2;
+const MAX_GENERIC_FALLBACK_MODELS_TO_PING = 2;
 
 function isTextChatModelId(modelId: string): boolean {
   const normalized = modelId.trim().toLowerCase();
@@ -498,15 +518,12 @@ function buildProbePlans(
 
   if (preferredApiFormat) {
     push(preferredApiFormat, preferredStream ?? false);
-    push(preferredApiFormat, !(preferredStream ?? false));
+    if (preferredStream) push(preferredApiFormat, false);
+    return candidates;
   }
-  const alternate = preferredApiFormat === "responses" ? "chat" : "responses";
-  push(alternate, false);
-  push(alternate, true);
+
   push("chat", false);
-  push("chat", true);
   push("responses", false);
-  push("responses", true);
   return candidates;
 }
 
@@ -530,14 +547,115 @@ function buildModelCandidates(args: {
   push(args.preferredModel);
   push(args.configModel);
   push(args.envModel ?? undefined);
-  for (const model of args.discoveredModels) push(model.id);
+  for (const model of args.discoveredModels.slice(0, MAX_DISCOVERED_MODELS_TO_PING)) push(model.id);
   if (args.includeGenericFallbacks === false) return candidates;
-  push("gpt-5.4");
-  push("gpt-4o");
-  push("claude-sonnet-4-6");
-  push("MiniMax-M2.7");
-  push("kimi-k2.5");
+  for (const fallback of [
+    "gpt-5.4",
+    "gpt-4o",
+    "claude-sonnet-4-6",
+    "MiniMax-M2.7",
+    "kimi-k2.5",
+  ].slice(0, MAX_GENERIC_FALLBACK_MODELS_TO_PING)) {
+    push(fallback);
+  }
   return candidates;
+}
+
+function yamlScalar(value: unknown): string {
+  return JSON.stringify(String(value ?? ""));
+}
+
+function radarTimestampForFilename(value: string | undefined): string {
+  const date = value ? new Date(value) : new Date();
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  return safeDate.toISOString().replace(/[:.]/g, "-");
+}
+
+async function saveRadarScan(root: string, result: unknown): Promise<string> {
+  const radarDir = join(root, "radar");
+  await mkdir(radarDir, { recursive: true });
+  const timestamp = typeof result === "object" && result !== null && "timestamp" in result
+    ? String((result as { timestamp?: unknown }).timestamp ?? "")
+    : "";
+  const fileName = `scan-${radarTimestampForFilename(timestamp)}.json`;
+  const filePath = join(radarDir, fileName);
+  await writeFile(filePath, JSON.stringify(result, null, 2), "utf-8");
+  return filePath;
+}
+
+async function loadRadarHistory(root: string): Promise<Array<{
+  readonly file: string;
+  readonly timestamp: string;
+  readonly marketSummary: string;
+  readonly summaryPreview: string;
+  readonly result: unknown;
+}>> {
+  const radarDir = join(root, "radar");
+  let files: string[] = [];
+  try {
+    files = await readdir(radarDir);
+  } catch {
+    return [];
+  }
+
+  const scans = await Promise.all(
+    files
+      .filter((file) => /^scan-.+\.json$/.test(file))
+      .map(async (file) => {
+        try {
+          const raw = await readFile(join(radarDir, file), "utf-8");
+          const result = JSON.parse(raw) as { timestamp?: unknown; marketSummary?: unknown };
+          const timestamp = typeof result.timestamp === "string"
+            ? result.timestamp
+            : file.replace(/^scan-/, "").replace(/\.json$/, "");
+          const marketSummary = typeof result.marketSummary === "string" ? result.marketSummary : "";
+          return {
+            file,
+            timestamp,
+            marketSummary,
+            summaryPreview: marketSummary.slice(0, 100),
+            result,
+          };
+        } catch {
+          return null;
+        }
+      }),
+  );
+
+  return scans
+    .filter((item): item is NonNullable<typeof item> => item !== null)
+    .sort((a, b) => b.file.localeCompare(a.file));
+}
+
+function fallbackTextModelsForEndpoint(
+  endpoint: ReturnType<typeof getAllEndpoints>[number] | undefined,
+  preset: ReturnType<typeof resolveServicePreset> | undefined,
+): Array<{ id: string; name: string }> {
+  const endpointModels = endpoint?.models
+    .filter((model) => model.enabled !== false)
+    .filter((model) => isTextChatModelId(model.id))
+    .map((model) => ({ id: model.id, name: model.id }))
+    ?? [];
+  if (endpointModels.length > 0) return endpointModels;
+  return preset?.knownModels?.map((id) => ({ id, name: id })) ?? [];
+}
+
+function shouldTrustStaticModelsWhenLiveListUnavailable(endpoint: ReturnType<typeof getAllEndpoints>[number] | undefined): boolean {
+  return endpoint?.group === "aggregator";
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  let timeout: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error(`${label} 超时（${timeoutMs}ms）`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
 }
 
 function formatServiceProbeError(args: {
@@ -610,8 +728,8 @@ async function fetchModelsFromServiceBaseUrl(
   const modelsUrl = modelsBaseUrl.replace(/\/$/, "") + "/models";
   try {
     const res = await fetchWithProxy(modelsUrl, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-      signal: AbortSignal.timeout(10_000),
+      headers: buildBearerAuthHeaders(apiKey),
+      signal: AbortSignal.timeout(SERVICE_MODELS_PROBE_TIMEOUT_MS),
     }, proxyUrl);
     if (!res.ok) {
       const body = await res.text().catch(() => "");
@@ -631,6 +749,15 @@ async function fetchModelsFromServiceBaseUrl(
       error: error instanceof Error ? error.message : String(error),
     };
   }
+}
+
+function buildBearerAuthHeaders(apiKey: string | undefined): Record<string, string> {
+  const trimmed = apiKey?.trim() ?? "";
+  if (!trimmed) return {};
+  if (!/^[\x20-\x7e]+$/.test(trimmed)) {
+    throw new Error("API Key 只能包含英文、数字和常见 ASCII 符号，请检查是否误粘贴了中文说明。");
+  }
+  return { Authorization: `Bearer ${trimmed}` };
 }
 
 async function probeServiceCapabilities(args: {
@@ -667,10 +794,45 @@ async function probeServiceCapabilities(args: {
   const discoveredFirstModel =
     discoveredModels.find((model) => isTextChatModelId(model.id))?.id
     ?? discoveredModels[0]?.id;
+  if (discoveredModels.length > 0) {
+    if (!discoveredFirstModel || !isTextChatModelId(discoveredFirstModel)) {
+      return {
+        ok: false,
+        models: discoveredModels,
+        error: "模型列表可访问，但没有发现可用于文本对话的模型。",
+      };
+    }
+    return {
+      ok: true,
+      models: discoveredModels,
+      selectedModel: discoveredFirstModel,
+      apiFormat: args.preferredApiFormat ?? "chat",
+      stream: args.preferredStream ?? false,
+      baseUrl: args.baseUrl,
+      modelsSource: "api",
+    };
+  }
+  if (shouldTrustStaticModelsWhenLiveListUnavailable(endpoint)) {
+    const models = fallbackTextModelsForEndpoint(endpoint, preset);
+    const selectedModel =
+      endpoint?.checkModel && models.some((model) => model.id === endpoint.checkModel)
+        ? endpoint.checkModel
+        : models[0]?.id;
+    if (selectedModel) {
+      return {
+        ok: true,
+        models,
+        selectedModel,
+        apiFormat: args.preferredApiFormat ?? "chat",
+        stream: args.preferredStream ?? false,
+        baseUrl: args.baseUrl,
+        modelsSource: "fallback",
+      };
+    }
+  }
   // Prefer live /models results; if unavailable, probe with the service's own check model before global defaults.
   const serviceFirstModel =
-    discoveredFirstModel
-    ?? endpoint?.checkModel
+    endpoint?.checkModel
     ?? preset?.knownModels?.[0]
     ?? endpoint?.models.find((model) => model.enabled !== false)?.id;
   const useDynamicLocalModels = baseService === "ollama";
@@ -686,7 +848,7 @@ async function probeServiceCapabilities(args: {
         ? llm.model
         : undefined
     : undefined;
-  const useCustomFallbacks = isCustomServiceId(args.service);
+  const useCustomFallbacks = false;
   const modelCandidates = buildModelCandidates({
     preferredModel: args.preferredModel ?? serviceFirstModel,
     configModel,
@@ -715,7 +877,7 @@ async function probeServiceCapabilities(args: {
         apiKey: args.apiKey.trim(),
         model,
         temperature: 0.7,
-        maxTokens: 2048,
+        maxTokens: 16,
         thinkingBudget: 0,
         proxyUrl: args.proxyUrl,
         apiFormat: plan.apiFormat,
@@ -723,18 +885,17 @@ async function probeServiceCapabilities(args: {
       } as ProjectConfig["llm"]);
 
       try {
-        await chatCompletion(client, model, [{ role: "user", content: "ping" }], { maxTokens: 2048 });
+        await withTimeout(
+          chatCompletion(client, model, [{ role: "user", content: "Reply with OK only." }], { maxTokens: 16 }),
+          SERVICE_CHAT_PROBE_TIMEOUT_MS,
+          "service connection test",
+        );
         const models = discoveredModels.length > 0
           ? discoveredModels
-          : endpoint?.models
-            .filter((m) => m.enabled !== false)
-            .filter((m) => isTextChatModelId(m.id))
-            .map((m) => ({ id: m.id, name: m.id }))
-            ?? preset?.knownModels?.map((id) => ({ id, name: id }))
-            ?? [{ id: model, name: model }];
+          : fallbackTextModelsForEndpoint(endpoint, preset);
         return {
           ok: true,
-          models,
+          models: models.length > 0 ? models : [{ id: model, name: model }],
           selectedModel: model,
           apiFormat: plan.apiFormat,
           stream: plan.stream,
@@ -1260,7 +1421,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       label: ep.label,
       group: ep.group,
       connected: Boolean(secrets.services[ep.id]?.apiKey),
-    }));
+    })).sort(compareServiceListItems);
 
     // Add custom services from inkos.json
     try {
@@ -1324,6 +1485,29 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     return c.json({ ok: true });
   });
 
+  app.delete("/api/v1/services/:service", async (c) => {
+    const service = c.req.param("service");
+    const config = await loadRawConfig(root);
+    const llm = (config.llm as Record<string, unknown> | undefined) ?? {};
+    const existingServices = normalizeServiceConfig(llm.services);
+    const nextServices = existingServices.filter((entry) => serviceConfigKey(entry) !== service);
+
+    if (!config.llm) config.llm = {};
+    const nextLlm = config.llm as Record<string, unknown>;
+    nextLlm.services = nextServices;
+    if (nextLlm.service === service) {
+      delete nextLlm.service;
+      delete nextLlm.defaultModel;
+    }
+    await saveRawConfig(root, config);
+
+    const secrets = await loadSecrets(root);
+    delete secrets.services[service];
+    await saveSecrets(root, secrets);
+    modelListCache.clear();
+    return c.json({ ok: true, service });
+  });
+
   app.post("/api/v1/services/:service/test", async (c) => {
     const service = c.req.param("service");
     const { apiKey, baseUrl, apiFormat, stream } = await c.req.json<{
@@ -1344,7 +1528,10 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       baseUrl: resolvedBaseUrl,
     });
     if (!apiKey?.trim() && !apiKeyOptional) {
-      return c.json({ ok: false, error: "API Key 不能为空" }, 400);
+      return c.json({
+        ok: false,
+        error: "API Key 不能为空",
+      }, 400);
     }
 
     const rawConfig = await loadRawConfig(root).catch(() => ({} as Record<string, unknown>));
@@ -1396,8 +1583,15 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const service = c.req.param("service");
     const { apiKey } = await c.req.json<{ apiKey: string }>();
     const secrets = await loadSecrets(root);
-    if (apiKey?.trim()) {
-      secrets.services[service] = { apiKey: apiKey.trim() };
+    const trimmedKey = apiKey?.trim() ?? "";
+    if (trimmedKey) {
+      if (!isHeaderSafeApiKey(trimmedKey)) {
+        return c.json({
+          ok: false,
+          error: "API Key 只能包含可放进 HTTP Authorization header 的非空白 ASCII 字符；请不要粘贴连接失败提示或诊断文本。",
+        }, 400);
+      }
+      secrets.services[service] = { apiKey: trimmedKey };
     } else {
       delete secrets.services[service];
     }
@@ -1615,7 +1809,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
   // --- Daemon control ---
 
-  let schedulerInstance: import("@actalk/inkos-core").Scheduler | null = null;
+  let schedulerInstance: Scheduler | null = null;
 
   app.get("/api/v1/daemon", (c) => {
     return c.json({
@@ -1628,7 +1822,6 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
       return c.json({ error: "Daemon already running" }, 400);
     }
     try {
-      const { Scheduler } = await import("@actalk/inkos-core");
       const currentConfig = await loadCurrentProjectConfig();
       const scheduler = new Scheduler({
         ...(await buildPipelineConfig()),
@@ -2720,15 +2913,15 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
 
     const frontmatter = [
       "---",
-      `name: ${body.name}`,
-      `id: ${body.id}`,
-      `language: ${body.language ?? "zh"}`,
+      `name: ${yamlScalar(body.name)}`,
+      `id: ${yamlScalar(body.id)}`,
+      `language: ${yamlScalar(body.language ?? "zh")}`,
       `chapterTypes: ${JSON.stringify(body.chapterTypes ?? [])}`,
       `fatigueWords: ${JSON.stringify(body.fatigueWords ?? [])}`,
       `numericalSystem: ${body.numericalSystem ?? false}`,
       `powerScaling: ${body.powerScaling ?? false}`,
       `eraResearch: ${body.eraResearch ?? false}`,
-      `pacingRule: "${body.pacingRule ?? ""}"`,
+      `pacingRule: ${yamlScalar(body.pacingRule ?? "")}`,
       `satisfactionTypes: ${JSON.stringify(body.satisfactionTypes ?? [])}`,
       `auditDimensions: ${JSON.stringify(body.auditDimensions ?? [])}`,
       "---",
@@ -2756,15 +2949,15 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     const p = body.profile;
     const frontmatter = [
       "---",
-      `name: ${p.name ?? genreId}`,
-      `id: ${p.id ?? genreId}`,
-      `language: ${p.language ?? "zh"}`,
+      `name: ${yamlScalar(p.name ?? genreId)}`,
+      `id: ${yamlScalar(p.id ?? genreId)}`,
+      `language: ${yamlScalar(p.language ?? "zh")}`,
       `chapterTypes: ${JSON.stringify(p.chapterTypes ?? [])}`,
       `fatigueWords: ${JSON.stringify(p.fatigueWords ?? [])}`,
       `numericalSystem: ${p.numericalSystem ?? false}`,
       `powerScaling: ${p.powerScaling ?? false}`,
       `eraResearch: ${p.eraResearch ?? false}`,
-      `pacingRule: "${p.pacingRule ?? ""}"`,
+      `pacingRule: ${yamlScalar(p.pacingRule ?? "")}`,
       `satisfactionTypes: ${JSON.stringify(p.satisfactionTypes ?? [])}`,
       `auditDimensions: ${JSON.stringify(p.auditDimensions ?? [])}`,
       "---",
@@ -2950,10 +3143,20 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     try {
       const pipeline = new PipelineRunner(await buildPipelineConfig());
       const result = await pipeline.runRadar();
+      await saveRadarScan(root, result);
       broadcast("radar:complete", { result });
       return c.json(result);
     } catch (e) {
       broadcast("radar:error", { error: String(e) });
+      return c.json({ error: String(e) }, 500);
+    }
+  });
+
+  app.get("/api/v1/radar/history", async (c) => {
+    try {
+      const items = await loadRadarHistory(root);
+      return c.json({ items });
+    } catch (e) {
       return c.json({ error: String(e) }, 500);
     }
   });

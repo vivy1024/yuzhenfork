@@ -22,12 +22,22 @@ export type ServiceDetailConnectionStatus =
 
 type JsonFetcher = typeof fetchJson;
 
-interface ServiceProbeResponse {
+export interface ServiceProbeResponse {
   readonly ok: boolean;
   readonly models?: ServiceDetailModelInfo[];
   readonly selectedModel?: string;
   readonly detected?: ServiceDetailDetectedConfig;
   readonly error?: string;
+}
+
+export interface ServiceDetailVerifiedProbe {
+  readonly apiKey: string;
+  readonly baseUrl: string;
+  readonly apiFormat: "chat" | "responses";
+  readonly stream: boolean;
+  readonly models: ServiceDetailModelInfo[];
+  readonly selectedModel?: string;
+  readonly detected?: ServiceDetailDetectedConfig;
 }
 
 export async function probeServiceForDetail(
@@ -104,6 +114,7 @@ export async function saveServiceConfig(args: {
   readonly stream: boolean;
   readonly temperature: string;
   readonly detectedModel: string;
+  readonly verifiedProbe?: ServiceDetailVerifiedProbe | null;
   readonly fetchJsonImpl?: JsonFetcher;
 }): Promise<{
   readonly status: ServiceDetailConnectionStatus;
@@ -114,7 +125,7 @@ export async function saveServiceConfig(args: {
   const trimmedKey = args.apiKey.trim();
   const trimmedBaseUrl = args.baseUrl.trim();
 
-  if (!trimmedKey) {
+  if (!trimmedKey && !args.isCustom) {
     return {
       status: { state: "error", message: "请先输入 API Key" },
       detectedModel: "",
@@ -129,20 +140,39 @@ export async function saveServiceConfig(args: {
     };
   }
 
+  const verifiedBaseUrl = args.isCustom ? trimmedBaseUrl : "";
+  const verified = args.verifiedProbe;
+  const canReuseVerifiedProbe = Boolean(
+    verified
+      && verified.apiKey === trimmedKey
+      && verified.baseUrl === verifiedBaseUrl
+      && verified.apiFormat === args.apiFormat
+      && verified.stream === args.stream,
+  );
+
   let probe: ServiceProbeResponse;
-  try {
-    probe = await probeServiceForDetail(args.effectiveServiceId, {
-      apiKey: trimmedKey,
-      apiFormat: args.apiFormat,
-      stream: args.stream,
-      ...(args.isCustom ? { baseUrl: trimmedBaseUrl } : {}),
-    }, { fetchJsonImpl });
-  } catch (error) {
-    return {
-      status: { state: "error", message: error instanceof Error ? error.message : "连接失败" },
-      detectedModel: "",
-      detectedConfig: null,
+  if (canReuseVerifiedProbe && verified) {
+    probe = {
+      ok: true,
+      models: verified.models,
+      selectedModel: verified.selectedModel,
+      detected: verified.detected,
     };
+  } else {
+    try {
+      probe = await probeServiceForDetail(args.effectiveServiceId, {
+        apiKey: trimmedKey,
+        apiFormat: args.apiFormat,
+        stream: args.stream,
+        ...(args.isCustom ? { baseUrl: trimmedBaseUrl } : {}),
+      }, { fetchJsonImpl });
+    } catch (error) {
+      return {
+        status: { state: "error", message: error instanceof Error ? error.message : "连接失败" },
+        detectedModel: "",
+        detectedConfig: null,
+      };
+    }
   }
 
   if (!probe.ok) {
@@ -191,4 +221,14 @@ export async function saveServiceConfig(args: {
     detectedModel,
     detectedConfig,
   };
+}
+
+export async function deleteServiceConfig(
+  serviceId: string,
+  deps?: { readonly fetchJsonImpl?: JsonFetcher },
+): Promise<void> {
+  const fetchJsonImpl = deps?.fetchJsonImpl ?? fetchJson;
+  await fetchJsonImpl(`/services/${encodeURIComponent(serviceId)}`, {
+    method: "DELETE",
+  });
 }

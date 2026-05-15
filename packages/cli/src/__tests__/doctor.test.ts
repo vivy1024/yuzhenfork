@@ -32,4 +32,5 @@ describe("doctor model candidate probing", () => {
 
     expect(modelsBaseUrl).toBe("https://dashscope.aliyuncs.com/compatible-mode/v1");
   });
+
 });
