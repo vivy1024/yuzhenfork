@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import { fetchJson } from "../hooks/use-api";
 import { useServiceStore } from "../store/service";
 import { Eye, EyeOff, Loader2, ArrowLeft, Trash2 } from "lucide-react";
+import { ServiceQuickLinks } from "../components/ServiceQuickLinks";
 import {
   deleteServiceConfig,
   matchServiceConfigEntryForDetail,
@@ -251,6 +252,7 @@ export function ServiceDetailPage({ serviceId, nav }: { serviceId: string; nav: 
           </span>
         )}
       </div>
+      <ServiceQuickLinks serviceId={serviceId} />
 
       <div className="space-y-5">
         {/* Custom fields */}

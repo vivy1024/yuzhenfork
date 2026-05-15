@@ -3,6 +3,7 @@ import { Check, Plus, Search, X } from "lucide-react";
 import { GROUP_LABELS, GROUP_ORDER, GROUP_SHORT_LABELS } from "../constants/service-groups";
 import { useServiceStore } from "../store/service";
 import type { EndpointGroup, ServiceInfo } from "../store/service";
+import { ServiceQuickLinks, getServiceQuickLinks } from "../components/ServiceQuickLinks";
 
 interface Nav {
   toDashboard: () => void;
@@ -22,9 +23,9 @@ function SkeletonCard() {
 }
 
 function ServiceCard({ svc, onClick }: { svc: ServiceInfo; onClick: () => void }) {
+  const quickLinks = getServiceQuickLinks(svc.service);
   return (
-    <button
-      onClick={onClick}
+    <div
       className={[
         "flex min-h-[92px] flex-col gap-2 rounded-lg border p-5 text-left transition-all hover:shadow-sm",
         svc.connected
@@ -32,14 +33,19 @@ function ServiceCard({ svc, onClick }: { svc: ServiceInfo; onClick: () => void }
           : "border-dashed border-border/40",
       ].join(" ")}
     >
-      <div className="flex items-center justify-between gap-3">
-        <span className="truncate text-sm font-medium">{svc.label}</span>
-        <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${svc.connected ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
-      </div>
-      <span className="text-xs text-muted-foreground/60">
-        {svc.connected ? "已连接" : "未配置"}
-      </span>
-    </button>
+      <button onClick={onClick} className="flex flex-1 flex-col gap-2 text-left">
+        <div className="flex items-center justify-between gap-3">
+          <span className="truncate text-sm font-medium">{svc.label}</span>
+          <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${svc.connected ? "bg-emerald-500" : "bg-muted-foreground/30"}`} />
+        </div>
+        <span className="text-xs text-muted-foreground/60">
+          {svc.connected ? "已连接" : "未配置"}
+        </span>
+      </button>
+      {quickLinks.length > 0 && (
+        <ServiceQuickLinks serviceId={svc.service} variant="card" className="pt-1" />
+      )}
+    </div>
   );
 }
 
