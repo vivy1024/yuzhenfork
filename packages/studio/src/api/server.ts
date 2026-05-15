@@ -1034,4 +1034,15 @@ export async function startStudioServer(
     );
     // setupMonitorWebSocket(startedServer, ctx);
   }
+
+  // 自动连接 MCP servers（autoConnect=true 的）
+  try {
+    const { initializeMcpTools } = await import("./lib/session-tool-registry.js");
+    const mcpResult = await initializeMcpTools();
+    if (mcpResult.connected > 0) {
+      console.log(`[startup] MCP auto-connected: ${mcpResult.connected} server(s), ${mcpResult.tools} tool(s)`);
+    }
+  } catch (mcpError) {
+    console.warn(`[startup] MCP auto-connect failed:`, mcpError instanceof Error ? mcpError.message : mcpError);
+  }
 }
