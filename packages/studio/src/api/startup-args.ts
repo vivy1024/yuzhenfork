@@ -24,8 +24,9 @@ export function resolveStartupPort(
 ): number {
   return parseInt(
     parseNamedArg(argv, "--port")
+      ?? env.YUZHENFORK_STUDIO_PORT
       ?? env.NOVELFORK_STUDIO_PORT
-      ?? "4567",
+      ?? "4600",
     10,
   );
 }

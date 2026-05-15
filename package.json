@@ -1,24 +1,20 @@
 {
-  "name": "novelfork",
+  "name": "yuzhenfork",
   "version": "0.6.0",
   "private": true,
-  "description": "NovelFork — Forked from InkOS, specialized AI-assisted workbench for Chinese web novel creation",
+  "description": "YuzhenFork — 基于 NovelFork v0.6.0 的健身 AI Agent 平台",
   "keywords": [
-    "ai-novel-writing",
-    "web-novel",
-    "chinese-novel",
-    "novel-generator",
-    "autonomous-writing",
-    "xuanhuan",
-    "xianxia",
-    "multi-agent",
-    "creative-writing-ai",
-    "cli"
+    "fitness-ai",
+    "training-agent",
+    "skills-first",
+    "mcp",
+    "health",
+    "chinese-fitness"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/vivy1024/novelfork"
+    "url": "https://github.com/vivy1024/yuzhenfork"
   },
   "scripts": {
     "build": "pnpm -r build",
