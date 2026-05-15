@@ -6,7 +6,7 @@ export { SKILL_DEFINITIONS } from "./skills/definitions.js";
 export type { SkillDefinition } from "./skills/definitions.js";
 export { calculateTDEE } from "./tools/tdee.js";
 export { calculateVolume } from "./tools/volume.js";
-export { assessSafety } from "./tools/safety.js";
+export { checkContraindications } from "./tools/safety.js";
 
 /**
  * 健身插件工具定义

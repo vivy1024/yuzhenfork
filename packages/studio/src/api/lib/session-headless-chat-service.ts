@@ -1,4 +1,4 @@
-import { getAgentSystemPrompt } from "@vivy1024/novelfork-novel-plugin/engine";
+import { getFitnessAgentSystemPrompt } from "@vivy1024/novelfork-fitness-plugin/prompts";
 import { executeRuntimeCommandInput, type RuntimeCommandEvent } from "@vivy1024/novelfork-core/registry/command-executor";
 
 import type { CanvasContext, SessionToolExecutionResult } from "../../shared/agent-native-workspace.js";
@@ -694,7 +694,7 @@ export async function executeHeadlessChat(input: HeadlessChatInput): Promise<Hea
     sessionId: session.id,
     sessionConfig: session.sessionConfig,
     messages: [userMessage],
-    systemPrompt: `${getAgentSystemPrompt(session.agentId)}${HEADLESS_CHAT_INSTRUCTIONS}`,
+    systemPrompt: `${getFitnessAgentSystemPrompt(session.agentId)}${HEADLESS_CHAT_INSTRUCTIONS}`,
     context,
     tools: getEnabledSessionTools(permissionMode),
     permissionMode,

@@ -47,7 +47,7 @@ export {
   createWritingModesRouter,
   createPipelineRouter,
   createFilterRouter,
-  createComplianceRouter,
+  // createComplianceRouter, // 健身场景不需要
   createBibleRouter,
   createWritingToolsRouter,
   createContextManagerRouter,

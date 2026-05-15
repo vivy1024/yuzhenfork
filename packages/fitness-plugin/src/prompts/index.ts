@@ -11,3 +11,11 @@ function loadPrompt(filename: string): string {
 export const coachPrompt = loadPrompt("coach.md");
 export const safetyAssessorPrompt = loadPrompt("safety-assessor.md");
 export const nutritionPlannerPrompt = loadPrompt("nutrition-planner.md");
+
+/**
+ * 获取健身 Agent 的 system prompt
+ * 替代 novel-plugin 的 getAgentSystemPrompt
+ */
+export function getFitnessAgentSystemPrompt(_agentId?: string): string {
+  return coachPrompt;
+}

@@ -13,11 +13,12 @@ import {
   type LogEntry,
   type StorageDatabase,
 } from "@vivy1024/novelfork-core";
-import {
-  pipelineEvents,
-  seedQuestionnaireTemplates,
-  type PipelineConfig,
-} from "@vivy1024/novelfork-novel-plugin/engine";
+// novel-plugin engine imports — 健身场景禁用
+// import {
+//   pipelineEvents,
+//   seedQuestionnaireTemplates,
+//   type PipelineConfig,
+// } from "@vivy1024/novelfork-novel-plugin/engine";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { createRuntimeJsonLineSink } from "./lib/runtime-log-sink.js";
@@ -94,7 +95,7 @@ import {
   createSearchRouter,
   createMonitorRouter,
   createPresetsRouter,
-  createComplianceRouter,
+  // createComplianceRouter, // 健身场景不需要
   createWritingToolsRouter,
   createWritingModesRouter,
   createExecRouter,
@@ -112,13 +113,15 @@ import {
   createFileChangesRouter,
   createAuthUsersRouter,
 } from "./routes/index.js";
-import { registerBuiltinPresets } from "@vivy1024/novelfork-novel-plugin/engine";
+// import { registerBuiltinPresets } from "@vivy1024/novelfork-novel-plugin/engine"; // 健身场景禁用
 import type { RouterContext } from "./routes/index.js";
 import type { Context } from "hono";
 import { authGuard } from "./middleware/auth-guard.js";
 import { pluginRegistry } from "./lib/plugin-loader.js";
-import { NOVEL_PLUGIN_MANIFEST, NOVEL_AGENT_PRESET_LIST } from "@vivy1024/novelfork-novel-plugin";
-import { handleChapterRead, handleJingweiReadContext } from "@vivy1024/novelfork-novel-plugin";
+// import { registerBuiltinPresets } from "@vivy1024/novelfork-novel-plugin/engine"; // 健身场景禁用
+// import { NOVEL_PLUGIN_MANIFEST, NOVEL_AGENT_PRESET_LIST } from "@vivy1024/novelfork-novel-plugin"; // 健身场景禁用
+// import { handleChapterRead, handleJingweiReadContext } from "@vivy1024/novelfork-novel-plugin"; // 健身场景禁用
+import { FITNESS_PLUGIN_MANIFEST } from "@vivy1024/novelfork-fitness-plugin";
 
 // --- Studio event bus for SSE ---
 
@@ -131,20 +134,20 @@ function broadcast(event: string, data: unknown): void {
   }
 }
 
-// Bridge core pipeline events → SSE
-pipelineEvents.on((event) => {
-  switch (event.type) {
-    case "run:start":
-      broadcast("pipeline:start", event.data);
-      break;
-    case "stage:update":
-      broadcast("pipeline:stage", event.data);
-      break;
-    case "run:complete":
-      broadcast("pipeline:complete", event.data);
-      break;
-  }
-});
+// Bridge core pipeline events → SSE (健身场景禁用 novel pipeline)
+// pipelineEvents.on((event) => {
+//   switch (event.type) {
+//     case "run:start":
+//       broadcast("pipeline:start", event.data);
+//       break;
+//     case "stage:update":
+//       broadcast("pipeline:stage", event.data);
+//       break;
+//     case "run:complete":
+//       broadcast("pipeline:complete", event.data);
+//       break;
+//   }
+// });
 
 // --- Runtime mode ---
 
@@ -159,21 +162,18 @@ function getNovelForkMode(): NovelForkMode {
 // --- Server factory ---
 
 export function createStudioServer(initialConfig: ProjectConfig, root: string) {
-  registerBuiltinPresets();
+  // registerBuiltinPresets(); // 健身场景禁用 novel presets
 
-  // --- Plugin registration ---
+  // --- Plugin registration: fitness-plugin ---
   pluginRegistry.register({
-    id: NOVEL_PLUGIN_MANIFEST.id ?? NOVEL_PLUGIN_MANIFEST.name,
-    name: NOVEL_PLUGIN_MANIFEST.displayName ?? NOVEL_PLUGIN_MANIFEST.name,
-    version: NOVEL_PLUGIN_MANIFEST.version,
-    projectType: NOVEL_PLUGIN_MANIFEST.projectType ?? "novel",
-    routes: [], // Routes will be migrated in Batch 3
-    tools: [
-      { toolName: "chapter.read", execute: async (input, ctx) => handleChapterRead(input as any, ctx as any) },
-      { toolName: "jingwei.read_context", execute: async (input, ctx) => handleJingweiReadContext(input as any, ctx as any) },
-    ],
-    pages: [], // Pages will be migrated in Batch 5
-    agentPresets: NOVEL_AGENT_PRESET_LIST as unknown as Array<{ agentId: string; name: string; tools: string[] }>,
+    id: FITNESS_PLUGIN_MANIFEST.id ?? FITNESS_PLUGIN_MANIFEST.name,
+    name: FITNESS_PLUGIN_MANIFEST.displayName ?? FITNESS_PLUGIN_MANIFEST.name,
+    version: FITNESS_PLUGIN_MANIFEST.version,
+    projectType: FITNESS_PLUGIN_MANIFEST.projectType ?? "fitness",
+    routes: [],
+    tools: [],
+    pages: [],
+    agentPresets: (FITNESS_PLUGIN_MANIFEST.agentPresets ?? []) as unknown as Array<{ agentId: string; name: string; tools: string[] }>,
   });
 
   const app = new Hono();
@@ -445,7 +445,7 @@ export function createStudioServer(initialConfig: ProjectConfig, root: string) {
     // Presets browsing and per-book preset management
     app.route("", createPresetsRouter(ctx));
 
-    app.route("", createComplianceRouter(ctx));
+    // app.route("", createComplianceRouter(ctx)); // 健身场景不需要
 
     app.route("", createWritingToolsRouter(ctx));
 
@@ -843,7 +843,7 @@ export async function startStudioServer(
   let jsonImportResult: Awaited<ReturnType<typeof runJsonImportMigrationIfNeeded>>;
   try {
     storageMigrationResult = runStorageMigrations(storageDatabase);
-    await seedQuestionnaireTemplates(storageDatabase);
+    // await seedQuestionnaireTemplates(storageDatabase); // 健身场景禁用
     jsonImportResult = await runJsonImportMigrationIfNeeded(storageDatabase, {
       storageDir: sessionStoreDir,
       warn(message, error) {

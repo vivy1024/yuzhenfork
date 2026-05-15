@@ -52,7 +52,7 @@ import { generateSessionReply, type LlmRuntimeMetadata } from "./llm-runtime-ser
 import type { RuntimeToolStreamEvent } from "./provider-adapters/index.js";
 import { getSessionById, updateSession } from "./session-service.js";
 import { buildAgentContext, buildProjectExplorationContext } from "./agent-context.js";
-import { getAgentSystemPrompt } from "@vivy1024/novelfork-novel-plugin/engine";
+import { getFitnessAgentSystemPrompt as getAgentSystemPrompt } from "@vivy1024/novelfork-fitness-plugin/prompts";
 import { createSessionToolExecutor, type SessionToolExecutorOptions } from "./session-tool-executor.js";
 import { getEnabledSessionTools } from "./session-tool-registry.js";
 import { annotateSessionToolsWithPolicy } from "./session-tool-policy.js";

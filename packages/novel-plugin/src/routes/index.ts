@@ -9,7 +9,8 @@ export { createJingweiRouter, type CreateJingweiRouterOptions } from "./jingwei.
 export { createWritingModesRouter } from "./writing-modes.js";
 export { createPipelineRouter, createPipelineRun, updatePipelineStage, completePipelineRun } from "./pipeline.js";
 export { createFilterRouter, type CreateFilterRouterOptions } from "./filter.js";
-export { createComplianceRouter } from "./compliance.js";
+// compliance 模块在健身场景不需要，跳过避免导入错误
+// export { createComplianceRouter } from "./compliance.js";
 export { createBibleRouter, type CreateBibleRouterOptions } from "./bible.js";
 export { createWritingToolsRouter } from "./writing-tools.js";
 export { createContextManagerRouter } from "./context-manager.js";
