@@ -1037,20 +1037,24 @@ export async function startStudioServer(
 
   // 自动连接 MCP servers — 通过内部 HTTP 调用（使用 core MCPClientImpl，已验证兼容 Bun）
   setTimeout(async () => {
+    console.log("[startup] MCP auto-connect: checking servers...");
     try {
       const res = await fetch(`http://localhost:${port}/api/mcp/servers`);
       const { servers } = await res.json() as { servers: Array<{ id: string; status: string }> };
+      console.log(`[startup] MCP auto-connect: found ${servers.length} server(s)`);
       for (const server of servers) {
         if (server.status !== "connected") {
           const startRes = await fetch(`http://localhost:${port}/api/mcp/servers/${server.id}/start`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
           const result = await startRes.json() as { ok?: boolean; tools?: Array<{ name: string }> };
           if (result.ok) {
             console.log(`[startup] MCP auto-connected: ${server.id} (${result.tools?.length ?? 0} tools)`);
+          } else {
+            console.warn(`[startup] MCP start failed for ${server.id}:`, result);
           }
         }
       }
     } catch (mcpError) {
       console.warn(`[startup] MCP auto-connect failed:`, mcpError instanceof Error ? mcpError.message : mcpError);
     }
-  }, 1000); // 延迟 1 秒等 HTTP server 就绪
+  }, 3000); // 延迟 3 秒等 HTTP server + MCP 完全就绪
 }
